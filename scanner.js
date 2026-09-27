@@ -1,0 +1,269 @@
+/* ==========================================================================
+   Scanner tables — formatting, color scales and a mock live feed
+   ========================================================================== */
+
+(() => {
+  "use strict";
+
+  /* ---- Config ------------------------------------------------------------ */
+
+  // Signal column: float tiers (shares). < low → low float, < mid → mid, else high.
+  const FLOAT_TIERS = { low: 10e6, mid: 50e6 };
+
+  // Color scales. `min` is the faintest value, `max` the brightest; values
+  // past `max` stay at full brightness, values short of `min` get no color.
+  const SCALES = {
+    chgUp:   { min: 2,  max: 35 },
+    chgDown: { min: -2, max: -25 },
+    vol1m:   { min: 1,  max: 10000, log: true }, // spans 4 orders of magnitude
+    hits:    { min: 1,  max: 150 },
+  };
+
+  // VWAP D.: >= +1% green, < -1% red, anything else amber.
+  const VWAP_D = { up: 1, down: -1 };
+
+  const MAX_ROWS = 10;
+  const LIVE_INTERVAL = 4000;
+
+  /* ---- Formatters -------------------------------------------------------- */
+
+  const pad = (n) => String(n).padStart(2, "0");
+  const fmtTime = (d) => `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+
+  // 20.51 above $1, 0.0985 below.
+  const fmtPrice = (v) => v.toFixed(v >= 1 ? 2 : 4);
+
+  // 1.5B · 89.5M · 525.2k
+  const fmtAbbr = (v) => {
+    const units = [[1e9, "B"], [1e6, "M"], [1e3, "k"]];
+    for (let i = 0; i < units.length; i++) {
+      const [size, suffix] = units[i];
+      if (v >= size) {
+        const scaled = Math.round((v / size) * 10) / 10;
+        // 999.96k rounds to 1000.0k → promote to 1.0M
+        if (scaled >= 1000 && i > 0) return `${(scaled / 1000).toFixed(1)}${units[i - 1][1]}`;
+        return `${scaled.toFixed(1)}${suffix}`;
+      }
+    }
+    return String(Math.round(v));
+  };
+
+  // 12.5x · 245x · 2,450x
+  const fmtMult = (v) => (v >= 100 ? `${Math.round(v).toLocaleString("en-US")}x` : `${v.toFixed(1)}x`);
+
+  const round = (v, dp) => Math.round(v * 10 ** dp) / 10 ** dp;
+  const fmtPct = (v, dp) => `${v > 0 ? "+" : ""}${v.toFixed(dp)}%`;
+
+  /* ---- Color scales ------------------------------------------------------ */
+
+  // 0 → faintest, 1 → brightest, null → outside the scale (no color).
+  const intensity = (v, { min, max, log }) => {
+    const dir = Math.sign(max - min);
+    if ((v - min) * dir < 0) return null;
+    const t = log
+      ? Math.log10(v / min) / Math.log10(max / min)
+      : (v - min) / (max - min);
+    return Math.min(1, Math.max(0, t));
+  };
+
+  // Every heat cell is a chip; `--t` drives background + text brightness in CSS.
+  const heat = (text, t, hue) => {
+    if (t === null) return `<span class="heat is-off">${text}</span>`;
+    const cls = t >= 0.85 ? "heat is-hot" : "heat";
+    const hueAttr = hue ? ` data-hue="${hue}"` : "";
+    return `<span class="${cls}"${hueAttr} style="--t:${t.toFixed(3)}">${text}</span>`;
+  };
+
+  const floatTier = (f) => (f < FLOAT_TIERS.low ? "low" : f < FLOAT_TIERS.mid ? "mid" : "high");
+  const FLOAT_LABEL = { low: "Low float", mid: "Mid float", high: "High float" };
+
+  const vwapClass = (d) => (d >= VWAP_D.up ? "up" : d < VWAP_D.down ? "down" : "flat");
+
+  /* ---- Mini charts ------------------------------------------------------- */
+
+  const seeded = (str) => {
+    let a = [...str].reduce((h, c) => Math.imul(h ^ c.charCodeAt(0), 2654435761), 1779033703);
+    return () => {
+      a = (a + 0x6d2b79f5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  };
+
+  const sparkPoints = (seed, up) => {
+    const rnd = seeded(seed);
+    const n = 16;
+    const pts = [];
+    let y = 0;
+    for (let i = 0; i < n; i++) {
+      y += (up ? 1 : -1) * (0.4 + rnd()) + (rnd() - 0.5) * 1.6;
+      pts.push(y);
+    }
+    const lo = Math.min(...pts);
+    const hi = Math.max(...pts);
+    return pts
+      .map((v, i) => `${((i / (n - 1)) * 88).toFixed(1)},${(25 - ((v - lo) / (hi - lo || 1)) * 22).toFixed(1)}`)
+      .join(" ");
+  };
+
+  /* ---- Row template ------------------------------------------------------ */
+
+  const renderRow = (r, tone) => {
+    const bear = tone === "bear";
+    const chgScale = bear ? SCALES.chgDown : SCALES.chgUp;
+    const hue = bear ? "red" : null;
+
+    const chg = (v) => {
+      const shown = round(v, 1);
+      return heat(fmtPct(shown, 1), intensity(shown, chgScale), hue);
+    };
+
+    const vwapD = round(((r.price - r.vwap) / r.vwap) * 100, 2);
+    const tier = floatTier(r.float);
+    const vol1m = round(r.vol1m, r.vol1m >= 100 ? 0 : 1);
+
+    return `
+      <td class="col-sig"><i class="sig-bar" data-float="${tier}" title="${FLOAT_LABEL[tier]} · ${fmtAbbr(r.float)}"></i><span class="sr-only">${FLOAT_LABEL[tier]}</span></td>
+      <td class="col-time">${fmtTime(r.time)}</td>
+      <td class="col-sym"><span class="sym">${r.sym}</span></td>
+      <td class="num">${fmtPrice(r.price)}</td>
+      <td class="num">${chg(r.chg1)}</td>
+      <td class="num">${heat(fmtMult(vol1m), intensity(vol1m, SCALES.vol1m), hue)}</td>
+      <td class="num">${fmtMult(r.rvol)}</td>
+      <td class="num">${heat(String(r.hits), intensity(r.hits, SCALES.hits), hue)}</td>
+      <td class="num"><span class="vwap-d ${vwapClass(vwapD)}">${fmtPct(vwapD, 2)}</span></td>
+      <td class="num">${fmtPrice(r.vwap)}</td>
+      <td class="num">${chg(r.chg5)}</td>
+      <td class="num">${chg(r.chg15)}</td>
+      <td class="num">${chg(r.chg30)}</td>
+      <td class="num muted hide-sm">${fmtAbbr(r.volume)}</td>
+      <td class="num muted">${fmtAbbr(r.float)}</td>
+      <td class="num muted">${fmtAbbr(r.mcap)}</td>
+      <td><div class="pressure" title="Buying vs selling pressure"><i class="buy" style="width:${r.buy}%"></i><i class="sell" style="width:${100 - r.buy}%"></i></div></td>
+      <td class="hide-sm ${bear ? "down" : "up"}"><svg class="spark" viewBox="0 0 88 28" aria-hidden="true"><polyline points="${sparkPoints(r.sym + r.hits, !bear)}"></polyline></svg></td>`;
+  };
+
+  /* ---- Mock data --------------------------------------------------------- */
+
+  const at = (hms) => {
+    const [h, m, s] = hms.split(":").map(Number);
+    const d = new Date();
+    d.setHours(h, m, s, 0);
+    return d;
+  };
+
+  const BULL = [
+    { sym: "NVLX", time: at("17:00:15"), price: 4.64,   chg1: 33.3, vol1m: 2450, rvol: 48.2, hits: 142, vwap: 3.98,   chg5: 41.2, chg15: 58.7, chg30: 64.1, volume: 3.0e6,   float: 3.2e6,   mcap: 14.8e6,  buy: 84 },
+    { sym: "BRZN", time: at("16:59:48"), price: 11.21,  chg1: 29.4, vol1m: 865,  rvol: 22.7, hits: 96,  vwap: 10.44,  chg5: 24.1, chg15: 30.2, chg30: 18.5, volume: 2.2e6,   float: 18.4e6,  mcap: 206.3e6, buy: 68 },
+    { sym: "HLIO", time: at("16:59:31"), price: 2.43,   chg1: 23.5, vol1m: 312,  rvol: 15.1, hits: 71,  vwap: 2.18,   chg5: 18.2, chg15: 12.4, chg30: 9.8,  volume: 4.8e6,   float: 6.7e6,   mcap: 16.3e6,  buy: 62 },
+    { sym: "ZENT", time: at("16:58:57"), price: 0.4185, chg1: 10.9, vol1m: 58.4, rvol: 8.6,  hits: 38,  vwap: 0.4102, chg5: 12.7, chg15: 7.3,  chg30: 4.1,  volume: 21.4e6,  float: 72.5e6,  mcap: 30.3e6,  buy: 59 },
+    { sym: "ORBT", time: at("16:58:12"), price: 3.09,   chg1: 11.6, vol1m: 24.3, rvol: 6.2,  hits: 22,  vwap: 3.12,   chg5: 6.4,  chg15: 3.2,  chg30: 2.5,  volume: 1.7e6,   float: 24.9e6,  mcap: 76.9e6,  buy: 52 },
+    { sym: "KRYP", time: at("16:57:40"), price: 15.69,  chg1: 8.4,  vol1m: 12.8, rvol: 4.3,  hits: 14,  vwap: 16.02,  chg5: 5.1,  chg15: 2.4,  chg30: 1.2,  volume: 812.4e3, float: 41.2e6,  mcap: 1.52e9,  buy: 40 },
+    { sym: "QMTR", time: at("16:56:05"), price: 0.1042, chg1: 5.3,  vol1m: 4.2,  rvol: 3.1,  hits: 6,   vwap: 0.0985, chg5: 3.8,  chg15: -1.4, chg30: 2.2,  volume: 38.6e6,  float: 312.4e6, mcap: 32.6e6,  buy: 57 },
+    { sym: "VYRA", time: at("16:54:22"), price: 6.87,   chg1: 2.6,  vol1m: 1.8,  rvol: 2.2,  hits: 2,   vwap: 6.81,   chg5: 2.1,  chg15: 0.8,  chg30: -3.1, volume: 525.2e3, float: 9.1e6,   mcap: 62.5e6,  buy: 49 },
+  ];
+
+  const BEAR = [
+    { sym: "DRFT", time: at("16:59:52"), price: 1.87,   chg1: -24.6, vol1m: 3120, rvol: 31.4, hits: 118, vwap: 2.34,   chg5: -28.3, chg15: -31.0, chg30: -22.4, volume: 5.6e6,   float: 4.1e6,   mcap: 7.7e6,   buy: 18 },
+    { sym: "SOLQ", time: at("16:59:10"), price: 8.42,   chg1: -15.2, vol1m: 640,  rvol: 14.8, hits: 64,  vwap: 9.21,   chg5: -12.8, chg15: -9.1,  chg30: -6.3,  volume: 1.9e6,   float: 15.6e6,  mcap: 131.4e6, buy: 27 },
+    { sym: "MIRA", time: at("16:58:33"), price: 0.6120, chg1: -9.7,  vol1m: 88.5, rvol: 7.9,  hits: 31,  vwap: 0.6588, chg5: -7.4,  chg15: -11.2, chg30: -4.8,  volume: 12.3e6,  float: 58.0e6,  mcap: 35.5e6,  buy: 34 },
+    { sym: "PLXR", time: at("16:57:21"), price: 22.05,  chg1: -5.8,  vol1m: 19.6, rvol: 4.1,  hits: 12,  vwap: 22.19,  chg5: -3.9,  chg15: -2.1,  chg30: -1.5,  volume: 740.2e3, float: 88.4e6,  mcap: 1.95e9,  buy: 41 },
+    { sym: "TUNE", time: at("16:55:48"), price: 3.36,   chg1: -3.1,  vol1m: 3.4,  rvol: 2.6,  hits: 4,   vwap: 3.30,   chg5: -2.2,  chg15: 1.1,   chg30: 4.3,   volume: 1.1e6,   float: 22.7e6,  mcap: 76.3e6,  buy: 46 },
+    { sym: "CELR", time: at("16:54:02"), price: 0.0842, chg1: -2.2,  vol1m: 1.6,  rvol: 1.9,  hits: 1,   vwap: 0.0851, chg5: -1.2,  chg15: -3.4,  chg30: -6.8,  volume: 64.2e6,  float: 420.0e6, mcap: 35.4e6,  buy: 44 },
+  ];
+
+  /* ---- Table controller -------------------------------------------------- */
+
+  const jitter = (v, pct) => v * (1 + (Math.random() - 0.5) * 2 * pct);
+
+  const mountTable = (root, seed) => {
+    const tone = root.dataset.tone;
+    const body = root.querySelector("[data-body]");
+    const count = root.querySelector("[data-count]");
+    const wrap = root.querySelector(".table-wrap");
+    const liveBtn = root.querySelector("[data-live]");
+    const liveLabel = root.querySelector("[data-live-label]");
+    const rows = seed.map((r) => ({ ...r }));
+    let timer = null;
+
+    const rowEl = (r) => {
+      const tr = document.createElement("tr");
+      tr.dataset.sym = r.sym;
+      tr.innerHTML = renderRow(r, tone);
+      return tr;
+    };
+
+    const syncCount = () => { count.textContent = String(rows.length); };
+
+    const renderAll = () => {
+      body.replaceChildren(...rows.map(rowEl));
+      syncCount();
+    };
+
+    // A ticker that alerts again moves to the top with hits + 1.
+    const pushAlert = () => {
+      const src = seed[Math.floor(Math.random() * seed.length)];
+      const i = rows.findIndex((r) => r.sym === src.sym);
+      const prev = i >= 0 ? rows.splice(i, 1)[0] : { ...src };
+      const price = jitter(prev.price, 0.04);
+      const next = {
+        ...prev,
+        time: new Date(),
+        price,
+        vwap: jitter(prev.vwap, 0.01),
+        chg1: jitter(prev.chg1, 0.25),
+        vol1m: Math.max(1, jitter(prev.vol1m, 0.3)),
+        rvol: Math.max(1, jitter(prev.rvol, 0.1)),
+        hits: prev.hits + 1,
+        chg5: jitter(prev.chg5, 0.15),
+        buy: Math.min(95, Math.max(5, Math.round(jitter(prev.buy, 0.08)))),
+        volume: prev.volume * 1.03,
+        mcap: prev.mcap * (price / prev.price),
+      };
+      rows.unshift(next);
+      rows.length = Math.min(rows.length, MAX_ROWS);
+
+      const old = body.querySelector(`tr[data-sym="${next.sym}"]`);
+      if (old) old.remove();
+      const tr = rowEl(next);
+      tr.classList.add("row-new");
+      body.prepend(tr);
+      while (body.children.length > MAX_ROWS) body.lastElementChild.remove();
+      syncCount();
+    };
+
+    const setLive = (on) => {
+      clearInterval(timer);
+      timer = on ? setInterval(pushAlert, LIVE_INTERVAL + Math.random() * 1500) : null;
+      liveBtn.setAttribute("aria-pressed", String(on));
+      liveLabel.textContent = on ? "Live" : "Paused";
+    };
+
+    liveBtn.addEventListener("click", () => setLive(timer === null));
+
+    // Edge shadow on the pinned columns once the table scrolls sideways.
+    wrap.addEventListener("scroll", () => {
+      wrap.classList.toggle("is-scrolled", wrap.scrollLeft > 0);
+    }, { passive: true });
+
+    // Left offsets for the pinned Time/Ticker columns, from real header widths.
+    const table = root.querySelector(".scan-table");
+    const pin = () => {
+      const sig = table.querySelector("th.col-sig").getBoundingClientRect().width;
+      const time = table.querySelector("th.col-time").getBoundingClientRect().width;
+      table.style.setProperty("--pin-time", `${sig}px`);
+      table.style.setProperty("--pin-sym", `${sig + time}px`);
+    };
+
+    renderAll();
+    pin();
+    window.addEventListener("resize", pin);
+    document.fonts?.ready.then(pin);
+    setLive(true);
+  };
+
+  const [bull, bear] = document.querySelectorAll(".terminal[data-tone]");
+  mountTable(bull, BULL);
+  mountTable(bear, BEAR);
+})();
