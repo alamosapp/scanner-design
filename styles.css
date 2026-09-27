@@ -173,16 +173,21 @@ button { cursor: pointer; }
 .table-wrap::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: var(--radius-pill); border: 2px solid var(--bg-elevated); }
 .table-wrap::-webkit-scrollbar-track, .table-wrap::-webkit-scrollbar-corner { background: transparent; }
 
-.scan-table { width: 100%; border-collapse: separate; border-spacing: 0; min-width: 1380px; font-size: 0.8125rem; font-variant-numeric: tabular-nums; }
-/* The whole header is one sticky layer, so it scrolls sideways in lockstep
-   with the body (per-cell sticky headers snap to pixels independently). */
-.scan-table thead { position: sticky; top: 0; z-index: 3; }
-.scan-table th { text-align: left; padding: 0.55rem 0.7rem; font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.06em; color: var(--text-3); background: var(--bg); border-bottom: 1px solid var(--line); white-space: nowrap; user-select: none; }
+/* Geometry is whole pixels on purpose: fixed column widths (set per column
+   in scanner.js), fixed row heights and px padding. Sticky cells are painted
+   on their own layer; if they sat on fractional positions they would round
+   differently from the scrolling cells, and the header, the pinned columns
+   and the row lines would drift apart by a pixel while scrolling. */
+.scan-table { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: 13px; font-variant-numeric: tabular-nums; }
+.scan-table th, .scan-table td { box-sizing: border-box; white-space: nowrap; }
+.scan-table th { position: sticky; top: 0; z-index: 2; height: 35px; padding: 0 11px; line-height: 16px; text-align: left; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; color: var(--text-3); background: var(--bg); border-bottom: 1px solid var(--line); user-select: none; }
 .scan-table th[title] { cursor: help; }
-.scan-table td { vertical-align: middle; padding: 0.4rem 0.7rem; border-bottom: 1px solid var(--line); white-space: nowrap; font-family: var(--font-mono); font-weight: 500; color: var(--text-2); background: var(--row-bg); transition: background var(--t-fast); }
+.scan-table td { height: 41px; padding: 0 11px; line-height: 20px; vertical-align: middle; border-bottom: 1px solid var(--line); font-family: var(--font-mono); font-weight: 500; color: var(--text-2); background: var(--row-bg); transition: background var(--t-fast); }
 .scan-table tr:last-child td { border-bottom: 0; }
 .scan-table tbody tr { cursor: pointer; }
-.scan-table tbody tr:hover { --row-bg: var(--row-hover); }
+/* Hover paints every cell of the row, pinned ones included */
+.scan-table tbody tr:hover > td { background: var(--row-hover); }
+.scan-table .col-fill { padding: 0; }
 .scan-table .num { text-align: right; }
 .scan-table .muted { color: var(--text-3); }
 
@@ -200,16 +205,21 @@ button { cursor: pointer; }
 
 /* ---- Pinned columns: Signal · Time · Ticker ---- */
 
+/* Each pinned cell sticks on its own; offsets are whole-pixel sums of the
+   column widths, set by scanner.js as --pin-time / --pin-sym. */
 .scan-table .col-sig,
 .scan-table .col-time,
 .scan-table .col-sym { position: sticky; z-index: 1; }
 .scan-table th.col-sig,
 .scan-table th.col-time,
 .scan-table th.col-sym { z-index: 3; }
-.scan-table .col-sig { left: 0; width: 22px; min-width: 22px; padding-inline: 0; }
-.scan-table .col-time { left: var(--pin-time, 22px); color: var(--text-3); }
-.scan-table .col-sym { left: var(--pin-sym, 110px); transition: box-shadow var(--t-fast); }
-.table-wrap.is-scrolled .col-sym { box-shadow: inset -1px 0 0 var(--line), 10px 0 14px -10px var(--shadow-color); }
+.scan-table .col-sig { left: 0; padding-inline: 0; }
+.scan-table .col-time { left: var(--pin-time); color: var(--text-3); }
+.scan-table .col-sym { left: var(--pin-sym); }
+/* Edge shadow once the table scrolls sideways; drawn by a pseudo-element so
+   it never covers the cell's own background or row line. */
+.scan-table .col-sym::after { content: ""; position: absolute; top: 0; bottom: -1px; right: -12px; width: 12px; pointer-events: none; opacity: 0; transition: opacity var(--t-fast); background: linear-gradient(to right, var(--shadow-color), transparent); border-left: 1px solid var(--line); }
+.table-wrap.is-scrolled .col-sym::after { opacity: 1; }
 
 .sym { font-weight: 700; color: var(--text); letter-spacing: 0.02em; display: inline-flex; align-items: center; gap: var(--space-2); }
 
@@ -243,7 +253,9 @@ button { cursor: pointer; }
 .timer[data-timer="resume"] { display: inline-flex; align-items: center; justify-content: flex-end; height: 1.5rem; padding: 0 0.5rem; border-radius: 6px; line-height: 1; background: var(--surface-3); }
 .timer.is-soon { color: var(--amber); font-weight: 700; background: var(--amber-a16); animation: timerPulse 1s steps(2, jump-none) infinite; }
 @keyframes timerPulse { 50% { background: color-mix(in srgb, var(--amber) 28%, transparent); } }
-tr.is-resumed td > *, .alert-card.is-resumed > * { opacity: 0.45; }
+/* A resumed halt fades out before it is removed */
+tr.is-leaving td { animation: rowOut 600ms var(--ease) forwards; }
+@keyframes rowOut { 0% { background: color-mix(in srgb, var(--tone) 14%, var(--row-bg)); } 100% { background: var(--row-bg); opacity: 0; } }
 
 /* VWAP D.: >= +1% green · < -1% red · otherwise amber */
 .vwap-d { font-weight: 700; }
@@ -345,6 +357,7 @@ tr.is-new td, .alert-card.is-new { animation: rowIn 1.6s var(--ease); }
   .card-halt { display: inline-flex; align-items: center; gap: 6px; }
   .card-halt i { font-style: normal; color: var(--text-3); }
   .card-halt .timer[data-timer="resume"] { height: 1.375rem; }
+  .alert-card.is-leaving { overflow: hidden; pointer-events: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

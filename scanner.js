@@ -162,29 +162,31 @@
   };
 
   /* ---- Columns ------------------------------------------------------------
-     Pinned columns stay first; the rest can be dragged into any order. */
+     Pinned columns stay first; the rest can be dragged into any order.
+     Every column has a fixed whole-pixel width (`w`), so pinned offsets and
+     row lines land on exact pixels and the header never drifts off the body. */
 
   const COLUMNS = [
-    { key: "sig",    label: "Signal", pinned: true, cls: "col-sig", title: "Float size", srOnly: true },
-    { key: "time",   label: "Time",   pinned: true, cls: "col-time" },
-    { key: "sym",    label: "Ticker", pinned: true, cls: "col-sym" },
-    { key: "price",  label: "Price",    num: true },
-    { key: "chg1",   label: "%Chg 1m",  num: true, title: "% change, last minute" },
-    { key: "vol1m",  label: "Vol 1m",   num: true, title: "Volume spike vs. normal 1m volume" },
-    { key: "rvol",   label: "RVol",     num: true, title: "Relative volume" },
-    { key: "hits",   label: "Hits",     num: true, title: "Alerts fired today" },
-    { key: "vwapD",  label: "VWAP D.",  num: true, title: "Distance to VWAP" },
-    { key: "vwap",   label: "VWAP",     num: true },
-    { key: "chg5",   label: "%Chg 5m",  num: true },
-    { key: "chg15",  label: "%Chg 15m", num: true },
-    { key: "chg30",  label: "%Chg 30m", num: true },
-    { key: "duration", label: "Duration",    num: true, title: "Time halted" },
-    { key: "resume",   label: "Resume Est.", num: true, title: "Countdown to the estimated resumption" },
-    { key: "volume", label: "Volume",   num: true, muted: true },
-    { key: "float",  label: "Float",    num: true, muted: true },
-    { key: "mcap",   label: "MCap",     num: true, muted: true },
-    { key: "press",  label: "Bull/Sell Press" },
-    { key: "trend",  label: "Trend" },
+    { key: "sig",      label: "Signal",      w: 24,  pinned: true, cls: "col-sig", title: "Float size", srOnly: true },
+    { key: "time",     label: "Time",        w: 88,  pinned: true, cls: "col-time" },
+    { key: "sym",      label: "Ticker",      w: 84,  pinned: true, cls: "col-sym" },
+    { key: "price",    label: "Price",       w: 80,  num: true },
+    { key: "chg1",     label: "%Chg 1m",     w: 96,  num: true, title: "% change, last minute" },
+    { key: "vol1m",    label: "Vol 1m",      w: 100, num: true, title: "Volume spike vs. normal 1m volume" },
+    { key: "rvol",     label: "RVol",        w: 72,  num: true, title: "Relative volume" },
+    { key: "hits",     label: "Hits",        w: 88,  num: true, title: "Alerts fired today" },
+    { key: "vwapD",    label: "VWAP D.",     w: 92,  num: true, title: "Distance to VWAP" },
+    { key: "vwap",     label: "VWAP",        w: 80,  num: true },
+    { key: "chg5",     label: "%Chg 5m",     w: 96,  num: true },
+    { key: "chg15",    label: "%Chg 15m",    w: 104, num: true },
+    { key: "chg30",    label: "%Chg 30m",    w: 104, num: true },
+    { key: "duration", label: "Duration",    w: 92,  num: true, title: "Time halted" },
+    { key: "resume",   label: "Resume Est.", w: 116, num: true, title: "Countdown to the estimated resumption" },
+    { key: "volume",   label: "Volume",      w: 84,  num: true, muted: true },
+    { key: "float",    label: "Float",       w: 76,  num: true, muted: true },
+    { key: "mcap",     label: "MCap",        w: 76,  num: true, muted: true },
+    { key: "press",    label: "Bull/Sell Press", w: 128 },
+    { key: "trend",    label: "Trend",       w: 116 },
   ];
   const COL = Object.fromEntries(COLUMNS.map((c) => [c.key, c]));
   const PINNED = COLUMNS.filter((c) => c.pinned).map((c) => c.key);
@@ -292,8 +294,55 @@
     { sym: "HLIO", dir: "up",   haltAt: ago(96),   resumeAt: soon(204), price: 2.78,   vol1m: 405,  rvol: 17.8, hits: 74,  vwap: 2.29,   volume: 5.3e6,   float: 6.7e6,   mcap: 18.6e6,  buy: 66 },
     { sym: "QBIT", dir: "up",   haltAt: ago(1510), resumeAt: soon(590), price: 0.8420, vol1m: 96.2, rvol: 11.3, hits: 29,  vwap: 0.7315, volume: 18.2e6,  float: 24.3e6,  mcap: 20.5e6,  buy: 58 },
     { sym: "SOLQ", dir: "down", haltAt: ago(42),   resumeAt: soon(258), price: 7.31,   vol1m: 512,  rvol: 16.2, hits: 66,  vwap: 8.95,   volume: 2.2e6,   float: 15.6e6,  mcap: 114.0e6, buy: 24 },
-    { sym: "ZENT", dir: "up",   haltAt: ago(560),  resumeAt: ago(260),  price: 0.4630, vol1m: 44.7, rvol: 9.1,  hits: 41,  vwap: 0.4188, volume: 23.9e6,  float: 72.5e6,  mcap: 33.6e6,  buy: 61 },
+    { sym: "ZENT", dir: "up",   haltAt: ago(284),  resumeAt: soon(16),  price: 0.4630, vol1m: 44.7, rvol: 9.1,  hits: 41,  vwap: 0.4188, volume: 23.9e6,  float: 72.5e6,  mcap: 33.6e6,  buy: 61 },
   ].map((h) => ({ ...h, time: h.haltAt })).sort((a, b) => b.time - a.time);
+
+  /* ---- Mock live feeds -------------------------------------------------- */
+
+  const jitter = (v, pct) => v * (1 + (Math.random() - 0.5) * 2 * pct);
+  const pick = (list) => list[Math.floor(Math.random() * list.length)];
+
+  // Scanner alerts: one of the most active tickers fires again, hits + 1.
+  const nextAlert = (seed) => (rows) => {
+    const src = pick(seed.slice(0, 10));
+    const prev = rows.find((r) => r.sym === src.sym) ?? src;
+    const price = jitter(prev.price, 0.04);
+    return {
+      ...prev,
+      time: new Date(),
+      price,
+      vwap: jitter(prev.vwap, 0.01),
+      chg1: jitter(prev.chg1, 0.25),
+      vol1m: Math.max(1, jitter(prev.vol1m, 0.3)),
+      rvol: Math.max(1, jitter(prev.rvol, 0.1)),
+      hits: prev.hits + 1,
+      chg5: jitter(prev.chg5, 0.15),
+      buy: Math.min(95, Math.max(5, Math.round(jitter(prev.buy, 0.08)))),
+      volume: prev.volume * 1.03,
+      mcap: prev.mcap * (price / prev.price),
+    };
+  };
+
+  // Halts: a ticker that is not already halted gets a 5-minute LULD pause.
+  const HALT_PAUSE = 5 * 60 * 1000;
+  const HALT_POOL = [
+    ...BULL.slice(0, 12).map((r) => ({ ...r, dir: "up" })),
+    ...BEAR.slice(0, 10).map((r) => ({ ...r, dir: "down" })),
+  ];
+  const nextHalt = (rows) => {
+    const free = HALT_POOL.filter((r) => !rows.some((h) => h.sym === r.sym));
+    if (!free.length) return null;
+    const src = pick(free);
+    const now = Date.now();
+    return {
+      ...src,
+      price: jitter(src.price, 0.06),
+      hits: src.hits + 1,
+      time: new Date(now),
+      haltAt: new Date(now),
+      resumeAt: new Date(now + HALT_PAUSE),
+    };
+  };
 
   /* ---- Alert sound (Web Audio, starts only after the user turns it on) --- */
 
@@ -302,7 +351,7 @@
     audio ??= new AudioContext();
     const osc = audio.createOscillator();
     const gain = audio.createGain();
-    osc.frequency.value = tone === "bear" ? 440 : 880;
+    osc.frequency.value = { bull: 880, bear: 440, halt: 660 }[tone];
     gain.gain.setValueAtTime(0.0001, audio.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.08, audio.currentTime + 0.01);
     gain.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + 0.18);
@@ -313,9 +362,7 @@
 
   /* ---- Table controller -------------------------------------------------- */
 
-  const jitter = (v, pct) => v * (1 + (Math.random() - 0.5) * 2 * pct);
-
-  const mountTable = (root, seed, { cols, live = true }) => {
+  const mountTable = (root, seed, { cols, next, every = LIVE_INTERVAL, expires = false }) => {
     const tone = root.dataset.tone;
     const table = root.querySelector(".scan-table");
     const headRow = table.querySelector("thead tr");
@@ -328,11 +375,30 @@
     let soundOn = false;
 
     const columns = () => [...PINNED, ...order];
+    const colgroup = table.insertBefore(document.createElement("colgroup"), table.firstChild);
+    const FILL = '<td class="col-fill" aria-hidden="true"></td>';
+
+    // Pinned offsets are plain sums of whole-pixel widths: nothing to measure.
+    table.style.setProperty("--pin-time", `${COL.sig.w}px`);
+    table.style.setProperty("--pin-sym", `${COL.sig.w + COL.time.w}px`);
 
     /* Header + rows */
 
     const renderHead = () => {
-      headRow.replaceChildren(...columns().map((key) => {
+      const keys = columns();
+      // Fixed layout: each column gets exactly its width; a trailing filler
+      // column soaks up any spare room so the others never stretch.
+      colgroup.replaceChildren(...keys.map((key) => {
+        const col = document.createElement("col");
+        col.style.width = `${COL[key].w}px`;
+        return col;
+      }), document.createElement("col"));
+      table.style.minWidth = `${keys.reduce((sum, key) => sum + COL[key].w, 0)}px`;
+
+      const fill = document.createElement("th");
+      fill.className = "col-fill";
+      fill.setAttribute("aria-hidden", "true");
+      headRow.replaceChildren(...keys.map((key) => {
         const c = COL[key];
         const th = document.createElement("th");
         th.scope = "col";
@@ -346,13 +412,13 @@
           th.setAttribute("aria-description", "Drag, or Alt + arrow keys, to move this column");
         }
         return th;
-      }));
+      }), fill);
     };
 
     const rowEl = (d, sym) => {
       const tr = document.createElement("tr");
       tr.dataset.sym = sym;
-      tr.innerHTML = columns().map((key) => `<td class="${cellClass(COL[key])}">${d[key]}</td>`).join("");
+      tr.innerHTML = columns().map((key) => `<td class="${cellClass(COL[key])}">${d[key]}</td>`).join("") + FILL;
       return tr;
     };
 
@@ -370,16 +436,8 @@
       const derived = rows.map((r) => [derive(r, tone), r.sym]);
       body.replaceChildren(...derived.map(([d, sym]) => rowEl(d, sym)));
       cards.replaceChildren(...derived.map(([d, sym]) => cardEl(d, sym)));
-      pin();
       tickTimers();
       feed?.sync();
-    };
-
-    // Left offsets for the pinned Time/Ticker columns, from real header widths.
-    const pin = () => {
-      const w = (key) => headRow.querySelector(`[data-key="${key}"]`).getBoundingClientRect().width;
-      table.style.setProperty("--pin-time", `${w("sig")}px`);
-      table.style.setProperty("--pin-sym", `${w("sig") + w("time")}px`);
     };
 
     /* Column drag & drop */
@@ -445,38 +503,25 @@
       headRow.querySelector(`[data-key="${key}"]`).focus();
     });
 
-    /* Live feed: a ticker that alerts again moves to the top with hits + 1. */
+    /* Live feed: the newest alert goes on top; a ticker already listed
+       moves up instead of appearing twice. */
 
     const pushAlert = () => {
-      const src = seed[Math.floor(Math.random() * Math.min(seed.length, 10))];
-      const i = rows.findIndex((r) => r.sym === src.sym);
-      const prev = i >= 0 ? rows.splice(i, 1)[0] : { ...src };
-      const price = jitter(prev.price, 0.04);
-      const next = {
-        ...prev,
-        time: new Date(),
-        price,
-        vwap: jitter(prev.vwap, 0.01),
-        chg1: jitter(prev.chg1, 0.25),
-        vol1m: Math.max(1, jitter(prev.vol1m, 0.3)),
-        rvol: Math.max(1, jitter(prev.rvol, 0.1)),
-        hits: prev.hits + 1,
-        chg5: jitter(prev.chg5, 0.15),
-        buy: Math.min(95, Math.max(5, Math.round(jitter(prev.buy, 0.08)))),
-        volume: prev.volume * 1.03,
-        mcap: prev.mcap * (price / prev.price),
-      };
-      rows.unshift(next);
+      const alert = next(rows);
+      if (!alert) return;
+      const i = rows.findIndex((r) => r.sym === alert.sym);
+      if (i >= 0) rows.splice(i, 1);
+      rows.unshift(alert);
       rows.length = Math.min(rows.length, MAX_ROWS);
 
-      const d = derive(next, tone);
-      body.querySelector(`[data-sym="${next.sym}"]`)?.remove();
-      const tr = rowEl(d, next.sym);
+      const d = derive(alert, tone);
+      body.querySelector(`[data-sym="${alert.sym}"]`)?.remove();
+      const tr = rowEl(d, alert.sym);
       tr.classList.add("is-new");
       body.prepend(tr);
       while (body.children.length > MAX_ROWS) body.lastElementChild.remove();
 
-      const card = cardEl(d, next.sym);
+      const card = cardEl(d, alert.sym);
       card.classList.add("is-new");
       feed.insert(card);
       tickTimers();
@@ -484,6 +529,21 @@
     };
 
     const feed = mountCardFeed(root.querySelector(".card-view"));
+
+    // Halts: once a ticker resumes trading its alert leaves the table.
+    const dropResumed = () => {
+      const now = Date.now();
+      for (const r of rows.filter((row) => row.resumeAt <= now)) {
+        rows.splice(rows.indexOf(r), 1);
+        const tr = body.querySelector(`[data-sym="${r.sym}"]`);
+        if (tr) {
+          tr.classList.add("is-leaving");
+          tr.addEventListener("animationend", () => tr.remove(), { once: true });
+          if (reduceMotion.matches) tr.remove();
+        }
+        feed.remove(r.sym);
+      }
+    };
 
     /* Toolbar */
 
@@ -499,10 +559,12 @@
       wrap.classList.toggle("is-scrolled", wrap.scrollLeft > 0);
     }, { passive: true });
 
+    if (expires) {
+      rows.splice(0, rows.length, ...rows.filter((r) => r.resumeAt > Date.now()));
+      onTick.push(dropResumed);
+    }
     renderAll();
-    window.addEventListener("resize", pin);
-    document.fonts?.ready.then(pin);
-    if (live) setInterval(pushAlert, LIVE_INTERVAL + Math.random() * 1500);
+    if (next) setInterval(pushAlert, every + Math.random() * 1500);
   };
 
   /* ---- Mobile card feed --------------------------------------------------
@@ -629,17 +691,44 @@
       syncRail();
     };
 
+    // An alert that leaves (a halt that resumed) folds away; cards below
+    // slide up into its place. Above the viewport it goes instantly and the
+    // scroll position compensates, so what the user is reading stays put.
+    const remove = (sym) => {
+      const el = list.querySelector(`[data-sym="${sym}"]:not(.is-leaving)`);
+      if (!el) return;
+      const visible = list.offsetParent !== null;
+      if (!visible || reduceMotion.matches || el.offsetTop + el.offsetHeight <= list.scrollTop) {
+        const shift = visible && el.offsetTop < list.scrollTop
+          ? el.offsetHeight + parseFloat(getComputedStyle(list).rowGap || 0) : 0;
+        el.remove();
+        if (shift) scrollListTo(list.scrollTop - shift);
+        syncRail();
+        return;
+      }
+      el.classList.add("is-leaving");
+      const gap = parseFloat(getComputedStyle(list).rowGap || 0);
+      el.animate(
+        [
+          { opacity: 1, height: `${el.offsetHeight}px`, marginBottom: "0px" },
+          { opacity: 0, height: "0px", marginBottom: `${-gap}px`, paddingBlock: "0px" },
+        ],
+        { duration: 380, easing: EASE },
+      ).finished.then(() => { el.remove(); syncRail(); });
+    };
+
     const ro = new ResizeObserver(syncRail);
     ro.observe(list);
     syncRail();
-    return { insert, sync: syncRail };
+    return { insert, remove, sync: syncRail };
   };
 
   /* ---- Halt timers --------------------------------------------------------
      Duration counts up from the halt; Resume Est. counts down to resumption.
-     Once resumed, Duration freezes at the total halt time and the row dims. */
+     When the countdown ends the ticker has resumed and its alert is removed. */
 
   const DUE_SOON = 60 * 1000;
+  const onTick = [];
 
   function tickTimers() {
     const now = Date.now();
@@ -650,16 +739,16 @@
       el.textContent = el.dataset.timer === "duration"
         ? fmtClock(Math.min(now, until) - since)
         : fmtClock(left);
-      if (el.dataset.timer === "resume") {
-        el.classList.toggle("is-soon", left > 0 && left <= DUE_SOON);
-        el.closest("tr, .alert-card")?.classList.toggle("is-resumed", left <= 0);
-      }
+      if (el.dataset.timer === "resume") el.classList.toggle("is-soon", left > 0 && left <= DUE_SOON);
     });
   }
 
   const [bull, bear, halts] = document.querySelectorAll(".terminal[data-tone]");
-  mountTable(bull, BULL, { cols: ALERT_COLS });
-  mountTable(bear, BEAR, { cols: ALERT_COLS });
-  mountTable(halts, HALTS, { cols: HALT_COLS, live: false });
-  setInterval(tickTimers, 1000);
+  mountTable(bull, BULL, { cols: ALERT_COLS, next: nextAlert(BULL) });
+  mountTable(bear, BEAR, { cols: ALERT_COLS, next: nextAlert(BEAR) });
+  mountTable(halts, HALTS, { cols: HALT_COLS, next: nextHalt, every: 18000, expires: true });
+  setInterval(() => {
+    tickTimers();
+    onTick.forEach((fn) => fn());
+  }, 1000);
 })();
