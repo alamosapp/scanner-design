@@ -174,7 +174,10 @@ button { cursor: pointer; }
 .table-wrap::-webkit-scrollbar-track, .table-wrap::-webkit-scrollbar-corner { background: transparent; }
 
 .scan-table { width: 100%; border-collapse: separate; border-spacing: 0; min-width: 1380px; font-size: 0.8125rem; font-variant-numeric: tabular-nums; }
-.scan-table th { position: sticky; top: 0; z-index: 2; text-align: left; padding: 0.55rem 0.7rem; font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.06em; color: var(--text-3); background: var(--bg); border-bottom: 1px solid var(--line); white-space: nowrap; user-select: none; }
+/* The whole header is one sticky layer, so it scrolls sideways in lockstep
+   with the body (per-cell sticky headers snap to pixels independently). */
+.scan-table thead { position: sticky; top: 0; z-index: 3; }
+.scan-table th { text-align: left; padding: 0.55rem 0.7rem; font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.06em; color: var(--text-3); background: var(--bg); border-bottom: 1px solid var(--line); white-space: nowrap; user-select: none; }
 .scan-table th[title] { cursor: help; }
 .scan-table td { vertical-align: middle; padding: 0.4rem 0.7rem; border-bottom: 1px solid var(--line); white-space: nowrap; font-family: var(--font-mono); font-weight: 500; color: var(--text-2); background: var(--row-bg); transition: background var(--t-fast); }
 .scan-table tr:last-child td { border-bottom: 0; }
@@ -277,7 +280,7 @@ tr.is-new td, .alert-card.is-new { animation: rowIn 1.6s var(--ease); }
    Phones: alert cards
    ========================================================================== */
 
-.card-list { display: none; }
+.card-view { display: none; }
 
 @media (max-width: 720px) {
   .section--scanner { padding-block: var(--space-4); }
@@ -287,16 +290,37 @@ tr.is-new td, .alert-card.is-new { animation: rowIn 1.6s var(--ease); }
   .terminal-bar { padding-left: var(--space-3); }
   .terminal-title { font-size: var(--fs-base); }
 
+  .card-view { display: block; position: relative; }
   .card-list {
-    display: flex; flex-direction: column; gap: var(--space-2);
+    position: relative; display: flex; flex-direction: column; gap: var(--space-2);
     max-height: var(--table-h); overflow-y: auto; overscroll-behavior: contain;
-    padding: var(--space-2); scroll-snap-type: y proximity; scrollbar-width: none;
+    overflow-anchor: none;            /* anchoring is handled in JS (Safari has none) */
+    padding: var(--space-2) 18px var(--space-2) var(--space-2);
+    scrollbar-width: none;            /* replaced by .card-rail */
   }
   .card-list::-webkit-scrollbar { display: none; }
 
+  /* Custom vertical scrollbar */
+  .card-rail { position: absolute; top: var(--space-2); bottom: var(--space-2); right: 2px; width: 14px; touch-action: none; cursor: pointer; }
+  .card-rail::before { content: ""; position: absolute; inset: 0 5px; border-radius: var(--radius-pill); background: var(--white-a04); }
+  .card-rail i { position: absolute; top: 0; left: 4px; right: 4px; border-radius: var(--radius-pill); background: var(--line-strong); transition: background var(--t-fast), left var(--t-fast), right var(--t-fast); }
+  .card-rail.is-active i, .card-rail:hover i { left: 3px; right: 3px; background: var(--text-3); }
+  .card-rail[hidden] { display: none; }
+
+  /* "N new" pill while the user is scrolled away from the top */
+  .new-pill {
+    position: absolute; top: var(--space-3); left: 50%; z-index: 2; transform: translateX(-50%);
+    padding: 4px 12px; border: 1px solid color-mix(in srgb, var(--tone) 40%, transparent); border-radius: var(--radius-pill);
+    background: color-mix(in srgb, var(--tone) 16%, var(--surface)); color: var(--tone);
+    font-size: var(--fs-xs); font-weight: 700; box-shadow: 0 8px 20px -8px var(--shadow-color);
+    animation: pillIn 240ms var(--ease);
+  }
+  .new-pill[hidden] { display: none; }
+  @keyframes pillIn { from { opacity: 0; transform: translate(-50%, -6px); } }
+
   .alert-card {
     --row-bg: var(--surface);
-    position: relative; scroll-snap-align: start;
+    position: relative; flex: none;
     display: grid; gap: 3px;
     padding: 0.55rem var(--space-3) 0.55rem calc(var(--space-3) + 8px);
     border: 1px solid var(--line); border-radius: var(--radius-sm);

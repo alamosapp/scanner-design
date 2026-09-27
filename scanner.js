@@ -372,6 +372,7 @@
       cards.replaceChildren(...derived.map(([d, sym]) => cardEl(d, sym)));
       pin();
       tickTimers();
+      feed?.sync();
     };
 
     // Left offsets for the pinned Time/Ticker columns, from real header widths.
@@ -469,16 +470,20 @@
       rows.length = Math.min(rows.length, MAX_ROWS);
 
       const d = derive(next, tone);
-      for (const [list, make] of [[body, rowEl], [cards, cardEl]]) {
-        list.querySelector(`[data-sym="${next.sym}"]`)?.remove();
-        const el = make(d, next.sym);
-        el.classList.add("is-new");
-        list.prepend(el);
-        while (list.children.length > MAX_ROWS) list.lastElementChild.remove();
-      }
+      body.querySelector(`[data-sym="${next.sym}"]`)?.remove();
+      const tr = rowEl(d, next.sym);
+      tr.classList.add("is-new");
+      body.prepend(tr);
+      while (body.children.length > MAX_ROWS) body.lastElementChild.remove();
+
+      const card = cardEl(d, next.sym);
+      card.classList.add("is-new");
+      feed.insert(card);
       tickTimers();
       if (soundOn) beep(tone);
     };
+
+    const feed = mountCardFeed(root.querySelector(".card-view"));
 
     /* Toolbar */
 
@@ -498,6 +503,136 @@
     window.addEventListener("resize", pin);
     document.fonts?.ready.then(pin);
     if (live) setInterval(pushAlert, LIVE_INTERVAL + Math.random() * 1500);
+  };
+
+  /* ---- Mobile card feed --------------------------------------------------
+     - At the top and idle: new alerts slide in and push the rest down.
+     - Scrolled away (or mid-gesture): the view stays put and a "new" pill
+       counts what arrived above.
+     - A custom scrollbar rail, since iOS hides native ones. */
+
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+  const EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
+
+  const mountCardFeed = (view) => {
+    const list = view.querySelector("[data-cards]");
+    const pill = view.querySelector("[data-new-pill]");
+    const pillCount = view.querySelector("[data-new-count]");
+    const rail = view.querySelector("[data-rail]");
+    const thumb = rail.firstElementChild;
+    let touching = false;
+    let lastUserScroll = 0;
+    let selfScroll = false;
+    let unseen = 0;
+
+    const atTop = () => list.scrollTop <= 2;
+    const userBusy = () => touching || Date.now() - lastUserScroll < 350;
+    const scrollListTo = (top) => {
+      if (Math.round(top) === Math.round(list.scrollTop)) return;
+      selfScroll = true;
+      list.scrollTop = top;
+    };
+
+    const syncRail = () => {
+      const { scrollTop, scrollHeight, clientHeight } = list;
+      const ratio = clientHeight / (scrollHeight || 1);
+      rail.hidden = ratio >= 1;
+      const h = Math.max(28, ratio * rail.clientHeight);
+      const travel = rail.clientHeight - h;
+      thumb.style.height = `${h}px`;
+      thumb.style.transform = `translateY(${(scrollTop / (scrollHeight - clientHeight || 1)) * travel}px)`;
+    };
+
+    const setUnseen = (n) => {
+      unseen = n;
+      pill.hidden = n === 0;
+      pillCount.textContent = String(n);
+    };
+
+    list.addEventListener("scroll", () => {
+      if (selfScroll) selfScroll = false;
+      else lastUserScroll = Date.now();
+      if (atTop()) setUnseen(0);
+      syncRail();
+    }, { passive: true });
+    list.addEventListener("touchstart", () => { touching = true; }, { passive: true });
+    list.addEventListener("touchend", () => { touching = false; lastUserScroll = Date.now(); }, { passive: true });
+    list.addEventListener("touchcancel", () => { touching = false; }, { passive: true });
+
+    pill.addEventListener("click", () => list.scrollTo({ top: 0, behavior: reduceMotion.matches ? "auto" : "smooth" }));
+
+    // Drag the rail thumb (or tap the rail) to scroll.
+    rail.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      rail.setPointerCapture(e.pointerId);
+      rail.classList.add("is-active");
+      const box = rail.getBoundingClientRect();
+      const grab = e.target === thumb ? e.clientY - thumb.getBoundingClientRect().top : thumb.offsetHeight / 2;
+      const move = (ev) => {
+        const travel = box.height - thumb.offsetHeight;
+        const pos = Math.min(travel, Math.max(0, ev.clientY - box.top - grab));
+        lastUserScroll = Date.now();
+        list.scrollTop = (pos / (travel || 1)) * (list.scrollHeight - list.clientHeight);
+      };
+      const up = () => {
+        rail.classList.remove("is-active");
+        rail.removeEventListener("pointermove", move);
+        rail.removeEventListener("pointerup", up);
+        rail.removeEventListener("pointercancel", up);
+      };
+      move(e);
+      rail.addEventListener("pointermove", move);
+      rail.addEventListener("pointerup", up);
+      rail.addEventListener("pointercancel", up);
+    });
+
+    const insert = (card) => {
+      const old = list.querySelector(`[data-sym="${card.dataset.sym}"]`);
+      const visible = list.offsetParent !== null;
+      const stayTop = visible && atTop() && !userBusy();
+
+      // FLIP: remember where the visible cards were…
+      const first = new Map();
+      let anchor = null;
+      let anchorOffset = 0;
+      if (stayTop) {
+        const limit = list.clientHeight * 1.5;
+        for (const el of list.children) if (el.offsetTop < limit) first.set(el, el.offsetTop);
+      } else if (visible) {
+        anchor = [...list.children].find((el) => el !== old && el.offsetTop + el.offsetHeight > list.scrollTop);
+        anchorOffset = anchor ? anchor.offsetTop - list.scrollTop : 0;
+      }
+
+      old?.remove();
+      list.prepend(card);
+      while (list.children.length > MAX_ROWS) list.lastElementChild.remove();
+
+      if (stayTop) {
+        scrollListTo(0);
+        // …then slide them from there to their new spot.
+        if (!reduceMotion.matches) {
+          first.forEach((top, el) => {
+            const dy = top - el.offsetTop;
+            if (dy && el.isConnected) {
+              el.animate([{ transform: `translateY(${dy}px)` }, { transform: "none" }], { duration: 420, easing: EASE });
+            }
+          });
+          card.animate(
+            [{ opacity: 0, transform: "translateY(-10px) scale(0.98)" }, { opacity: 1, transform: "none" }],
+            { duration: 320, delay: 90, easing: EASE, fill: "backwards" },
+          );
+        }
+      } else if (visible) {
+        if (anchor?.isConnected) scrollListTo(anchor.offsetTop - anchorOffset);
+        setUnseen(unseen + 1);
+      }
+      syncRail();
+    };
+
+    const ro = new ResizeObserver(syncRail);
+    ro.observe(list);
+    syncRail();
+    return { insert, sync: syncRail };
   };
 
   /* ---- Halt timers --------------------------------------------------------
