@@ -32,21 +32,25 @@
       <div class="main-pane">
 
         <!-- Top: alert tables -->
-        <section class="pane-row pane-row--top" aria-label="Alerts">
+        <section class="pane-row pane-row--top" data-row="top" aria-label="Alerts">
           <div class="terminal" data-panel="new-hod" data-title="New HoD" data-tone="bull"></div>
+          <div class="splitter splitter--col" data-split="col" role="separator" aria-orientation="vertical" aria-label="Resize New HoD and Buying Pressure" aria-valuemin="0" aria-valuemax="100" tabindex="0"></div>
           <div class="terminal" data-panel="buying" data-title="Buying Pressure" data-tone="bull"></div>
+          <div class="splitter splitter--col" data-split="col" role="separator" aria-orientation="vertical" aria-label="Resize Buying Pressure and Selling Pressure" aria-valuemin="0" aria-valuemax="100" tabindex="0"></div>
           <div class="terminal" data-panel="selling" data-title="Selling Pressure" data-tone="bear"></div>
         </section>
 
         <div class="splitter splitter--row" data-split="rows" role="separator" aria-orientation="horizontal" aria-label="Resize alert rows" aria-valuemin="0" aria-valuemax="100" tabindex="0"></div>
 
         <!-- Bottom: chart + momentum · chart · halts -->
-        <section class="pane-row pane-row--bottom" aria-label="Charts, momentum and halts">
-          <div class="pane-stack">
+        <section class="pane-row pane-row--bottom" data-row="bottom" aria-label="Charts, momentum and halts">
+          <!-- One panel: bar · chart · table (the chart is moved under the bar) -->
+          <div class="terminal" data-panel="momentum" data-title="Fast-Growing Momentum" data-tone="bull">
             <div class="chart-slot" role="img" aria-label="Chart (coming soon)"><span>Chart</span></div>
-            <div class="terminal" data-panel="momentum" data-title="Fast-Growing Momentum" data-tone="bull"></div>
           </div>
+          <div class="splitter splitter--col" data-split="col" role="separator" aria-orientation="vertical" aria-label="Resize Momentum and chart" aria-valuemin="0" aria-valuemax="100" tabindex="0"></div>
           <div class="chart-slot" role="img" aria-label="Chart (coming soon)"><span>Chart</span></div>
+          <div class="splitter splitter--col" data-split="col" role="separator" aria-orientation="vertical" aria-label="Resize chart and Halts" aria-valuemin="0" aria-valuemax="100" tabindex="0"></div>
           <div class="terminal" data-panel="halts" data-title="Halts" data-tone="halt"></div>
         </section>
 

@@ -145,7 +145,7 @@ button { cursor: pointer; }
 .workspace {
   --side-w: 360px;
   display: grid;
-  grid-template-columns: clamp(220px, var(--side-w), calc(100% - var(--gap) - 480px)) var(--gap) minmax(0, 1fr);
+  grid-template-columns: clamp(220px, var(--side-w), calc(100% - var(--gap) - 500px)) var(--gap) minmax(0, 1fr);
   padding: var(--gap); min-height: 0;
 }
 .side-pane { display: grid; grid-template-rows: repeat(3, minmax(0, 1fr)); gap: var(--gap); min-width: 0; min-height: 0; }
@@ -158,14 +158,17 @@ button { cursor: pointer; }
   grid-template-rows: clamp(140px, calc((100% - var(--gap)) * var(--top-ratio)), calc(100% - var(--gap) - 140px)) var(--gap) minmax(0, 1fr);
   min-width: 0; min-height: 0;
 }
-.pane-row { display: grid; gap: var(--gap); min-width: 0; min-height: 0; }
-.pane-row--top { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.pane-row--bottom { grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr) minmax(0, 1fr); }
-/* First bottom cell: chart above, momentum table below */
-.pane-stack { display: grid; grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); gap: var(--gap); min-width: 0; min-height: 0; }
+/* Panes in a row share the width by --grow (set per pane by the splitters
+   between them); the splitters themselves are the gaps. */
+.pane-row { display: flex; min-width: 0; min-height: 0; }
+.pane-row > :not(.splitter) { flex: var(--grow, 1) 1 0px; }
+.pane-row > .splitter { flex: none; width: var(--gap); }
 
 /* Chart placeholder */
 .chart-slot { display: grid; place-items: center; min-width: 0; min-height: 0; border: 1px dashed var(--line-strong); border-radius: var(--radius); background: var(--bg-elevated); color: var(--text-3); font-family: var(--font-mono); font-size: var(--fs-xs); letter-spacing: 0.08em; text-transform: uppercase; }
+/* Chart inside a panel (Momentum): bar · chart · table read as one element */
+.terminal > .chart-slot { flex: 1 1 0px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; }
+.terminal > .chart-slot ~ .table-wrap { flex: 1 1 0px; }
 
 /* ---- Splitters: the gap between panes is the drag handle ---- */
 
@@ -337,10 +340,11 @@ tr.is-leaving td { animation: rowOut 600ms var(--ease) forwards; }
 .tag.halt { background: var(--red-a16); color: var(--red); }
 .tag.nhod { background: var(--green-a16); color: var(--green); }
 .tag.vol { background: var(--cyan-a16); color: var(--cyan); }
-.flash-up { animation: flashUp 700ms; }
-.flash-down { animation: flashDown 700ms; }
-@keyframes flashUp { 0% { background: var(--green-a32); } 100% { background: transparent; } }
-@keyframes flashDown { 0% { background: var(--red-a32); } 100% { background: transparent; } }
+/* Price tick: brief tint + colored text, green up / red down */
+.flash-up { animation: flashUp 900ms var(--ease); }
+.flash-down { animation: flashDown 900ms var(--ease); }
+@keyframes flashUp { 0% { background: color-mix(in srgb, var(--green) 26%, var(--row-bg)); color: var(--green); } 100% { background: var(--row-bg); } }
+@keyframes flashDown { 0% { background: color-mix(in srgb, var(--red) 26%, var(--row-bg)); color: var(--red); } 100% { background: var(--row-bg); } }
 
 /* New alert lands on top with a short tint in the table's tone */
 tr.is-new td, .alert-card.is-new { animation: rowIn 1.6s var(--ease); }
@@ -364,9 +368,10 @@ tr.is-new td, .alert-card.is-new { animation: rowIn 1.6s var(--ease); }
 @media (max-width: 720px) {
   /* Panes stack in one scrolling column; nothing to resize */
   .app { display: block; height: auto; }
-  .workspace, .side-pane, .main-pane, .pane-row, .pane-stack { display: flex; flex-direction: column; gap: var(--gap); }
+  .workspace, .side-pane, .main-pane, .pane-row { display: flex; flex-direction: column; gap: var(--gap); }
+  .pane-row > :not(.splitter) { flex: none; }
   .splitter { display: none; }
-  .chart-slot { height: 220px; }
+  .chart-slot, .terminal > .chart-slot { flex: none; height: 220px; }
 
   .table-wrap { display: none; }
 
@@ -422,7 +427,7 @@ tr.is-new td, .alert-card.is-new { animation: rowIn 1.6s var(--ease); }
 
   .card-line { display: flex; align-items: center; gap: var(--space-2); min-height: 1.5rem; }
   .card-line .sym { font-size: var(--fs-base); }
-  .card-price { font-size: var(--fs-base); font-weight: 700; color: var(--text-2); }
+  .card-price { margin-inline: -3px; padding-inline: 3px; border-radius: 4px; font-size: var(--fs-base); font-weight: 700; color: var(--text-2); }
   .card-time { margin-left: auto; font-size: var(--fs-xs); color: var(--text-3); }
 
   .card-meta { gap: var(--space-3); font-size: var(--fs-xs); color: var(--text-3); }

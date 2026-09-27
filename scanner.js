@@ -29,6 +29,7 @@
 
   const MAX_ROWS = 40;
   const LIVE_INTERVAL = 4000;
+  const QUOTE_INTERVAL = 1200; // toplist price updates
 
   /* ---- Formatters -------------------------------------------------------- */
 
@@ -376,11 +377,14 @@
 
   /* ---- Table controller -------------------------------------------------- */
 
-  // Fill an empty panel from the shared <template>.
+  // Fill a panel from the shared <template>. Anything already inside it
+  // (e.g. a chart) goes between the bar and the table.
   const panelTpl = document.getElementById("terminal-tpl");
   const buildPanel = (root) => {
     const { panel, title, kind } = root.dataset;
+    const extras = [...root.children];
     root.append(panelTpl.content.cloneNode(true));
+    root.querySelector(".terminal-bar").after(...extras);
     const titleEl = root.querySelector(".terminal-title");
     titleEl.id = `${panel}-title`;
     titleEl.textContent = title;
@@ -394,7 +398,7 @@
     if (kind === "toplist") root.querySelector("[data-sound]").remove();
   };
 
-  const mountTable = (root, seed, { cols, pins = PINNED, next, every = LIVE_INTERVAL, expires = false }) => {
+  const mountTable = (root, seed, { cols, pins = PINNED, next, every = LIVE_INTERVAL, expires = false, quotes = false }) => {
     const tone = root.dataset.tone;
     const panel = root.dataset.panel;
     const table = root.querySelector(".scan-table");
@@ -597,12 +601,43 @@
       wrap.classList.toggle("is-scrolled", wrap.scrollLeft >= 1);
     }, { passive: true });
 
+    /* Live prices (toplists): a changed price flashes green when it ticks
+       up, red when it ticks down — in the table cell and on the card. */
+
+    const flash = (el, up) => {
+      el.classList.remove("flash-up", "flash-down");
+      void el.offsetWidth; // restart the animation if it is still running
+      el.classList.add(up ? "flash-up" : "flash-down");
+    };
+
+    const tickPrices = () => {
+      const count = 1 + Math.floor(Math.random() * 3);
+      for (let n = 0; n < count; n++) {
+        const r = pick(rows);
+        const before = fmtPrice(r.price);
+        r.price = jitter(r.price, 0.015);
+        const after = fmtPrice(r.price);
+        if (after === before) continue;
+        const up = Number(after) > Number(before);
+        const cell = body.querySelector(`[data-sym="${r.sym}"]`)?.children[columns().indexOf("price")];
+        if (cell) { cell.textContent = after; flash(cell, up); }
+        const cardPrice = cards.querySelector(`[data-sym="${r.sym}"] .card-price`);
+        if (cardPrice) { cardPrice.textContent = after; flash(cardPrice, up); }
+      }
+    };
+
+    // Drop the class once done so re-renders never replay a stale flash.
+    root.addEventListener("animationend", (e) => {
+      if (/^flash(Up|Down)$/.test(e.animationName)) e.target.classList.remove("flash-up", "flash-down");
+    });
+
     if (expires) {
       rows.splice(0, rows.length, ...rows.filter((r) => r.resumeAt > Date.now()));
       onTick.push(dropResumed);
     }
     renderAll();
     if (next) setInterval(pushAlert, every + Math.random() * 1500);
+    if (quotes) setInterval(tickPrices, QUOTE_INTERVAL + Math.random() * 600);
   };
 
   /* ---- Mobile card feed --------------------------------------------------
@@ -781,15 +816,23 @@
   /* ---- Layout: resizable panes --------------------------------------------
      - The line between the toplists and the rest sets the toplists' width.
      - The line between the two alert rows sets how the height is shared.
+     - The lines between the panes of a row move width between the two
+       neighbours; the rest of the row stays put.
      Drag it, or focus it and use the arrow keys (Shift = bigger steps);
      double-click restores the default. The split survives reloads.
-     The same limits are enforced in CSS, so a smaller window never
+     Side/row limits are also enforced in CSS, so a smaller window never
      squeezes a pane below its minimum. */
 
   const LAYOUT_KEY = "scanner:layout";
-  const LAYOUT_DEFAULT = { side: 360, top: 0.55 };
+  const LAYOUT_DEFAULT = {
+    side: 360,
+    top: 0.55,
+    // Each pane's share of its row's width (flex-grow)
+    cols: { top: [1, 1, 1], bottom: [1, 1.5, 1] },
+  };
   const MIN_SIDE = 220;  // toplists
-  const MIN_MAIN = 480;  // everything right of them
+  const MIN_COL = 160;   // each pane within a row
+  const MIN_MAIN = 3 * MIN_COL + 2 * 10;  // everything right of the toplists (3 panes + 2 gaps)
   const MIN_ROW = 140;   // each alert row
 
   const mountLayout = () => {
@@ -801,8 +844,16 @@
     const rowHandle = workspace.querySelector('[data-split="rows"]');
     const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), Math.max(lo, hi));
 
-    const state = { ...LAYOUT_DEFAULT };
-    try { Object.assign(state, JSON.parse(localStorage.getItem(LAYOUT_KEY) || "{}")); } catch { /* ignore */ }
+    const state = structuredClone(LAYOUT_DEFAULT);
+    try {
+      const saved = JSON.parse(localStorage.getItem(LAYOUT_KEY) || "{}");
+      if (Number.isFinite(saved.side)) state.side = saved.side;
+      if (Number.isFinite(saved.top)) state.top = saved.top;
+      for (const row of Object.keys(state.cols)) {
+        const g = saved.cols?.[row];
+        if (Array.isArray(g) && g.length === state.cols[row].length && g.every((v) => v > 0)) state.cols[row] = g;
+      }
+    } catch { /* ignore */ }
     const save = () => {
       try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(state)); } catch { /* ignore */ }
     };
@@ -818,8 +869,8 @@
     };
 
     // Each handle resizes one pane: size() reads it in px, resize(px) sets it.
-    const panes = {
-      side: {
+    const panes = [
+      {
         handle: colHandle, axis: "x",
         size: () => side.getBoundingClientRect().width,
         resize: (px) => {
@@ -829,7 +880,7 @@
         },
         reset: () => { state.side = LAYOUT_DEFAULT.side; applySide(); },
       },
-      rows: {
+      {
         handle: rowHandle, axis: "y",
         size: () => topRow.getBoundingClientRect().height,
         resize: (px) => {
@@ -839,9 +890,55 @@
         },
         reset: () => { state.top = LAYOUT_DEFAULT.top; applyRows(); },
       },
-    };
+    ];
 
-    Object.values(panes).forEach(({ handle, axis, size, resize, reset }) => {
+    // Panes within a row: splitter i sits between pane i and pane i + 1.
+    const colAppliers = [topRow, bottomRow].map((rowEl) => {
+      const row = rowEl.dataset.row;
+      const items = [...rowEl.children].filter((el) => !el.classList.contains("splitter"));
+      const handles = [...rowEl.querySelectorAll(':scope > [data-split="col"]')];
+      const width = (el) => el.getBoundingClientRect().width;
+
+      const apply = () => {
+        const g = state.cols[row];
+        items.forEach((el, i) => el.style.setProperty("--grow", g[i].toFixed(4)));
+        const sum = g.reduce((a, b) => a + b, 0);
+        let edge = 0;
+        handles.forEach((h, i) => {
+          edge += g[i];
+          h.setAttribute("aria-valuenow", String(Math.round((edge / sum) * 100)));
+        });
+      };
+
+      handles.forEach((handle, i) => {
+        const [a, b] = [items[i], items[i + 1]];
+        panes.push({
+          handle, axis: "x",
+          size: () => width(a),
+          // Widths follow the grow factors, so keeping the pair's sum fixed
+          // leaves every other pane in the row exactly where it was.
+          resize: (px) => {
+            const total = width(a) + width(b);
+            const g = state.cols[row];
+            const pair = g[i] + g[i + 1];
+            g[i] = (pair * clamp(px, MIN_COL, total - MIN_COL)) / (total || 1);
+            g[i + 1] = pair - g[i];
+            apply();
+          },
+          reset: () => {
+            const g = state.cols[row];
+            const d = LAYOUT_DEFAULT.cols[row];
+            const pair = g[i] + g[i + 1];
+            g[i] = (pair * d[i]) / (d[i] + d[i + 1]);
+            g[i + 1] = pair - g[i];
+            apply();
+          },
+        });
+      });
+      return apply;
+    });
+
+    panes.forEach(({ handle, axis, size, resize, reset }) => {
       const pos = (e) => (axis === "x" ? e.clientX : e.clientY);
 
       handle.addEventListener("pointerdown", (e) => {
@@ -887,6 +984,7 @@
       handle.addEventListener("dblclick", () => { reset(); save(); });
     });
 
+    colAppliers.forEach((apply) => apply());
     applySide();
     applyRows();
   };
@@ -898,9 +996,9 @@
   mountLayout();
 
   // Vertical container: toplists
-  mountTable(panel("gainers"), GAINERS, { cols: GAINER_COLS, pins: TOPLIST_PINS });
-  mountTable(panel("gainers-open"), GAINERS_OPEN, { cols: GAINER_COLS, pins: TOPLIST_PINS });
-  mountTable(panel("volume-leaders"), VOLUME_LEADERS, { cols: VOLUME_COLS, pins: TOPLIST_PINS });
+  mountTable(panel("gainers"), GAINERS, { cols: GAINER_COLS, pins: TOPLIST_PINS, quotes: true });
+  mountTable(panel("gainers-open"), GAINERS_OPEN, { cols: GAINER_COLS, pins: TOPLIST_PINS, quotes: true });
+  mountTable(panel("volume-leaders"), VOLUME_LEADERS, { cols: VOLUME_COLS, pins: TOPLIST_PINS, quotes: true });
   // Top row: alerts
   mountTable(panel("new-hod"), BULL, { cols: ALERT_COLS, next: nextAlert(BULL) });
   mountTable(panel("buying"), BUYING, { cols: ALERT_COLS, next: nextAlert(BUYING) });
