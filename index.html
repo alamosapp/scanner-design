@@ -15,14 +15,37 @@
     <!-- Navigation bar (placeholder) -->
     <nav class="app-nav" aria-label="Main navigation">
       <span class="app-brand">Scanner</span>
+
+      <!-- Market session (the scanner's status) · New York time (scanner.js) -->
+      <div class="app-status">
+        <span class="nav-chip market-session" data-session="closed" role="status" title="Market session">
+          <i class="status-dot" aria-hidden="true"></i><span data-session-label>Closed</span>
+        </span>
+        <time class="market-clock" data-clock title="New York time">--:--:-- <small>ET</small></time>
+      </div>
+
+      <div class="app-tools">
+        <button type="button" class="icon-btn guide-icon" data-guide-open aria-haspopup="dialog" aria-controls="user-guide" aria-label="Open the User Guide" title="User Guide">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.3a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.6"/><path d="M12 17h.01"/></svg>
+        </button>
+        <button type="button" class="icon-btn fullscreen-icon" data-app-fullscreen aria-pressed="false" aria-label="Fullscreen dashboard" title="Fullscreen dashboard" hidden>
+          <svg class="icon-expand" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg>
+          <svg class="icon-collapse" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5"/></svg>
+        </button>
+        <span class="user-avatar" role="img" aria-label="User account" title="Account">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="9" r="3.5"/><path d="M5.5 19.5a6.5 6.5 0 0 1 13 0"/></svg>
+        </span>
+      </div>
     </nav>
 
     <main class="workspace" id="main">
 
       <!-- Vertical container: toplists -->
-      <aside class="side-pane" aria-label="Toplists">
+      <aside class="side-pane" data-row="side" aria-label="Toplists">
         <div class="terminal" data-panel="gainers" data-title="Gainers" data-tone="bull" data-kind="toplist"></div>
+        <div class="splitter splitter--row" data-split="cell" role="separator" aria-orientation="horizontal" aria-label="Resize Gainers and Gainers Open" aria-valuemin="0" aria-valuemax="100" tabindex="0"></div>
         <div class="terminal" data-panel="gainers-open" data-title="Gainers Open" data-tone="bull" data-kind="toplist"></div>
+        <div class="splitter splitter--row" data-split="cell" role="separator" aria-orientation="horizontal" aria-label="Resize Gainers Open and Volume Leaders" aria-valuemin="0" aria-valuemax="100" tabindex="0"></div>
         <div class="terminal" data-panel="volume-leaders" data-title="Volume Leaders" data-tone="bull" data-kind="toplist"></div>
       </aside>
 
@@ -58,6 +81,122 @@
     </main>
   </div>
 
+  <!-- Floating help button → User Guide side panel -->
+  <button type="button" class="faq-button" data-guide-open aria-haspopup="dialog" aria-controls="user-guide" aria-label="Open the User Guide" title="User Guide">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.3a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.6"/><path d="M12 17h.01"/></svg>
+  </button>
+
+  <dialog class="guide-panel" id="user-guide" aria-labelledby="user-guide-title">
+    <header class="guide-head">
+      <h2 class="guide-title" id="user-guide-title">User Guide</h2>
+      <button type="button" class="icon-btn" data-guide-close aria-label="Close the User Guide" title="Close">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </header>
+
+    <div class="guide-search">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>
+      <input type="search" data-guide-search placeholder="Search the guide" aria-label="Search the User Guide" autocomplete="off">
+    </div>
+
+    <div class="guide-body" data-guide-body>
+      <details class="guide-item" open>
+        <summary>Dashboard layout</summary>
+        <p>The dashboard has three areas:</p>
+        <ul>
+          <li><b>Toplists</b> (left): Gainers, Gainers Open and Volume Leaders.</li>
+          <li><b>Alerts</b> (top right): New HoD, Buying Pressure and Selling Pressure.</li>
+          <li><b>Bottom row</b>: Fast-Growing Momentum with its chart, a second chart, and Halts.</li>
+        </ul>
+        <p>The chip in the top bar shows the market session in New York time. Its dot pulses while a trading session is running.</p>
+      </details>
+
+      <details class="guide-item">
+        <summary>Market sessions</summary>
+        <ul>
+          <li><b>Pre-Market</b>: 4:00 – 9:30 ET</li>
+          <li><b>Market Open</b>: 9:30 – 16:00 ET</li>
+          <li><b>After Hours</b>: 16:00 – 20:00 ET</li>
+          <li><b>Closed</b>: outside those hours and on weekends</li>
+        </ul>
+      </details>
+
+      <details class="guide-item">
+        <summary>Toplists</summary>
+        <ul>
+          <li><b>Gainers</b>: biggest % change from the previous close.</li>
+          <li><b>Gainers Open</b>: biggest % change from today's open.</li>
+          <li><b>Volume Leaders</b>: highest volume traded today.</li>
+        </ul>
+        <p>Prices update live and flash green when they rise, red when they fall.</p>
+      </details>
+
+      <details class="guide-item">
+        <summary>Alert tables</summary>
+        <ul>
+          <li><b>New HoD</b>: a ticker just made a new high of the day.</li>
+          <li><b>Buying / Selling Pressure</b>: strong one-sided order flow.</li>
+          <li><b>Fast-Growing Momentum</b>: fast gains over 1, 5, 15 and 30 minutes.</li>
+        </ul>
+        <p>New alerts appear at the top. Turn on the speaker icon in a table's bar to hear a sound for each new alert.</p>
+      </details>
+
+      <details class="guide-item">
+        <summary>Halts</summary>
+        <p>Trading pauses (for example LULD halts). <b>Duration</b> counts the time since the halt and <b>Resume Est.</b> counts down to the expected reopening. A halt leaves the table once trading resumes.</p>
+      </details>
+
+      <details class="guide-item">
+        <summary>Columns</summary>
+        <dl>
+          <dt>Signal</dt><dd>Color bar showing the float size: low, mid or high (hover it to see the value).</dd>
+          <dt>%Chg Close / Chg Close</dt><dd>Change from the previous close, in % and in dollars.</dd>
+          <dt>%Chg Open / Chg Open</dt><dd>Change from today's open, in % and in dollars.</dd>
+          <dt>Float</dt><dd>Shares available for public trading.</dd>
+          <dt>RVol</dt><dd>Relative volume: today's volume against its usual level.</dd>
+          <dt>MCap</dt><dd>Market capitalization.</dd>
+          <dt>VWAP / VWAP D.</dt><dd>Volume-weighted average price and the distance of the price from it.</dd>
+          <dt>%Chg 1m / 5m / 15m / 30m</dt><dd>Price change over the last 1, 5, 15 and 30 minutes.</dd>
+          <dt>Vol. 1m</dt><dd>Volume traded in the last minute.</dd>
+          <dt>Hits</dt><dd>How many times the ticker has triggered this alert.</dd>
+          <dt>Bull/Sell Press</dt><dd>Share of buying (green) against selling (red) pressure.</dd>
+          <dt>Trend</dt><dd>Recent price path.</dd>
+        </dl>
+      </details>
+
+      <details class="guide-item">
+        <summary>Resizing panels</summary>
+        <ul>
+          <li>Drag the lines between panels to resize them.</li>
+          <li>With a line focused, use the arrow keys (hold Shift for bigger steps).</li>
+          <li>Double-click a line to restore the default size.</li>
+        </ul>
+        <p>Your layout is saved in this browser.</p>
+      </details>
+
+      <details class="guide-item">
+        <summary>Columns order</summary>
+        <p>Drag a column header to move it. The first columns (Signal, Time, Ticker) stay pinned while you scroll sideways. Each table remembers its own order.</p>
+      </details>
+
+      <details class="guide-item">
+        <summary>Fullscreen</summary>
+        <ul>
+          <li>The icon in a table's bar opens that table in fullscreen.</li>
+          <li>The icon in the top bar opens the whole dashboard in fullscreen.</li>
+          <li>Press Esc or the same icon to exit.</li>
+        </ul>
+      </details>
+
+      <details class="guide-item">
+        <summary>On your phone</summary>
+        <p>Panels are stacked and each table shows its rows as cards. When new alerts arrive while you are scrolled down, tap the “new” pill to jump back to the top.</p>
+      </details>
+
+      <p class="guide-empty" data-guide-empty hidden>No results. Try another word.</p>
+    </div>
+  </dialog>
+
   <!-- Shared panel markup; scanner.js fills in the title and labels.
        "{title}" in data-label becomes the panel's title. -->
   <template id="terminal-tpl">
@@ -70,6 +209,10 @@
         </button>
         <button type="button" class="icon-btn config-icon" data-label="Settings for {title}" title="Settings">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
+        </button>
+        <button type="button" class="icon-btn fullscreen-icon" data-fullscreen aria-pressed="false" data-label="Fullscreen: {title}" title="Fullscreen">
+          <svg class="icon-expand" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg>
+          <svg class="icon-collapse" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5"/></svg>
         </button>
         <button type="button" class="icon-btn detach-icon" data-label="Detach {title} into its own window" title="Detach">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6"/><path d="m20 4-8 8"/><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></svg>

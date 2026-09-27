@@ -138,6 +138,101 @@ button { cursor: pointer; }
 
 .app-nav { display: flex; align-items: center; gap: var(--space-4); padding-inline: var(--space-4); background: var(--surface); border-bottom: 1px solid var(--line); }
 .app-brand { font-family: var(--font-mono); font-size: var(--fs-sm); font-weight: 700; letter-spacing: 0.04em; color: var(--text); }
+.app-tools { --tone: var(--green); display: flex; align-items: center; gap: var(--space-2); padding-left: var(--space-3); border-left: 1px solid var(--line); }
+
+/* Market session · clock · dashboard state */
+.app-status { display: flex; align-items: center; gap: var(--space-3); min-width: 0; margin-left: auto; }
+.nav-chip {
+  --chip: var(--text-3);
+  display: inline-flex; align-items: center; gap: 6px; height: 24px; padding-inline: 8px;
+  border: 1px solid color-mix(in srgb, var(--chip) 30%, transparent); border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--chip) 10%, transparent); color: var(--chip);
+  font-family: var(--font-mono); font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; white-space: nowrap;
+}
+.status-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.market-session[data-session="pre"]     { --chip: var(--amber); }
+.market-session[data-session="regular"] { --chip: var(--green); }
+.market-session[data-session="after"]   { --chip: var(--violet); }
+/* Any trading session (pre, regular, after) is live: the dot pulses */
+.market-session:not([data-session="closed"]) .status-dot { animation: livePulse 2s ease-in-out infinite; }
+@keyframes livePulse { 50% { opacity: 0.3; } }
+.market-clock { font-family: var(--font-mono); font-size: var(--fs-sm); font-weight: 500; color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.market-clock small { font-size: 10px; color: var(--text-3); }
+
+.user-avatar { display: inline-grid; place-items: center; width: 28px; height: 28px; border: 1px solid var(--line-strong); border-radius: 50%; background: var(--surface-3); color: var(--text-2); }
+.user-avatar svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; }
+
+/* ---- Help: floating button + User Guide side panel ---- */
+/* Desktop: help lives in the nav; the floating button is mobile only. */
+.guide-icon svg { fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+.faq-button {
+  position: fixed; right: var(--space-4); bottom: var(--space-4); z-index: 90;
+  display: grid; place-items: center; width: 44px; height: 44px; padding: 0;
+  border: 1px solid var(--line-strong); border-radius: 50%;
+  background: var(--surface-2); color: var(--text-2);
+  box-shadow: 0 10px 28px -8px var(--shadow-color);
+  transition: color var(--t-fast), border-color var(--t-fast), background var(--t-fast);
+}
+.faq-button:hover { color: var(--green); border-color: var(--green-a32); background: var(--surface-3); }
+.faq-button:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.faq-button svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+
+.guide-panel {
+  --tone: var(--green);
+  position: fixed; inset: 0 0 0 auto; width: min(420px, 100%); max-width: 100%; height: 100%; max-height: 100%; margin: 0; padding: 0;
+  border: 0; border-left: 1px solid var(--line); background: var(--bg-elevated); color: var(--text);
+  box-shadow: var(--shadow-lg);
+}
+.guide-panel[open] { display: flex; flex-direction: column; animation: guideIn 220ms var(--ease); }
+.guide-panel::backdrop { background: var(--scrim); animation: fadeIn 220ms var(--ease); }
+@keyframes guideIn { from { transform: translateX(24px); opacity: 0; } }
+@keyframes fadeIn { from { opacity: 0; } }
+
+.guide-head { flex: none; display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4); border-bottom: 1px solid var(--line); }
+.guide-title { margin: 0; font-family: var(--font-mono); font-size: var(--fs-sm); font-weight: 700; letter-spacing: 0.04em; }
+
+.guide-search { flex: none; position: relative; margin: var(--space-3) var(--space-4); }
+.guide-search svg { position: absolute; left: 10px; top: 50%; width: 16px; height: 16px; transform: translateY(-50%); fill: none; stroke: var(--text-3); stroke-width: 1.75; stroke-linecap: round; pointer-events: none; }
+.guide-search input {
+  width: 100%; height: 36px; padding: 0 var(--space-3) 0 34px;
+  border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--text);
+  font-size: var(--fs-sm);
+}
+.guide-search input::placeholder { color: var(--text-3); }
+.guide-search input:focus-visible { outline: 2px solid var(--green); outline-offset: 1px; }
+
+.guide-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 var(--space-4) var(--space-5); font-size: var(--fs-sm); line-height: 1.55; color: var(--text-2); }
+.guide-item { border-bottom: 1px solid var(--line); }
+.guide-item summary {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
+  padding: var(--space-3) 0; cursor: pointer; list-style: none; color: var(--text); font-weight: 700;
+}
+.guide-item summary::-webkit-details-marker { display: none; }
+.guide-item summary::after { content: "+"; flex: none; font-family: var(--font-mono); color: var(--text-3); }
+.guide-item[open] summary::after { content: "−"; }
+.guide-item summary:hover { color: var(--green); }
+.guide-item summary:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; border-radius: 4px; }
+.guide-item > :not(summary) { margin: 0 0 var(--space-3); }
+.guide-item ul { padding-left: 1.1rem; }
+.guide-item li + li { margin-top: 4px; }
+.guide-item b, .guide-item dt { color: var(--text); font-weight: 700; }
+.guide-item dt { margin-top: var(--space-2); }
+.guide-item dd { margin: 2px 0 0; }
+.guide-empty { margin: var(--space-5) 0 0; text-align: center; color: var(--text-3); }
+
+@media (max-width: 720px) {
+  .faq-button { right: var(--space-3); bottom: var(--space-3); }
+  .guide-panel { width: 100%; border-left: 0; }
+  .app-tools .guide-icon { display: none; }
+}
+@media (min-width: 721px) {
+  .faq-button { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .market-session .status-dot { animation: none; }
+  .guide-panel[open], .guide-panel::backdrop { animation: none; }
+}
 
 /* Vertical container | rectangular container. --side-w is set by the
    splitter; min/max keep both sides usable at any window size (the same
@@ -148,7 +243,10 @@ button { cursor: pointer; }
   grid-template-columns: clamp(220px, var(--side-w), calc(100% - var(--gap) - 500px)) var(--gap) minmax(0, 1fr);
   padding: var(--gap); min-height: 0;
 }
-.side-pane { display: grid; grid-template-rows: repeat(3, minmax(0, 1fr)); gap: var(--gap); min-width: 0; min-height: 0; }
+/* Toplists share the height by --grow, like the panes of a row */
+.side-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.side-pane > :not(.splitter) { flex: var(--grow, 1) 1 0px; }
+.side-pane > .splitter { flex: none; height: var(--gap); }
 
 /* Rectangular container: top row / splitter / bottom row. --top-ratio is the
    top row's share of the height (MIN_ROW in scanner.js = 140px). */
@@ -217,6 +315,13 @@ button { cursor: pointer; }
 .terminal[data-tone="halt"] { --tone: var(--amber); }
 .terminal[data-kind="toplist"] { --tone: var(--cyan); }
 
+/* Fullscreen panel (Fullscreen API), or maximized over the page where the
+   API is unavailable */
+.terminal.is-full { border: 0; border-radius: 0; }
+.terminal:fullscreen { width: 100%; height: 100%; }
+.terminal.is-maximized { position: fixed; inset: 0; z-index: 100; }
+.has-maximized, .has-maximized body { overflow: hidden; }
+
 .terminal-bar { flex: none; display: flex; align-items: center; gap: var(--space-3); min-width: 0; padding: 4px 6px 4px var(--space-3); background: var(--surface); border-bottom: 1px solid var(--line); }
 .terminal-title { display: inline-flex; align-items: center; gap: var(--space-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 700; color: var(--text); font-family: var(--font-mono); }
 .terminal-title::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 2px; background: var(--tone); box-shadow: 0 0 10px color-mix(in srgb, var(--tone) 60%, transparent); }
@@ -225,9 +330,13 @@ button { cursor: pointer; }
 
 .terminal-tools { flex: none; display: flex; align-items: center; gap: 2px; margin-left: auto; }
 .icon-btn { display: inline-grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); transition: color var(--t-fast), background var(--t-fast), border-color var(--t-fast); }
+.icon-btn[hidden] { display: none; }
 .icon-btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
 .icon-btn:hover { color: var(--text); background: var(--white-a04); border-color: var(--line); }
 .icon-btn:focus-visible { outline: 2px solid var(--tone); outline-offset: 1px; }
+.fullscreen-icon .icon-collapse,
+.fullscreen-icon[aria-pressed="true"] .icon-expand { display: none; }
+.fullscreen-icon[aria-pressed="true"] .icon-collapse { display: block; }
 .sound-icon .icon-on { display: none; }
 .sound-icon[aria-pressed="true"] { color: var(--tone); background: color-mix(in srgb, var(--tone) 10%, transparent); }
 .sound-icon[aria-pressed="true"] .icon-on { display: block; }
@@ -368,8 +477,16 @@ tr.is-new td, .alert-card.is-new { animation: rowIn 1.6s var(--ease); }
 @media (max-width: 720px) {
   /* Panes stack in one scrolling column; nothing to resize */
   .app { display: block; height: auto; }
+  /* Nav: brand + tools on top, market status on its own line below */
+  .app-nav { flex-wrap: wrap; row-gap: var(--space-2); padding: var(--space-2) var(--space-3); }
+  .app-tools { margin-left: auto; }
+  .app-status { order: 1; flex: 1 0 100%; margin-left: 0; justify-content: space-between; }
   .workspace, .side-pane, .main-pane, .pane-row { display: flex; flex-direction: column; gap: var(--gap); }
-  .pane-row > :not(.splitter) { flex: none; }
+  .pane-row > :not(.splitter), .side-pane > :not(.splitter) { flex: none; }
+  /* Fullscreen panel: the cards fill the screen below the bar (and chart) */
+  .terminal.is-full { height: 100%; }
+  .terminal.is-full .card-view { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+  .terminal.is-full .card-list { flex: 1 1 auto; min-height: 0; max-height: none; }
   .splitter { display: none; }
   .chart-slot, .terminal > .chart-slot { flex: none; height: 220px; }
 
@@ -380,7 +497,7 @@ tr.is-new td, .alert-card.is-new { animation: rowIn 1.6s var(--ease); }
   .terminal-title { font-size: var(--fs-base); }
   .icon-btn { width: 34px; height: 34px; }
   .icon-btn svg { width: 18px; height: 18px; }
-  .detach-icon { display: none; }
+  .detach-icon, .terminal .fullscreen-icon { display: none; }
 
   .card-view { display: block; position: relative; }
   .card-list {

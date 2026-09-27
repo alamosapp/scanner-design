@@ -18,11 +18,13 @@
     chgDown: { min: -2, max: -25 },
     vol1m:   { min: 1,  max: 10000, log: true }, // spans 4 orders of magnitude
     hits:    { min: 1,  max: 150 },
+    chgDayUp:   { min: 5,  max: 100 },  // vs. close / open: day moves run far bigger
+    chgDayDown: { min: -5, max: -50 },
   };
 
   // Heat hue per metric. %Chg follows the table's direction; volume and hits
   // are direction-neutral so they never read as bullish/bearish.
-  const HUES = { chgUp: "green", chgDown: "red", vol1m: "amber", hits: "violet" };
+  const HUES = { chgUp: "green", chgDown: "red", chgDayUp: "green", chgDayDown: "red", vol1m: "amber", hits: "violet" };
 
   // VWAP D.: >= +1% green, < -1% red, anything else amber.
   const VWAP_D = { up: 1, down: -1 };
@@ -132,6 +134,19 @@
     const timer = (kind) => r.haltAt
       ? `<span class="timer" data-timer="${kind}" data-since="${r.haltAt.getTime()}" data-until="${r.resumeAt.getTime()}"></span>`
       : "";
+    // Session moves: vs. yesterday's close and today's open. Their color
+    // follows the sign of the move, not the table.
+    const dayChg = (ref) => {
+      const pct = round(((r.price - ref) / ref) * 100, 1);
+      const scale = pct >= 0 ? "chgDayUp" : "chgDayDown";
+      return heat(fmtPct(pct, 1), intensity(pct, SCALES[scale]), HUES[scale]);
+    };
+    const dayAbs = (ref) => {
+      const diff = r.price - ref;
+      const shown = diff.toFixed(Math.abs(diff) >= 1 ? 2 : 4);
+      const n = Number(shown);
+      return `<span class="${n > 0 ? "up" : n < 0 ? "down" : ""}">${n > 0 ? "+" : ""}${shown}</span>`;
+    };
     const vwapD = round(((r.price - r.vwap) / r.vwap) * 100, 2);
     const tier = floatTier(r.float);
     const vol1m = round(r.vol1m, r.vol1m >= 100 ? 0 : 1);
@@ -144,6 +159,10 @@
       price: fmtPrice(r.price),
       chg1: chg(r.chg1),
       chg1Tag: chg(r.chg1, " / 1m"),
+      chgClose: dayChg(r.close),
+      chgCloseAbs: dayAbs(r.close),
+      chgOpen: dayChg(r.open),
+      chgOpenAbs: dayAbs(r.open),
       vol1m: heat(fmtMult(vol1m), intensity(vol1m, SCALES.vol1m), HUES.vol1m),
       rvol: fmtMult(r.rvol),
       hits: heat(String(r.hits), intensity(r.hits, SCALES.hits), HUES.hits),
@@ -173,7 +192,11 @@
     { key: "sym",      label: "Ticker",      w: 68, pinned: true, cls: "col-sym" },
     { key: "price",    label: "Price",       w: 80,  num: true },
     { key: "chg1",     label: "%Chg 1m",     w: 96,  num: true, title: "% change, last minute" },
-    { key: "vol1m",    label: "Vol 1m",      w: 100, num: true, title: "Volume spike vs. normal 1m volume" },
+    { key: "vol1m",    label: "Vol. 1m",     w: 100, num: true, title: "Volume spike vs. normal 1m volume" },
+    { key: "chgClose",    label: "%Chg Close", w: 108, num: true, title: "% change vs. previous close" },
+    { key: "chgCloseAbs", label: "Chg Close",  w: 96,  num: true, title: "Change vs. previous close" },
+    { key: "chgOpen",     label: "%Chg Open",  w: 104, num: true, title: "% change vs. today's open" },
+    { key: "chgOpenAbs",  label: "Chg Open",   w: 92,  num: true, title: "Change vs. today's open" },
     { key: "rvol",     label: "RVol",        w: 72,  num: true, title: "Relative volume" },
     { key: "hits",     label: "Hits",        w: 88,  num: true, title: "Alerts fired today" },
     { key: "vwapD",    label: "VWAP D.",     w: 92,  num: true, title: "Distance to VWAP" },
@@ -194,16 +217,20 @@
   // Toplists rank tickers rather than log alerts, so they pin no Time column.
   const TOPLIST_PINS = ["sig", "sym"];
 
-  // Default (movable) column order per table.
-  const ALERT_COLS = ["price", "chg1", "vol1m", "rvol", "hits", "vwapD", "vwap", "chg5", "chg15", "chg30", "volume", "float", "mcap", "press", "trend"];
-  const HALT_COLS = ["price", "duration", "resume", "vol1m", "rvol", "hits", "vwapD", "vwap", "volume", "float", "mcap", "press", "trend"];
-  const GAINER_COLS = ["price", "chg30", "chg15", "chg5", "volume", "rvol", "float", "mcap"];
-  const VOLUME_COLS = ["volume", "price", "chg30", "rvol", "vol1m", "float", "mcap"];
+  // Default (movable) column order per table. Every table starts with the
+  // same session block, then adds its own columns.
+  const BASE_COLS = ["price", "volume", "chgClose", "chgCloseAbs", "chgOpen", "chgOpenAbs", "float", "rvol", "mcap"];
+  const TOPLIST_COLS = [...BASE_COLS, "vwapD", "vwap", "press", "trend"];
+  const HALT_COLS = [...BASE_COLS, "duration", "resume", "press", "trend"];
+  const HOD_COLS = [...BASE_COLS, "chg1", "hits", "vol1m", "press", "trend"];
+  const PRESSURE_COLS = [...BASE_COLS, "chg1", "vol1m", "press", "trend"];
+  const MOMENTUM_COLS = [...BASE_COLS, "chg1", "vol1m", "chg5", "chg15", "chg30", "press", "trend"];
 
   const cellClass = (c) => [c.cls, c.num && "num", c.muted && "muted"].filter(Boolean).join(" ");
 
-  // Column order per table survives reloads (best effort — storage may be blocked).
-  const storeKey = (panel) => `scanner:columns:${panel}`;
+  // Column order per table survives reloads (best effort — storage may be
+  // blocked). v2: the column sets changed, so orders saved before are dropped.
+  const storeKey = (panel) => `scanner:columns:v2:${panel}`;
   const loadOrder = (panel, movable) => {
     try {
       const saved = JSON.parse(localStorage.getItem(storeKey(panel)) || "null");
@@ -290,15 +317,32 @@
   BULL.push(...backfill(BULL, ["AUXO", "PNTR", "GLYD", "FRST", "MOXY", "TRBO", "LUMA", "KINE", "SPRK", "VOLT", "NEXA", "CRUX"], false));
   BEAR.push(...backfill(BEAR, ["SLAB", "DUSK", "HALO", "WREN", "OPTX", "BRKN", "FADE", "NUMB", "ASHN", "TIDE"], true));
 
+  // Session reference prices: yesterday's close and today's open. One pair
+  // per ticker, so a symbol measures against the same levels in every table.
+  const SESSION = new Map();
+  const withSession = (r) => {
+    if (!SESSION.has(r.sym)) {
+      const rnd = seeded(`${r.sym}:session`);
+      const bear = r.dir === "down" || r.chg1 < 0;
+      const dayPct = bear ? -(4 + rnd() * 36) : 8 + rnd() ** 1.5 * 140;
+      const close = r.price / (1 + dayPct / 100);
+      const open = close + (r.price - close) * (0.2 + rnd() * 0.6); // gapped part of the move
+      SESSION.set(r.sym, { close, open });
+    }
+    return Object.assign(r, SESSION.get(r.sym));
+  };
+  BULL.forEach(withSession);
+  BEAR.forEach(withSession);
+
   // Placeholder seeds for the other alert tables, carved out of the same mock data.
   const BUYING = BULL.filter((r) => r.buy >= 55);
   const MOMENTUM = BULL.filter((r) => r.chg5 >= 5);
 
-  // Toplists: ranked snapshots (static for now).
-  const rankBy = (list, key) => [...list].sort((a, b) => b[key] - a[key]);
-  const GAINERS = rankBy(BULL, "chg30");
-  const GAINERS_OPEN = rankBy(BULL, "chg15");
-  const VOLUME_LEADERS = rankBy([...BULL, ...BEAR], "volume");
+  // Toplists: ranked snapshots (the ranking is static for now).
+  const rankBy = (list, score) => [...list].sort((a, b) => score(b) - score(a));
+  const GAINERS = rankBy(BULL, (r) => r.price / r.close);
+  const GAINERS_OPEN = rankBy(BULL, (r) => r.price / r.open);
+  const VOLUME_LEADERS = rankBy([...BULL, ...BEAR], (r) => r.volume);
 
   // Halts: `resumeAt` is the estimated resumption (LULD pauses last 5 minutes).
   const ago = (sec) => new Date(Date.now() - sec * 1000);
@@ -310,7 +354,7 @@
     { sym: "QBIT", dir: "up",   haltAt: ago(1510), resumeAt: soon(590), price: 0.8420, vol1m: 96.2, rvol: 11.3, hits: 29,  vwap: 0.7315, volume: 18.2e6,  float: 24.3e6,  mcap: 20.5e6,  buy: 58 },
     { sym: "SOLQ", dir: "down", haltAt: ago(42),   resumeAt: soon(258), price: 7.31,   vol1m: 512,  rvol: 16.2, hits: 66,  vwap: 8.95,   volume: 2.2e6,   float: 15.6e6,  mcap: 114.0e6, buy: 24 },
     { sym: "ZENT", dir: "up",   haltAt: ago(284),  resumeAt: soon(16),  price: 0.4630, vol1m: 44.7, rvol: 9.1,  hits: 41,  vwap: 0.4188, volume: 23.9e6,  float: 72.5e6,  mcap: 33.6e6,  buy: 61 },
-  ].map((h) => ({ ...h, time: h.haltAt })).sort((a, b) => b.time - a.time);
+  ].map((h) => withSession({ ...h, time: h.haltAt })).sort((a, b) => b.time - a.time);
 
   /* ---- Mock live feeds -------------------------------------------------- */
 
@@ -396,6 +440,31 @@
     });
     // Toplists are snapshots, not alerts: nothing to sound.
     if (kind === "toplist") root.querySelector("[data-sound]").remove();
+
+    /* Fullscreen: the panel takes the whole screen (Fullscreen API; Esc
+       leaves). Where the API is missing or refused — e.g. iPhone Safari —
+       the panel is maximized over the page instead. */
+    const fsBtn = root.querySelector("[data-fullscreen]");
+    const setFull = (on, fallback = false) => {
+      root.classList.toggle("is-full", on);
+      root.classList.toggle("is-maximized", on && fallback);
+      document.documentElement.classList.toggle("has-maximized", on && fallback);
+      fsBtn.setAttribute("aria-pressed", String(on));
+      fsBtn.title = on ? "Exit fullscreen" : "Fullscreen";
+      fsBtn.setAttribute("aria-label", `${on ? "Exit fullscreen" : "Fullscreen"}: ${title}`);
+    };
+    fsBtn.addEventListener("click", () => {
+      if (document.fullscreenElement === root) document.exitFullscreen();
+      else if (root.classList.contains("is-maximized")) setFull(false);
+      else if (root.requestFullscreen) root.requestFullscreen().catch(() => setFull(true, true));
+      else setFull(true, true);
+    });
+    document.addEventListener("fullscreenchange", () => {
+      if (!root.classList.contains("is-maximized")) setFull(document.fullscreenElement === root);
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && root.classList.contains("is-maximized")) setFull(false);
+    });
   };
 
   const mountTable = (root, seed, { cols, pins = PINNED, next, every = LIVE_INTERVAL, expires = false, quotes = false }) => {
@@ -619,8 +688,16 @@
         const after = fmtPrice(r.price);
         if (after === before) continue;
         const up = Number(after) > Number(before);
-        const cell = body.querySelector(`[data-sym="${r.sym}"]`)?.children[columns().indexOf("price")];
-        if (cell) { cell.textContent = after; flash(cell, up); }
+        // Refresh every cell that follows the price (%Chg Close, VWAP D., …)
+        const tr = body.querySelector(`[data-sym="${r.sym}"]`);
+        if (tr) {
+          const d = derive(r, tone);
+          columns().forEach((key, i) => {
+            const td = tr.children[i];
+            if (td.innerHTML !== d[key]) td.innerHTML = d[key];
+          });
+          flash(tr.children[columns().indexOf("price")], up);
+        }
         const cardPrice = cards.querySelector(`[data-sym="${r.sym}"] .card-price`);
         if (cardPrice) { cardPrice.textContent = after; flash(cardPrice, up); }
       }
@@ -816,8 +893,8 @@
   /* ---- Layout: resizable panes --------------------------------------------
      - The line between the toplists and the rest sets the toplists' width.
      - The line between the two alert rows sets how the height is shared.
-     - The lines between the panes of a row move width between the two
-       neighbours; the rest of the row stays put.
+     - The lines between the panes of a row (width) or between the toplists
+       (height) move space between the two neighbours; the rest stays put.
      Drag it, or focus it and use the arrow keys (Shift = bigger steps);
      double-click restores the default. The split survives reloads.
      Side/row limits are also enforced in CSS, so a smaller window never
@@ -827,11 +904,12 @@
   const LAYOUT_DEFAULT = {
     side: 360,
     top: 0.55,
-    // Each pane's share of its row's width (flex-grow)
-    cols: { top: [1, 1, 1], bottom: [1, 1.5, 1] },
+    // Each pane's share of its group's width / height (flex-grow)
+    cols: { top: [1, 1, 1], bottom: [1, 1.5, 1], side: [1, 1, 1] },
   };
   const MIN_SIDE = 220;  // toplists
   const MIN_COL = 160;   // each pane within a row
+  const MIN_CELL = 100;  // each toplist's height
   const MIN_MAIN = 3 * MIN_COL + 2 * 10;  // everything right of the toplists (3 panes + 2 gaps)
   const MIN_ROW = 140;   // each alert row
 
@@ -892,12 +970,15 @@
       },
     ];
 
-    // Panes within a row: splitter i sits between pane i and pane i + 1.
-    const colAppliers = [topRow, bottomRow].map((rowEl) => {
+    // Panes within a group — side by side in the alert rows (x), stacked in
+    // the toplists (y): splitter i sits between pane i and pane i + 1.
+    // resetAll: a double-click restores the whole group, not just the pair.
+    const groups = [[topRow, "x", MIN_COL], [bottomRow, "x", MIN_COL], [side, "y", MIN_CELL, true]];
+    const groupAppliers = groups.map(([rowEl, axis, min, resetAll = false]) => {
       const row = rowEl.dataset.row;
       const items = [...rowEl.children].filter((el) => !el.classList.contains("splitter"));
-      const handles = [...rowEl.querySelectorAll(':scope > [data-split="col"]')];
-      const width = (el) => el.getBoundingClientRect().width;
+      const handles = [...rowEl.querySelectorAll(":scope > .splitter")];
+      const width = (el) => el.getBoundingClientRect()[axis === "x" ? "width" : "height"];
 
       const apply = () => {
         const g = state.cols[row];
@@ -913,21 +994,26 @@
       handles.forEach((handle, i) => {
         const [a, b] = [items[i], items[i + 1]];
         panes.push({
-          handle, axis: "x",
+          handle, axis,
           size: () => width(a),
-          // Widths follow the grow factors, so keeping the pair's sum fixed
-          // leaves every other pane in the row exactly where it was.
+          // Sizes follow the grow factors, so keeping the pair's sum fixed
+          // leaves every other pane in the group exactly where it was.
           resize: (px) => {
             const total = width(a) + width(b);
             const g = state.cols[row];
             const pair = g[i] + g[i + 1];
-            g[i] = (pair * clamp(px, MIN_COL, total - MIN_COL)) / (total || 1);
+            g[i] = (pair * clamp(px, min, total - min)) / (total || 1);
             g[i + 1] = pair - g[i];
             apply();
           },
           reset: () => {
             const g = state.cols[row];
             const d = LAYOUT_DEFAULT.cols[row];
+            if (resetAll) {
+              g.splice(0, g.length, ...d);
+              apply();
+              return;
+            }
             const pair = g[i] + g[i + 1];
             g[i] = (pair * d[i]) / (d[i] + d[i + 1]);
             g[i + 1] = pair - g[i];
@@ -984,9 +1070,103 @@
       handle.addEventListener("dblclick", () => { reset(); save(); });
     });
 
-    colAppliers.forEach((apply) => apply());
+    groupAppliers.forEach((apply) => apply());
     applySide();
     applyRows();
+  };
+
+  /* Whole dashboard fullscreen (nav button). Only offered where the
+     Fullscreen API works; a panel can still go fullscreen on top of it,
+     and leaving that panel returns to the fullscreen dashboard. */
+  const mountAppFullscreen = () => {
+    const btn = document.querySelector("[data-app-fullscreen]");
+    const page = document.documentElement;
+    if (!btn || !document.fullscreenEnabled || !page.requestFullscreen) return;
+    btn.hidden = false;
+    btn.addEventListener("click", () => {
+      if (document.fullscreenElement) document.exitFullscreen();
+      else page.requestFullscreen().catch(() => {});
+    });
+    document.addEventListener("fullscreenchange", () => {
+      const on = document.fullscreenElement === page;
+      btn.setAttribute("aria-pressed", String(on));
+      btn.title = on ? "Exit fullscreen" : "Fullscreen dashboard";
+      btn.setAttribute("aria-label", on ? "Exit fullscreen" : "Fullscreen dashboard");
+    });
+  };
+
+  /* Nav status: US market session and clock in New York time (weekends are
+     closed; exchange holidays are not taken into account). The session chip
+     is the scanner's status: its dot pulses during any trading session. */
+  const SESSIONS = [
+    { id: "pre",     label: "Pre-Market",  from: 4 * 60,      to: 9 * 60 + 30 },
+    { id: "regular", label: "Market Open", from: 9 * 60 + 30, to: 16 * 60 },
+    { id: "after",   label: "After Hours", from: 16 * 60,     to: 20 * 60 },
+  ];
+  const nyTime = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York", weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+  });
+
+  const mountNavStatus = () => {
+    const session = document.querySelector(".market-session");
+    const sessionLabel = session.querySelector("[data-session-label]");
+    const clock = document.querySelector("[data-clock]");
+
+    const tick = () => {
+      const p = Object.fromEntries(nyTime.formatToParts(new Date()).map(({ type, value }) => [type, value]));
+      const mins = Number(p.hour) * 60 + Number(p.minute);
+      const weekend = p.weekday === "Sat" || p.weekday === "Sun";
+      const s = (!weekend && SESSIONS.find((x) => mins >= x.from && mins < x.to)) || { id: "closed", label: "Closed" };
+      if (session.dataset.session !== s.id) {
+        session.dataset.session = s.id;
+        sessionLabel.textContent = s.label;
+      }
+      clock.firstChild.textContent = `${p.hour}:${p.minute}:${p.second} `;
+    };
+    tick();
+    // Align to the start of each second so the clock never skips a digit.
+    setTimeout(() => { tick(); setInterval(tick, 1000); }, 1000 - (Date.now() % 1000));
+  };
+
+  /* User Guide: the floating help button opens a modal side panel (Esc, the
+     close button or a click outside closes it). The search box keeps only
+     the sections that mention every word typed, and opens them. */
+  const mountGuide = () => {
+    const openers = document.querySelectorAll("[data-guide-open]");
+    let openBtn = openers[0];
+    const panel = document.getElementById("user-guide");
+    const search = panel.querySelector("[data-guide-search]");
+    const empty = panel.querySelector("[data-guide-empty]");
+    const items = [...panel.querySelectorAll(".guide-item")];
+    const initiallyOpen = items.map((d) => d.open);
+    const norm = (s) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+    const texts = items.map((d) => norm(d.textContent));
+
+    openers.forEach((btn) => btn.addEventListener("click", () => {
+      openBtn = btn;
+      panel.showModal();
+      search.focus();
+    }));
+    panel.querySelector("[data-guide-close]").addEventListener("click", () => panel.close());
+    panel.addEventListener("click", (e) => {
+      if (e.target !== panel) return;
+      const r = panel.getBoundingClientRect();
+      const inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+      if (!inside) panel.close();
+    });
+    panel.addEventListener("close", () => openBtn.focus());
+
+    search.addEventListener("input", () => {
+      const words = norm(search.value).split(/\s+/).filter(Boolean);
+      let shown = 0;
+      items.forEach((d, i) => {
+        const match = words.every((w) => texts[i].includes(w));
+        d.hidden = !match;
+        d.open = words.length ? match : initiallyOpen[i];
+        shown += match;
+      });
+      empty.hidden = shown > 0;
+    });
   };
 
   /* ---- Mount -------------------------------------------------------------- */
@@ -994,17 +1174,20 @@
   const panel = (id) => document.querySelector(`.terminal[data-panel="${id}"]`);
   document.querySelectorAll(".terminal[data-panel]").forEach(buildPanel);
   mountLayout();
+  mountAppFullscreen();
+  mountNavStatus();
+  mountGuide();
 
   // Vertical container: toplists
-  mountTable(panel("gainers"), GAINERS, { cols: GAINER_COLS, pins: TOPLIST_PINS, quotes: true });
-  mountTable(panel("gainers-open"), GAINERS_OPEN, { cols: GAINER_COLS, pins: TOPLIST_PINS, quotes: true });
-  mountTable(panel("volume-leaders"), VOLUME_LEADERS, { cols: VOLUME_COLS, pins: TOPLIST_PINS, quotes: true });
+  mountTable(panel("gainers"), GAINERS, { cols: TOPLIST_COLS, pins: TOPLIST_PINS, quotes: true });
+  mountTable(panel("gainers-open"), GAINERS_OPEN, { cols: TOPLIST_COLS, pins: TOPLIST_PINS, quotes: true });
+  mountTable(panel("volume-leaders"), VOLUME_LEADERS, { cols: TOPLIST_COLS, pins: TOPLIST_PINS, quotes: true });
   // Top row: alerts
-  mountTable(panel("new-hod"), BULL, { cols: ALERT_COLS, next: nextAlert(BULL) });
-  mountTable(panel("buying"), BUYING, { cols: ALERT_COLS, next: nextAlert(BUYING) });
-  mountTable(panel("selling"), BEAR, { cols: ALERT_COLS, next: nextAlert(BEAR) });
+  mountTable(panel("new-hod"), BULL, { cols: HOD_COLS, next: nextAlert(BULL) });
+  mountTable(panel("buying"), BUYING, { cols: PRESSURE_COLS, next: nextAlert(BUYING) });
+  mountTable(panel("selling"), BEAR, { cols: PRESSURE_COLS, next: nextAlert(BEAR) });
   // Bottom row: momentum + halts
-  mountTable(panel("momentum"), MOMENTUM, { cols: ALERT_COLS, next: nextAlert(MOMENTUM) });
+  mountTable(panel("momentum"), MOMENTUM, { cols: MOMENTUM_COLS, next: nextAlert(MOMENTUM) });
   mountTable(panel("halts"), HALTS, { cols: HALT_COLS, next: nextHalt, every: 18000, expires: true });
 
   setInterval(() => {
