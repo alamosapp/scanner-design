@@ -119,12 +119,75 @@ button { cursor: pointer; }
 
 
 /* ==========================================================================
-   Scanner tables
+   App layout
+   nav bar
+   ┌───────────┬┬──────────────────────────────────────────┐
+   │ toplists  ││ top row: 3 alert tables                  │
+   │ (side)    │├──────────────────────────────────────────┤  ← row splitter
+   │           ││ bottom row: chart/momentum · chart · halts│
+   └───────────┴┴──────────────────────────────────────────┘
+                ↑ column splitter
    ========================================================================== */
 
-.section--scanner { padding-block: var(--space-6); }
-.container--wide { max-width: 1680px; }
-.terminal + .terminal { margin-top: var(--space-5); }
+.app {
+  --nav-h: 48px;
+  --gap: 10px;                 /* space between panes; splitters fill it */
+  display: grid; grid-template-rows: var(--nav-h) minmax(0, 1fr);
+  height: 100vh; height: 100dvh;
+}
+
+.app-nav { display: flex; align-items: center; gap: var(--space-4); padding-inline: var(--space-4); background: var(--surface); border-bottom: 1px solid var(--line); }
+.app-brand { font-family: var(--font-mono); font-size: var(--fs-sm); font-weight: 700; letter-spacing: 0.04em; color: var(--text); }
+
+/* Vertical container | rectangular container. --side-w is set by the
+   splitter; min/max keep both sides usable at any window size (the same
+   limits as MIN_SIDE / MIN_MAIN in scanner.js). */
+.workspace {
+  --side-w: 360px;
+  display: grid;
+  grid-template-columns: clamp(220px, var(--side-w), calc(100% - var(--gap) - 480px)) var(--gap) minmax(0, 1fr);
+  padding: var(--gap); min-height: 0;
+}
+.side-pane { display: grid; grid-template-rows: repeat(3, minmax(0, 1fr)); gap: var(--gap); min-width: 0; min-height: 0; }
+
+/* Rectangular container: top row / splitter / bottom row. --top-ratio is the
+   top row's share of the height (MIN_ROW in scanner.js = 140px). */
+.main-pane {
+  --top-ratio: 0.55;
+  display: grid;
+  grid-template-rows: clamp(140px, calc((100% - var(--gap)) * var(--top-ratio)), calc(100% - var(--gap) - 140px)) var(--gap) minmax(0, 1fr);
+  min-width: 0; min-height: 0;
+}
+.pane-row { display: grid; gap: var(--gap); min-width: 0; min-height: 0; }
+.pane-row--top { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.pane-row--bottom { grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr) minmax(0, 1fr); }
+/* First bottom cell: chart above, momentum table below */
+.pane-stack { display: grid; grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); gap: var(--gap); min-width: 0; min-height: 0; }
+
+/* Chart placeholder */
+.chart-slot { display: grid; place-items: center; min-width: 0; min-height: 0; border: 1px dashed var(--line-strong); border-radius: var(--radius); background: var(--bg-elevated); color: var(--text-3); font-family: var(--font-mono); font-size: var(--fs-xs); letter-spacing: 0.08em; text-transform: uppercase; }
+
+/* ---- Splitters: the gap between panes is the drag handle ---- */
+
+.splitter { position: relative; touch-action: none; outline: none; }
+.splitter--col { cursor: col-resize; }
+.splitter--row { cursor: row-resize; }
+/* Thin divider line, brightens on hover / drag / keyboard focus */
+.splitter::before { content: ""; position: absolute; border-radius: var(--radius-pill); background: transparent; transition: background var(--t-fast), box-shadow var(--t-fast); }
+.splitter--col::before { top: 0; bottom: 0; left: 50%; width: 2px; transform: translateX(-50%); }
+.splitter--row::before { left: 0; right: 0; top: 50%; height: 2px; transform: translateY(-50%); }
+.splitter:hover::before { background: var(--line-strong); }
+.splitter.is-active::before,
+.splitter:focus-visible::before { background: var(--green); box-shadow: 0 0 10px var(--green-a32); }
+
+/* While dragging: keep the resize cursor everywhere and stop text selection */
+[data-resizing] * { user-select: none; }
+[data-resizing="x"] * { cursor: col-resize !important; }
+[data-resizing="y"] * { cursor: row-resize !important; }
+
+/* ==========================================================================
+   Scanner tables
+   ========================================================================== */
 
 .sr-only {
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
@@ -136,28 +199,30 @@ button { cursor: pointer; }
   --tone: var(--green);
   --row-bg: var(--bg-elevated);
   --row-hover: color-mix(in srgb, var(--white) 4%, var(--bg-elevated));
-  --table-h: 440px;            /* visible height before the table scrolls */
   --sig-low: var(--cyan);      /* low float: most explosive */
   --sig-mid: var(--violet);
   --sig-high: var(--text-3);   /* high float: heavy, slower mover */
   --press-buy: color-mix(in srgb, var(--green) 50%, var(--surface-3));
   --press-sell: color-mix(in srgb, var(--red) 50%, var(--surface-3));
 
-  border-radius: var(--radius-lg); overflow: hidden; background: var(--bg-elevated);
-  border: 1px solid var(--line-strong); box-shadow: var(--shadow-lg), 0 0 120px -40px var(--green-a16);
+  /* Fills its grid cell: bar on top, table takes the rest */
+  display: flex; flex-direction: column; min-width: 0; min-height: 0;
+  border-radius: var(--radius); overflow: hidden; background: var(--bg-elevated);
+  border: 1px solid var(--line-strong);
 }
-.terminal[data-tone="bear"] { --tone: var(--red); box-shadow: var(--shadow-lg), 0 0 120px -40px var(--red-a16); }
-.terminal[data-tone="halt"] { --tone: var(--amber); box-shadow: var(--shadow-lg), 0 0 120px -40px var(--amber-a16); }
+.terminal[data-tone="bear"] { --tone: var(--red); }
+.terminal[data-tone="halt"] { --tone: var(--amber); }
+.terminal[data-kind="toplist"] { --tone: var(--cyan); }
 
-.terminal-bar { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-2) var(--space-3) var(--space-2) var(--space-4); background: var(--surface); border-bottom: 1px solid var(--line); }
-.terminal-title { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--fs-md); font-weight: 700; color: var(--text); font-family: var(--font-mono); }
-.terminal-title::before { content: ""; width: 8px; height: 8px; border-radius: 2px; background: var(--tone); box-shadow: 0 0 10px color-mix(in srgb, var(--tone) 60%, transparent); }
+.terminal-bar { flex: none; display: flex; align-items: center; gap: var(--space-3); min-width: 0; padding: 4px 6px 4px var(--space-3); background: var(--surface); border-bottom: 1px solid var(--line); }
+.terminal-title { display: inline-flex; align-items: center; gap: var(--space-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 700; color: var(--text); font-family: var(--font-mono); }
+.terminal-title::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 2px; background: var(--tone); box-shadow: 0 0 10px color-mix(in srgb, var(--tone) 60%, transparent); }
 
 /* ---- Toolbar icons: sound · config · detach ---- */
 
-.terminal-tools { display: flex; align-items: center; gap: var(--space-1); margin-left: auto; }
-.icon-btn { display: inline-grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); transition: color var(--t-fast), background var(--t-fast), border-color var(--t-fast); }
-.icon-btn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+.terminal-tools { flex: none; display: flex; align-items: center; gap: 2px; margin-left: auto; }
+.icon-btn { display: inline-grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); transition: color var(--t-fast), background var(--t-fast), border-color var(--t-fast); }
+.icon-btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
 .icon-btn:hover { color: var(--text); background: var(--white-a04); border-color: var(--line); }
 .icon-btn:focus-visible { outline: 2px solid var(--tone); outline-offset: 1px; }
 .sound-icon .icon-on { display: none; }
@@ -167,7 +232,7 @@ button { cursor: pointer; }
 
 /* ---- Grid ---- */
 
-.table-wrap { max-height: var(--table-h); overflow: auto; overscroll-behavior: contain; position: relative; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+.table-wrap { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; position: relative; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
 .table-wrap:focus-visible { outline: 2px solid var(--tone); outline-offset: -2px; }
 .table-wrap::-webkit-scrollbar { width: 8px; height: 8px; }
 .table-wrap::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: var(--radius-pill); border: 2px solid var(--bg-elevated); }
@@ -180,7 +245,11 @@ button { cursor: pointer; }
    and the row lines would drift apart by a pixel while scrolling. */
 .scan-table { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: 13px; font-variant-numeric: tabular-nums; }
 .scan-table th, .scan-table td { box-sizing: border-box; white-space: nowrap; }
-.scan-table th { position: sticky; top: 0; z-index: 2; height: 35px; padding: 0 11px; line-height: 16px; text-align: left; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; color: var(--text-3); background: var(--bg); border-bottom: 1px solid var(--line); user-select: none; }
+/* The whole header sticks as one block, so every header cell shares a single
+   layer and moves in lockstep with the body when scrolling sideways. (Sticky
+   on each <th> gives every cell its own layer, and those drift apart.) */
+.scan-table thead { position: sticky; top: 0; z-index: 2; will-change: transform; }
+.scan-table th { height: 35px; padding: 0 11px; line-height: 16px; text-align: left; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; color: var(--text-3); background: var(--bg); border-bottom: 1px solid var(--line); user-select: none; }
 .scan-table th[title] { cursor: help; }
 .scan-table td { height: 41px; padding: 0 11px; line-height: 20px; vertical-align: middle; border-bottom: 1px solid var(--line); font-family: var(--font-mono); font-weight: 500; color: var(--text-2); background: var(--row-bg); transition: background var(--t-fast); }
 .scan-table tr:last-child td { border-bottom: 0; }
@@ -209,17 +278,15 @@ button { cursor: pointer; }
    column widths, set by scanner.js as --pin-time / --pin-sym. */
 .scan-table .col-sig,
 .scan-table .col-time,
-.scan-table .col-sym { position: sticky; z-index: 1; }
-.scan-table th.col-sig,
-.scan-table th.col-time,
-.scan-table th.col-sym { z-index: 3; }
+.scan-table .col-sym { position: sticky; z-index: 1; will-change: transform; }
 .scan-table .col-sig { left: 0; padding-inline: 0; }
 .scan-table .col-time { left: var(--pin-time); color: var(--text-3); }
 .scan-table .col-sym { left: var(--pin-sym); }
 /* Edge shadow once the table scrolls sideways; drawn by a pseudo-element so
-   it never covers the cell's own background or row line. */
-.scan-table .col-sym::after { content: ""; position: absolute; top: 0; bottom: -1px; right: -12px; width: 12px; pointer-events: none; opacity: 0; transition: opacity var(--t-fast); background: linear-gradient(to right, var(--shadow-color), transparent); border-left: 1px solid var(--line); }
-.table-wrap.is-scrolled .col-sym::after { opacity: 1; }
+   it never covers the cell's own background or row line. It only exists
+   while scrolled: fading it with opacity left stray pixels of the divider
+   behind in some rows once the table was back at the left edge. */
+.table-wrap.is-scrolled .col-sym::after { content: ""; position: absolute; top: 0; bottom: -1px; right: -12px; width: 12px; pointer-events: none; background: linear-gradient(to right, var(--shadow-color), transparent); border-left: 1px solid var(--line); }
 
 .sym { font-weight: 700; color: var(--text); letter-spacing: 0.02em; display: inline-flex; align-items: center; gap: var(--space-2); }
 
@@ -295,12 +362,20 @@ tr.is-new td, .alert-card.is-new { animation: rowIn 1.6s var(--ease); }
 .card-view { display: none; }
 
 @media (max-width: 720px) {
-  .section--scanner { padding-block: var(--space-4); }
+  /* Panes stack in one scrolling column; nothing to resize */
+  .app { display: block; height: auto; }
+  .workspace, .side-pane, .main-pane, .pane-row, .pane-stack { display: flex; flex-direction: column; gap: var(--gap); }
+  .splitter { display: none; }
+  .chart-slot { height: 220px; }
+
   .table-wrap { display: none; }
 
-  .terminal { --table-h: 72vh; border-radius: var(--radius); }
-  .terminal-bar { padding-left: var(--space-3); }
+  .terminal { --table-h: 60vh; }
+  .terminal-bar { padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3); }
   .terminal-title { font-size: var(--fs-base); }
+  .icon-btn { width: 34px; height: 34px; }
+  .icon-btn svg { width: 18px; height: 18px; }
+  .detach-icon { display: none; }
 
   .card-view { display: block; position: relative; }
   .card-list {

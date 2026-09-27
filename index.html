@@ -10,112 +10,84 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <main id="main">
-    <section class="section section--scanner" id="platform">
-      <div class="container container--wide">
+  <div class="app">
 
-        <!-- Buying alerts -->
-        <div class="terminal" role="region" aria-labelledby="buying-title" data-tone="bull">
-          <div class="terminal-bar">
-            <span class="terminal-title" id="buying-title">New HoD</span>
-            <div class="terminal-tools">
-              <button type="button" class="icon-btn sound-icon" data-sound aria-pressed="false" aria-label="Alert sound for New HoD" title="Alert sound">
-                <svg class="icon-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
-                <svg class="icon-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="m16 9 5 6"/><path d="m21 9-5 6"/></svg>
-              </button>
-              <button type="button" class="icon-btn config-icon" aria-label="Settings for New HoD" title="Settings">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
-              </button>
-              <button type="button" class="icon-btn detach-icon" aria-label="Detach New HoD into its own window" title="Detach">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6"/><path d="m20 4-8 8"/><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></svg>
-              </button>
-            </div>
-          </div>
+    <!-- Navigation bar (placeholder) -->
+    <nav class="app-nav" aria-label="Main navigation">
+      <span class="app-brand">Scanner</span>
+    </nav>
 
-          <div class="table-wrap" tabindex="0" aria-label="New HoD alerts">
-            <table class="scan-table">
-              <thead><tr></tr></thead>
-              <tbody></tbody>
-            </table>
-          </div>
+    <main class="workspace" id="main">
 
-          <!-- Phones: the same alerts as cards -->
-          <div class="card-view">
-            <button type="button" class="new-pill" data-new-pill hidden>↑ <span data-new-count>0</span> new</button>
-            <div class="card-list" data-cards aria-label="New HoD alerts"></div>
-            <div class="card-rail" data-rail aria-hidden="true"><i></i></div>
-          </div>
-        </div>
+      <!-- Vertical container: toplists -->
+      <aside class="side-pane" aria-label="Toplists">
+        <div class="terminal" data-panel="gainers" data-title="Gainers" data-tone="bull" data-kind="toplist"></div>
+        <div class="terminal" data-panel="gainers-open" data-title="Gainers Open" data-tone="bull" data-kind="toplist"></div>
+        <div class="terminal" data-panel="volume-leaders" data-title="Volume Leaders" data-tone="bull" data-kind="toplist"></div>
+      </aside>
 
-        <!-- Selling alerts -->
-        <div class="terminal" role="region" aria-labelledby="selling-title" data-tone="bear">
-          <div class="terminal-bar">
-            <span class="terminal-title" id="selling-title">Selling Spikes</span>
-            <div class="terminal-tools">
-              <button type="button" class="icon-btn sound-icon" data-sound aria-pressed="false" aria-label="Alert sound for Selling Spikes" title="Alert sound">
-                <svg class="icon-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
-                <svg class="icon-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="m16 9 5 6"/><path d="m21 9-5 6"/></svg>
-              </button>
-              <button type="button" class="icon-btn config-icon" aria-label="Settings for Selling Spikes" title="Settings">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
-              </button>
-              <button type="button" class="icon-btn detach-icon" aria-label="Detach Selling Spikes into its own window" title="Detach">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6"/><path d="m20 4-8 8"/><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></svg>
-              </button>
-            </div>
-          </div>
+      <div class="splitter splitter--col" data-split="side" role="separator" aria-orientation="vertical" aria-label="Resize toplists" aria-valuemin="0" aria-valuemax="100" tabindex="0"></div>
 
-          <div class="table-wrap" tabindex="0" aria-label="Selling Spikes alerts">
-            <table class="scan-table">
-              <thead><tr></tr></thead>
-              <tbody></tbody>
-            </table>
-          </div>
+      <!-- Rectangular container -->
+      <div class="main-pane">
 
-          <!-- Phones: the same alerts as cards -->
-          <div class="card-view">
-            <button type="button" class="new-pill" data-new-pill hidden>↑ <span data-new-count>0</span> new</button>
-            <div class="card-list" data-cards aria-label="Selling Spikes alerts"></div>
-            <div class="card-rail" data-rail aria-hidden="true"><i></i></div>
-          </div>
-        </div>
+        <!-- Top: alert tables -->
+        <section class="pane-row pane-row--top" aria-label="Alerts">
+          <div class="terminal" data-panel="new-hod" data-title="New HoD" data-tone="bull"></div>
+          <div class="terminal" data-panel="buying" data-title="Buying Pressure" data-tone="bull"></div>
+          <div class="terminal" data-panel="selling" data-title="Selling Pressure" data-tone="bear"></div>
+        </section>
 
-        <!-- Trading halts -->
-        <div class="terminal" role="region" aria-labelledby="halts-title" data-tone="halt">
-          <div class="terminal-bar">
-            <span class="terminal-title" id="halts-title">Halts</span>
-            <div class="terminal-tools">
-              <button type="button" class="icon-btn sound-icon" data-sound aria-pressed="false" aria-label="Alert sound for Halts" title="Alert sound">
-                <svg class="icon-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
-                <svg class="icon-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="m16 9 5 6"/><path d="m21 9-5 6"/></svg>
-              </button>
-              <button type="button" class="icon-btn config-icon" aria-label="Settings for Halts" title="Settings">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
-              </button>
-              <button type="button" class="icon-btn detach-icon" aria-label="Detach Halts into its own window" title="Detach">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6"/><path d="m20 4-8 8"/><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></svg>
-              </button>
-            </div>
-          </div>
+        <div class="splitter splitter--row" data-split="rows" role="separator" aria-orientation="horizontal" aria-label="Resize alert rows" aria-valuemin="0" aria-valuemax="100" tabindex="0"></div>
 
-          <div class="table-wrap" tabindex="0" aria-label="Halts alerts">
-            <table class="scan-table">
-              <thead><tr></tr></thead>
-              <tbody></tbody>
-            </table>
+        <!-- Bottom: chart + momentum · chart · halts -->
+        <section class="pane-row pane-row--bottom" aria-label="Charts, momentum and halts">
+          <div class="pane-stack">
+            <div class="chart-slot" role="img" aria-label="Chart (coming soon)"><span>Chart</span></div>
+            <div class="terminal" data-panel="momentum" data-title="Fast-Growing Momentum" data-tone="bull"></div>
           </div>
-
-          <!-- Phones: the same alerts as cards -->
-          <div class="card-view">
-            <button type="button" class="new-pill" data-new-pill hidden>↑ <span data-new-count>0</span> new</button>
-            <div class="card-list" data-cards aria-label="Halts alerts"></div>
-            <div class="card-rail" data-rail aria-hidden="true"><i></i></div>
-          </div>
-        </div>
+          <div class="chart-slot" role="img" aria-label="Chart (coming soon)"><span>Chart</span></div>
+          <div class="terminal" data-panel="halts" data-title="Halts" data-tone="halt"></div>
+        </section>
 
       </div>
-    </section>
-  </main>
+    </main>
+  </div>
+
+  <!-- Shared panel markup; scanner.js fills in the title and labels.
+       "{title}" in data-label becomes the panel's title. -->
+  <template id="terminal-tpl">
+    <div class="terminal-bar">
+      <span class="terminal-title"></span>
+      <div class="terminal-tools">
+        <button type="button" class="icon-btn sound-icon" data-sound aria-pressed="false" data-label="Alert sound for {title}" title="Alert sound">
+          <svg class="icon-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+          <svg class="icon-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="m16 9 5 6"/><path d="m21 9-5 6"/></svg>
+        </button>
+        <button type="button" class="icon-btn config-icon" data-label="Settings for {title}" title="Settings">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
+        </button>
+        <button type="button" class="icon-btn detach-icon" data-label="Detach {title} into its own window" title="Detach">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6"/><path d="m20 4-8 8"/><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="table-wrap" tabindex="0" data-label="{title}">
+      <table class="scan-table">
+        <thead><tr></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <!-- Phones: the same rows as cards -->
+    <div class="card-view">
+      <button type="button" class="new-pill" data-new-pill hidden>↑ <span data-new-count>0</span> new</button>
+      <div class="card-list" data-cards data-label="{title}"></div>
+      <div class="card-rail" data-rail aria-hidden="true"><i></i></div>
+    </div>
+  </template>
+
   <script src="scanner.js"></script>
 </body>
 </html>

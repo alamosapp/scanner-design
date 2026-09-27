@@ -169,7 +169,7 @@
   const COLUMNS = [
     { key: "sig",      label: "Signal",      w: 24,  pinned: true, cls: "col-sig", title: "Float size", srOnly: true },
     { key: "time",     label: "Time",        w: 88,  pinned: true, cls: "col-time" },
-    { key: "sym",      label: "Ticker",      w: 84,  pinned: true, cls: "col-sym" },
+    { key: "sym",      label: "Ticker",      w: 68, pinned: true, cls: "col-sym" },
     { key: "price",    label: "Price",       w: 80,  num: true },
     { key: "chg1",     label: "%Chg 1m",     w: 96,  num: true, title: "% change, last minute" },
     { key: "vol1m",    label: "Vol 1m",      w: 100, num: true, title: "Volume spike vs. normal 1m volume" },
@@ -190,18 +190,22 @@
   ];
   const COL = Object.fromEntries(COLUMNS.map((c) => [c.key, c]));
   const PINNED = COLUMNS.filter((c) => c.pinned).map((c) => c.key);
+  // Toplists rank tickers rather than log alerts, so they pin no Time column.
+  const TOPLIST_PINS = ["sig", "sym"];
 
   // Default (movable) column order per table.
   const ALERT_COLS = ["price", "chg1", "vol1m", "rvol", "hits", "vwapD", "vwap", "chg5", "chg15", "chg30", "volume", "float", "mcap", "press", "trend"];
   const HALT_COLS = ["price", "duration", "resume", "vol1m", "rvol", "hits", "vwapD", "vwap", "volume", "float", "mcap", "press", "trend"];
+  const GAINER_COLS = ["price", "chg30", "chg15", "chg5", "volume", "rvol", "float", "mcap"];
+  const VOLUME_COLS = ["volume", "price", "chg30", "rvol", "vol1m", "float", "mcap"];
 
   const cellClass = (c) => [c.cls, c.num && "num", c.muted && "muted"].filter(Boolean).join(" ");
 
   // Column order per table survives reloads (best effort — storage may be blocked).
-  const storeKey = (tone) => `scanner:columns:${tone}`;
-  const loadOrder = (tone, movable) => {
+  const storeKey = (panel) => `scanner:columns:${panel}`;
+  const loadOrder = (panel, movable) => {
     try {
-      const saved = JSON.parse(localStorage.getItem(storeKey(tone)) || "null");
+      const saved = JSON.parse(localStorage.getItem(storeKey(panel)) || "null");
       if (Array.isArray(saved)) {
         const known = saved.filter((k) => movable.includes(k));
         return [...known, ...movable.filter((k) => !known.includes(k))];
@@ -209,8 +213,8 @@
     } catch { /* ignore */ }
     return [...movable];
   };
-  const saveOrder = (tone, order) => {
-    try { localStorage.setItem(storeKey(tone), JSON.stringify(order)); } catch { /* ignore */ }
+  const saveOrder = (panel, order) => {
+    try { localStorage.setItem(storeKey(panel), JSON.stringify(order)); } catch { /* ignore */ }
   };
 
   /* ---- Mobile card ------------------------------------------------------- */
@@ -284,6 +288,16 @@
 
   BULL.push(...backfill(BULL, ["AUXO", "PNTR", "GLYD", "FRST", "MOXY", "TRBO", "LUMA", "KINE", "SPRK", "VOLT", "NEXA", "CRUX"], false));
   BEAR.push(...backfill(BEAR, ["SLAB", "DUSK", "HALO", "WREN", "OPTX", "BRKN", "FADE", "NUMB", "ASHN", "TIDE"], true));
+
+  // Placeholder seeds for the other alert tables, carved out of the same mock data.
+  const BUYING = BULL.filter((r) => r.buy >= 55);
+  const MOMENTUM = BULL.filter((r) => r.chg5 >= 5);
+
+  // Toplists: ranked snapshots (static for now).
+  const rankBy = (list, key) => [...list].sort((a, b) => b[key] - a[key]);
+  const GAINERS = rankBy(BULL, "chg30");
+  const GAINERS_OPEN = rankBy(BULL, "chg15");
+  const VOLUME_LEADERS = rankBy([...BULL, ...BEAR], "volume");
 
   // Halts: `resumeAt` is the estimated resumption (LULD pauses last 5 minutes).
   const ago = (sec) => new Date(Date.now() - sec * 1000);
@@ -362,8 +376,27 @@
 
   /* ---- Table controller -------------------------------------------------- */
 
-  const mountTable = (root, seed, { cols, next, every = LIVE_INTERVAL, expires = false }) => {
+  // Fill an empty panel from the shared <template>.
+  const panelTpl = document.getElementById("terminal-tpl");
+  const buildPanel = (root) => {
+    const { panel, title, kind } = root.dataset;
+    root.append(panelTpl.content.cloneNode(true));
+    const titleEl = root.querySelector(".terminal-title");
+    titleEl.id = `${panel}-title`;
+    titleEl.textContent = title;
+    root.setAttribute("role", "region");
+    root.setAttribute("aria-labelledby", titleEl.id);
+    root.querySelectorAll("[data-label]").forEach((el) => {
+      el.setAttribute("aria-label", el.dataset.label.replace("{title}", title));
+      el.removeAttribute("data-label");
+    });
+    // Toplists are snapshots, not alerts: nothing to sound.
+    if (kind === "toplist") root.querySelector("[data-sound]").remove();
+  };
+
+  const mountTable = (root, seed, { cols, pins = PINNED, next, every = LIVE_INTERVAL, expires = false }) => {
     const tone = root.dataset.tone;
+    const panel = root.dataset.panel;
     const table = root.querySelector(".scan-table");
     const headRow = table.querySelector("thead tr");
     const body = table.querySelector("tbody");
@@ -371,16 +404,19 @@
     const cards = root.querySelector("[data-cards]");
     const soundBtn = root.querySelector("[data-sound]");
     const rows = seed.map((r) => ({ ...r }));
-    let order = loadOrder(tone, cols);
+    let order = loadOrder(panel, cols);
     let soundOn = false;
 
-    const columns = () => [...PINNED, ...order];
+    const columns = () => [...pins, ...order];
     const colgroup = table.insertBefore(document.createElement("colgroup"), table.firstChild);
     const FILL = '<td class="col-fill" aria-hidden="true"></td>';
 
-    // Pinned offsets are plain sums of whole-pixel widths: nothing to measure.
-    table.style.setProperty("--pin-time", `${COL.sig.w}px`);
-    table.style.setProperty("--pin-sym", `${COL.sig.w + COL.time.w}px`);
+    // Pinned offsets (--pin-time, --pin-sym) are plain sums of whole-pixel
+    // widths: nothing to measure.
+    pins.reduce((left, key) => {
+      table.style.setProperty(`--pin-${key}`, `${left}px`);
+      return left + COL[key].w;
+    }, 0);
 
     /* Header + rows */
 
@@ -448,7 +484,7 @@
       const i = next.indexOf(targetKey) + (after ? 1 : 0);
       next.splice(i, 0, key);
       order = next;
-      saveOrder(tone, order);
+      saveOrder(panel, order);
       renderAll();
     };
 
@@ -547,7 +583,7 @@
 
     /* Toolbar */
 
-    soundBtn.addEventListener("click", () => {
+    soundBtn?.addEventListener("click", () => {
       soundOn = !soundOn;
       soundBtn.setAttribute("aria-pressed", String(soundOn));
       soundBtn.title = soundOn ? "Mute alerts" : "Alert sound";
@@ -555,8 +591,10 @@
     });
 
     // Edge shadow on the pinned columns once the table scrolls sideways.
+    // With display scaling scrollLeft can rest a fraction of a pixel off 0 at
+    // the left edge; that still counts as "not scrolled".
     wrap.addEventListener("scroll", () => {
-      wrap.classList.toggle("is-scrolled", wrap.scrollLeft > 0);
+      wrap.classList.toggle("is-scrolled", wrap.scrollLeft >= 1);
     }, { passive: true });
 
     if (expires) {
@@ -568,9 +606,11 @@
   };
 
   /* ---- Mobile card feed --------------------------------------------------
-     - At the top and idle: new alerts slide in and push the rest down.
-     - Scrolled away (or mid-gesture): the view stays put and a "new" pill
-       counts what arrived above.
+     - Every new alert lands on top and pushes every earlier card down one
+       slot; a ticker that fires again gets a new card, its older ones stay.
+     - At the top: the push is animated.
+     - Scrolled away: the view stays put and a "new" pill counts what
+       arrived above.
      - A custom scrollbar rail, since iOS hides native ones. */
 
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -582,17 +622,12 @@
     const pillCount = view.querySelector("[data-new-count]");
     const rail = view.querySelector("[data-rail]");
     const thumb = rail.firstElementChild;
-    let touching = false;
-    let lastUserScroll = 0;
-    let selfScroll = false;
+    const slides = new WeakMap(); // card → its running slide/entry animation
     let unseen = 0;
 
     const atTop = () => list.scrollTop <= 2;
-    const userBusy = () => touching || Date.now() - lastUserScroll < 350;
     const scrollListTo = (top) => {
-      if (Math.round(top) === Math.round(list.scrollTop)) return;
-      selfScroll = true;
-      list.scrollTop = top;
+      if (Math.round(top) !== Math.round(list.scrollTop)) list.scrollTop = top;
     };
 
     const syncRail = () => {
@@ -612,14 +647,9 @@
     };
 
     list.addEventListener("scroll", () => {
-      if (selfScroll) selfScroll = false;
-      else lastUserScroll = Date.now();
       if (atTop()) setUnseen(0);
       syncRail();
     }, { passive: true });
-    list.addEventListener("touchstart", () => { touching = true; }, { passive: true });
-    list.addEventListener("touchend", () => { touching = false; lastUserScroll = Date.now(); }, { passive: true });
-    list.addEventListener("touchcancel", () => { touching = false; }, { passive: true });
 
     pill.addEventListener("click", () => list.scrollTo({ top: 0, behavior: reduceMotion.matches ? "auto" : "smooth" }));
 
@@ -633,7 +663,6 @@
       const move = (ev) => {
         const travel = box.height - thumb.offsetHeight;
         const pos = Math.min(travel, Math.max(0, ev.clientY - box.top - grab));
-        lastUserScroll = Date.now();
         list.scrollTop = (pos / (travel || 1)) * (list.scrollHeight - list.clientHeight);
       };
       const up = () => {
@@ -649,40 +678,46 @@
     });
 
     const insert = (card) => {
-      const old = list.querySelector(`[data-sym="${card.dataset.sym}"]`);
       const visible = list.offsetParent !== null;
-      const stayTop = visible && atTop() && !userBusy();
+      const top = visible && atTop();
 
-      // FLIP: remember where the visible cards were…
+      // FLIP: remember where the cards on screen are right now — measured
+      // with the transform of a slide still in flight, so alerts arriving in
+      // quick succession keep pushing smoothly instead of jumping.
       const first = new Map();
       let anchor = null;
       let anchorOffset = 0;
-      if (stayTop) {
-        const limit = list.clientHeight * 1.5;
-        for (const el of list.children) if (el.offsetTop < limit) first.set(el, el.offsetTop);
+      if (top) {
+        const limit = list.getBoundingClientRect().bottom + list.clientHeight / 2;
+        for (const el of list.children) {
+          const y = el.getBoundingClientRect().top;
+          if (y > limit) break;
+          first.set(el, y);
+        }
       } else if (visible) {
-        anchor = [...list.children].find((el) => el !== old && el.offsetTop + el.offsetHeight > list.scrollTop);
+        anchor = [...list.children].find((el) => el.offsetTop + el.offsetHeight > list.scrollTop);
         anchorOffset = anchor ? anchor.offsetTop - list.scrollTop : 0;
       }
 
-      old?.remove();
       list.prepend(card);
       while (list.children.length > MAX_ROWS) list.lastElementChild.remove();
 
-      if (stayTop) {
+      if (top) {
         scrollListTo(0);
-        // …then slide them from there to their new spot.
+        // …then slide every one of them down to its new spot.
         if (!reduceMotion.matches) {
-          first.forEach((top, el) => {
-            const dy = top - el.offsetTop;
-            if (dy && el.isConnected) {
-              el.animate([{ transform: `translateY(${dy}px)` }, { transform: "none" }], { duration: 420, easing: EASE });
+          first.forEach((y, el) => {
+            if (!el.isConnected) return;
+            slides.get(el)?.cancel();
+            const dy = y - el.getBoundingClientRect().top;
+            if (dy) {
+              slides.set(el, el.animate([{ transform: `translateY(${dy}px)` }, { transform: "none" }], { duration: 420, easing: EASE }));
             }
           });
-          card.animate(
+          slides.set(card, card.animate(
             [{ opacity: 0, transform: "translateY(-10px) scale(0.98)" }, { opacity: 1, transform: "none" }],
             { duration: 320, delay: 90, easing: EASE, fill: "backwards" },
-          );
+          ));
         }
       } else if (visible) {
         if (anchor?.isConnected) scrollListTo(anchor.offsetTop - anchorOffset);
@@ -743,10 +778,137 @@
     });
   }
 
-  const [bull, bear, halts] = document.querySelectorAll(".terminal[data-tone]");
-  mountTable(bull, BULL, { cols: ALERT_COLS, next: nextAlert(BULL) });
-  mountTable(bear, BEAR, { cols: ALERT_COLS, next: nextAlert(BEAR) });
-  mountTable(halts, HALTS, { cols: HALT_COLS, next: nextHalt, every: 18000, expires: true });
+  /* ---- Layout: resizable panes --------------------------------------------
+     - The line between the toplists and the rest sets the toplists' width.
+     - The line between the two alert rows sets how the height is shared.
+     Drag it, or focus it and use the arrow keys (Shift = bigger steps);
+     double-click restores the default. The split survives reloads.
+     The same limits are enforced in CSS, so a smaller window never
+     squeezes a pane below its minimum. */
+
+  const LAYOUT_KEY = "scanner:layout";
+  const LAYOUT_DEFAULT = { side: 360, top: 0.55 };
+  const MIN_SIDE = 220;  // toplists
+  const MIN_MAIN = 480;  // everything right of them
+  const MIN_ROW = 140;   // each alert row
+
+  const mountLayout = () => {
+    const workspace = document.querySelector(".workspace");
+    const side = workspace.querySelector(".side-pane");
+    const main = workspace.querySelector(".main-pane");
+    const [topRow, bottomRow] = main.querySelectorAll(".pane-row");
+    const colHandle = workspace.querySelector('[data-split="side"]');
+    const rowHandle = workspace.querySelector('[data-split="rows"]');
+    const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), Math.max(lo, hi));
+
+    const state = { ...LAYOUT_DEFAULT };
+    try { Object.assign(state, JSON.parse(localStorage.getItem(LAYOUT_KEY) || "{}")); } catch { /* ignore */ }
+    const save = () => {
+      try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(state)); } catch { /* ignore */ }
+    };
+
+    const applySide = () => {
+      workspace.style.setProperty("--side-w", `${Math.round(state.side)}px`);
+      const total = side.offsetWidth + main.offsetWidth;
+      colHandle.setAttribute("aria-valuenow", String(Math.round((side.offsetWidth / (total || 1)) * 100)));
+    };
+    const applyRows = () => {
+      main.style.setProperty("--top-ratio", state.top.toFixed(4));
+      rowHandle.setAttribute("aria-valuenow", String(Math.round(state.top * 100)));
+    };
+
+    // Each handle resizes one pane: size() reads it in px, resize(px) sets it.
+    const panes = {
+      side: {
+        handle: colHandle, axis: "x",
+        size: () => side.getBoundingClientRect().width,
+        resize: (px) => {
+          const max = side.getBoundingClientRect().width + main.getBoundingClientRect().width - MIN_MAIN;
+          state.side = clamp(px, MIN_SIDE, max);
+          applySide();
+        },
+        reset: () => { state.side = LAYOUT_DEFAULT.side; applySide(); },
+      },
+      rows: {
+        handle: rowHandle, axis: "y",
+        size: () => topRow.getBoundingClientRect().height,
+        resize: (px) => {
+          const avail = topRow.getBoundingClientRect().height + bottomRow.getBoundingClientRect().height;
+          state.top = clamp(px, MIN_ROW, avail - MIN_ROW) / (avail || 1);
+          applyRows();
+        },
+        reset: () => { state.top = LAYOUT_DEFAULT.top; applyRows(); },
+      },
+    };
+
+    Object.values(panes).forEach(({ handle, axis, size, resize, reset }) => {
+      const pos = (e) => (axis === "x" ? e.clientX : e.clientY);
+
+      handle.addEventListener("pointerdown", (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        handle.setPointerCapture(e.pointerId);
+        const start = pos(e);
+        const from = size();
+        let frame = 0;
+        let last = e;
+        handle.classList.add("is-active");
+        document.documentElement.dataset.resizing = axis;
+
+        // One resize per frame: every pane's tables relayout on each step.
+        const move = (ev) => {
+          last = ev;
+          frame ||= requestAnimationFrame(() => { frame = 0; resize(from + pos(last) - start); });
+        };
+        const up = () => {
+          cancelAnimationFrame(frame);
+          resize(from + pos(last) - start);
+          handle.classList.remove("is-active");
+          delete document.documentElement.dataset.resizing;
+          handle.removeEventListener("pointermove", move);
+          handle.removeEventListener("pointerup", up);
+          handle.removeEventListener("pointercancel", up);
+          save();
+        };
+        handle.addEventListener("pointermove", move);
+        handle.addEventListener("pointerup", up);
+        handle.addEventListener("pointercancel", up);
+      });
+
+      handle.addEventListener("keydown", (e) => {
+        const step = e.shiftKey ? 64 : 16;
+        const keys = axis === "x" ? { ArrowLeft: -step, ArrowRight: step } : { ArrowUp: -step, ArrowDown: step };
+        if (!(e.key in keys)) return;
+        e.preventDefault();
+        resize(size() + keys[e.key]);
+        save();
+      });
+
+      handle.addEventListener("dblclick", () => { reset(); save(); });
+    });
+
+    applySide();
+    applyRows();
+  };
+
+  /* ---- Mount -------------------------------------------------------------- */
+
+  const panel = (id) => document.querySelector(`.terminal[data-panel="${id}"]`);
+  document.querySelectorAll(".terminal[data-panel]").forEach(buildPanel);
+  mountLayout();
+
+  // Vertical container: toplists
+  mountTable(panel("gainers"), GAINERS, { cols: GAINER_COLS, pins: TOPLIST_PINS });
+  mountTable(panel("gainers-open"), GAINERS_OPEN, { cols: GAINER_COLS, pins: TOPLIST_PINS });
+  mountTable(panel("volume-leaders"), VOLUME_LEADERS, { cols: VOLUME_COLS, pins: TOPLIST_PINS });
+  // Top row: alerts
+  mountTable(panel("new-hod"), BULL, { cols: ALERT_COLS, next: nextAlert(BULL) });
+  mountTable(panel("buying"), BUYING, { cols: ALERT_COLS, next: nextAlert(BUYING) });
+  mountTable(panel("selling"), BEAR, { cols: ALERT_COLS, next: nextAlert(BEAR) });
+  // Bottom row: momentum + halts
+  mountTable(panel("momentum"), MOMENTUM, { cols: ALERT_COLS, next: nextAlert(MOMENTUM) });
+  mountTable(panel("halts"), HALTS, { cols: HALT_COLS, next: nextHalt, every: 18000, expires: true });
+
   setInterval(() => {
     tickTimers();
     onTick.forEach((fn) => fn());
