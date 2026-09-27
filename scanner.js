@@ -56,6 +56,12 @@
   // 12.5x · 245x · 2,450x
   const fmtMult = (v) => (v >= 100 ? `${Math.round(v).toLocaleString("en-US")}x` : `${v.toFixed(1)}x`);
 
+  // Timers: 04:05 · 75:12
+  const fmtClock = (ms) => {
+    const sec = Math.max(0, Math.floor(ms / 1000));
+    return `${pad(Math.floor(sec / 60))}:${pad(sec % 60)}`;
+  };
+
   const round = (v, dp) => Math.round(v * 10 ** dp) / 10 ** dp;
   const fmtPct = (v, dp) => `${v > 0 ? "+" : ""}${v.toFixed(dp)}%`;
 
@@ -114,12 +120,17 @@
   /* ---- Cell contents (shared by table rows and mobile cards) ------------- */
 
   const derive = (r, tone) => {
-    const bear = tone === "bear";
+    const bear = tone === "bear" || r.dir === "down";
     const chgScale = bear ? "chgDown" : "chgUp";
-    const chg = (v) => {
+    const chg = (v, suffix = "") => {
+      if (v == null) return "";
       const shown = round(v, 1);
-      return heat(fmtPct(shown, 1), intensity(shown, SCALES[chgScale]), HUES[chgScale]);
+      return heat(fmtPct(shown, 1) + suffix, intensity(shown, SCALES[chgScale]), HUES[chgScale]);
     };
+    // Halt timers are filled in (and kept ticking) by tickTimers().
+    const timer = (kind) => r.haltAt
+      ? `<span class="timer" data-timer="${kind}" data-since="${r.haltAt.getTime()}" data-until="${r.resumeAt.getTime()}"></span>`
+      : "";
     const vwapD = round(((r.price - r.vwap) / r.vwap) * 100, 2);
     const tier = floatTier(r.float);
     const vol1m = round(r.vol1m, r.vol1m >= 100 ? 0 : 1);
@@ -131,6 +142,7 @@
       sym: `<span class="sym">${r.sym}</span>`,
       price: fmtPrice(r.price),
       chg1: chg(r.chg1),
+      chg1Tag: chg(r.chg1, " / 1m"),
       vol1m: heat(fmtMult(vol1m), intensity(vol1m, SCALES.vol1m), HUES.vol1m),
       rvol: fmtMult(r.rvol),
       hits: heat(String(r.hits), intensity(r.hits, SCALES.hits), HUES.hits),
@@ -139,6 +151,8 @@
       chg5: chg(r.chg5),
       chg15: chg(r.chg15),
       chg30: chg(r.chg30),
+      duration: timer("duration"),
+      resume: timer("resume"),
       volume: fmtAbbr(r.volume),
       float: fmtAbbr(r.float),
       mcap: fmtAbbr(r.mcap),
@@ -164,6 +178,8 @@
     { key: "chg5",   label: "%Chg 5m",  num: true },
     { key: "chg15",  label: "%Chg 15m", num: true },
     { key: "chg30",  label: "%Chg 30m", num: true },
+    { key: "duration", label: "Duration",    num: true, title: "Time halted" },
+    { key: "resume",   label: "Resume Est.", num: true, title: "Countdown to the estimated resumption" },
     { key: "volume", label: "Volume",   num: true, muted: true },
     { key: "float",  label: "Float",    num: true, muted: true },
     { key: "mcap",   label: "MCap",     num: true, muted: true },
@@ -172,21 +188,24 @@
   ];
   const COL = Object.fromEntries(COLUMNS.map((c) => [c.key, c]));
   const PINNED = COLUMNS.filter((c) => c.pinned).map((c) => c.key);
-  const MOVABLE = COLUMNS.filter((c) => !c.pinned).map((c) => c.key);
+
+  // Default (movable) column order per table.
+  const ALERT_COLS = ["price", "chg1", "vol1m", "rvol", "hits", "vwapD", "vwap", "chg5", "chg15", "chg30", "volume", "float", "mcap", "press", "trend"];
+  const HALT_COLS = ["price", "duration", "resume", "vol1m", "rvol", "hits", "vwapD", "vwap", "volume", "float", "mcap", "press", "trend"];
 
   const cellClass = (c) => [c.cls, c.num && "num", c.muted && "muted"].filter(Boolean).join(" ");
 
   // Column order per table survives reloads (best effort — storage may be blocked).
   const storeKey = (tone) => `scanner:columns:${tone}`;
-  const loadOrder = (tone) => {
+  const loadOrder = (tone, movable) => {
     try {
       const saved = JSON.parse(localStorage.getItem(storeKey(tone)) || "null");
       if (Array.isArray(saved)) {
-        const known = saved.filter((k) => MOVABLE.includes(k));
-        return [...known, ...MOVABLE.filter((k) => !known.includes(k))];
+        const known = saved.filter((k) => movable.includes(k));
+        return [...known, ...movable.filter((k) => !known.includes(k))];
       }
     } catch { /* ignore */ }
-    return [...MOVABLE];
+    return [...movable];
   };
   const saveOrder = (tone, order) => {
     try { localStorage.setItem(storeKey(tone), JSON.stringify(order)); } catch { /* ignore */ }
@@ -194,31 +213,16 @@
 
   /* ---- Mobile card ------------------------------------------------------- */
 
+  // Two lines: ticker · price · time / volume · RVol · 1m change (or halt timers).
   const renderCard = (d) => `
-    <header class="card-head">
-      ${d.sym}
-      <span class="float-chip" data-float="${d.tier}">${FLOAT_LABEL[d.tier].replace(" float", "")} float · ${d.float}</span>
+    <div class="card-line">
+      ${d.sym}<span class="card-price">${d.price}</span>
       <time class="card-time">${d.time}</time>
-    </header>
-    <div class="card-main">
-      <div class="card-price">
-        <span class="card-last">${d.price}</span>
-        <span class="card-vwap">VWAP ${d.vwap} ${d.vwapD}</span>
-      </div>
-      <div class="card-chg">${d.chg1}</div>
     </div>
-    <div class="tf-strip">
-      <div><span>5m</span>${d.chg5}</div>
-      <div><span>15m</span>${d.chg15}</div>
-      <div><span>30m</span>${d.chg30}</div>
-    </div>
-    <dl class="card-stats">
-      <div><dt>Vol 1m</dt><dd>${d.vol1m}</dd></div>
-      <div><dt>RVol</dt><dd>${d.rvol}</dd></div>
-      <div><dt>Hits</dt><dd>${d.hits}</dd></div>
-      <div><dt>MCap</dt><dd>${d.mcap}</dd></div>
-    </dl>
-    <footer class="card-foot">${d.press}<span class="card-volume">Vol ${d.volume}</span>${d.trend}</footer>`;
+    <div class="card-line card-meta">
+      <span>Vol <b>${d.volume}</b></span><span>RVol <b>${d.rvol}</b></span>
+      <span class="card-end">${d.duration ? `<span class="card-halt">${d.duration}<i>→</i>${d.resume}</span>` : d.chg1Tag}</span>
+    </div>`;
 
   /* ---- Mock data --------------------------------------------------------- */
 
@@ -279,6 +283,18 @@
   BULL.push(...backfill(BULL, ["AUXO", "PNTR", "GLYD", "FRST", "MOXY", "TRBO", "LUMA", "KINE", "SPRK", "VOLT", "NEXA", "CRUX"], false));
   BEAR.push(...backfill(BEAR, ["SLAB", "DUSK", "HALO", "WREN", "OPTX", "BRKN", "FADE", "NUMB", "ASHN", "TIDE"], true));
 
+  // Halts: `resumeAt` is the estimated resumption (LULD pauses last 5 minutes).
+  const ago = (sec) => new Date(Date.now() - sec * 1000);
+  const soon = (sec) => new Date(Date.now() + sec * 1000);
+  const HALTS = [
+    { sym: "NVLX", dir: "up",   haltAt: ago(212),  resumeAt: soon(88),  price: 5.12,   vol1m: 1880, rvol: 52.4, hits: 143, vwap: 4.21,   volume: 3.4e6,   float: 3.2e6,   mcap: 16.4e6,  buy: 81 },
+    { sym: "DRFT", dir: "down", haltAt: ago(265),  resumeAt: soon(35),  price: 1.64,   vol1m: 2210, rvol: 34.9, hits: 121, vwap: 2.19,   volume: 6.1e6,   float: 4.1e6,   mcap: 6.7e6,   buy: 16 },
+    { sym: "HLIO", dir: "up",   haltAt: ago(96),   resumeAt: soon(204), price: 2.78,   vol1m: 405,  rvol: 17.8, hits: 74,  vwap: 2.29,   volume: 5.3e6,   float: 6.7e6,   mcap: 18.6e6,  buy: 66 },
+    { sym: "QBIT", dir: "up",   haltAt: ago(1510), resumeAt: soon(590), price: 0.8420, vol1m: 96.2, rvol: 11.3, hits: 29,  vwap: 0.7315, volume: 18.2e6,  float: 24.3e6,  mcap: 20.5e6,  buy: 58 },
+    { sym: "SOLQ", dir: "down", haltAt: ago(42),   resumeAt: soon(258), price: 7.31,   vol1m: 512,  rvol: 16.2, hits: 66,  vwap: 8.95,   volume: 2.2e6,   float: 15.6e6,  mcap: 114.0e6, buy: 24 },
+    { sym: "ZENT", dir: "up",   haltAt: ago(560),  resumeAt: ago(260),  price: 0.4630, vol1m: 44.7, rvol: 9.1,  hits: 41,  vwap: 0.4188, volume: 23.9e6,  float: 72.5e6,  mcap: 33.6e6,  buy: 61 },
+  ].map((h) => ({ ...h, time: h.haltAt })).sort((a, b) => b.time - a.time);
+
   /* ---- Alert sound (Web Audio, starts only after the user turns it on) --- */
 
   let audio = null;
@@ -299,7 +315,7 @@
 
   const jitter = (v, pct) => v * (1 + (Math.random() - 0.5) * 2 * pct);
 
-  const mountTable = (root, seed) => {
+  const mountTable = (root, seed, { cols, live = true }) => {
     const tone = root.dataset.tone;
     const table = root.querySelector(".scan-table");
     const headRow = table.querySelector("thead tr");
@@ -308,7 +324,7 @@
     const cards = root.querySelector("[data-cards]");
     const soundBtn = root.querySelector("[data-sound]");
     const rows = seed.map((r) => ({ ...r }));
-    let order = loadOrder(tone);
+    let order = loadOrder(tone, cols);
     let soundOn = false;
 
     const columns = () => [...PINNED, ...order];
@@ -355,6 +371,7 @@
       body.replaceChildren(...derived.map(([d, sym]) => rowEl(d, sym)));
       cards.replaceChildren(...derived.map(([d, sym]) => cardEl(d, sym)));
       pin();
+      tickTimers();
     };
 
     // Left offsets for the pinned Time/Ticker columns, from real header widths.
@@ -459,6 +476,7 @@
         list.prepend(el);
         while (list.children.length > MAX_ROWS) list.lastElementChild.remove();
       }
+      tickTimers();
       if (soundOn) beep(tone);
     };
 
@@ -479,10 +497,34 @@
     renderAll();
     window.addEventListener("resize", pin);
     document.fonts?.ready.then(pin);
-    setInterval(pushAlert, LIVE_INTERVAL + Math.random() * 1500);
+    if (live) setInterval(pushAlert, LIVE_INTERVAL + Math.random() * 1500);
   };
 
-  const [bull, bear] = document.querySelectorAll(".terminal[data-tone]");
-  mountTable(bull, BULL);
-  mountTable(bear, BEAR);
+  /* ---- Halt timers --------------------------------------------------------
+     Duration counts up from the halt; Resume Est. counts down to resumption.
+     Once resumed, Duration freezes at the total halt time and the row dims. */
+
+  const DUE_SOON = 60 * 1000;
+
+  function tickTimers() {
+    const now = Date.now();
+    document.querySelectorAll("[data-timer]").forEach((el) => {
+      const since = Number(el.dataset.since);
+      const until = Number(el.dataset.until);
+      const left = until - now;
+      el.textContent = el.dataset.timer === "duration"
+        ? fmtClock(Math.min(now, until) - since)
+        : fmtClock(left);
+      if (el.dataset.timer === "resume") {
+        el.classList.toggle("is-soon", left > 0 && left <= DUE_SOON);
+        el.closest("tr, .alert-card")?.classList.toggle("is-resumed", left <= 0);
+      }
+    });
+  }
+
+  const [bull, bear, halts] = document.querySelectorAll(".terminal[data-tone]");
+  mountTable(bull, BULL, { cols: ALERT_COLS });
+  mountTable(bear, BEAR, { cols: ALERT_COLS });
+  mountTable(halts, HALTS, { cols: HALT_COLS, live: false });
+  setInterval(tickTimers, 1000);
 })();
