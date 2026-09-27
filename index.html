@@ -1,8 +1,9 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Scanner</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@500;700&amp;display=swap" rel="stylesheet">
@@ -10,80 +11,111 @@
 </head>
 <body>
   <main id="main">
-    <section class="section" id="platform">
-      <div class="container">
-        <div class="terminal" role="region" aria-label="Interactive scanner preview">
+    <section class="section section--scanner" id="platform">
+      <div class="container container--wide">
+
+        <!-- Buying alerts -->
+        <div class="terminal" role="region" aria-labelledby="buying-title" data-tone="bull">
           <div class="terminal-bar">
-            <span class="terminal-title">New HoD</span>
+            <span class="terminal-title" id="buying-title">New HoD</span>
+            <div class="terminal-tools">
+              <button type="button" class="icon-btn sound-icon" data-sound aria-pressed="false" aria-label="Alert sound for New HoD" title="Alert sound">
+                <svg class="icon-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+                <svg class="icon-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="m16 9 5 6"/><path d="m21 9-5 6"/></svg>
+              </button>
+              <button type="button" class="icon-btn config-icon" aria-label="Settings for New HoD" title="Settings">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
+              </button>
+              <button type="button" class="icon-btn detach-icon" aria-label="Detach New HoD into its own window" title="Detach">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6"/><path d="m20 4-8 8"/><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></svg>
+              </button>
+            </div>
           </div>
 
-          <div class="table-wrap">
+          <div class="table-wrap" tabindex="0" aria-label="New HoD alerts">
             <table class="scan-table">
-              <thead>
-                <tr>
-                  <th scope="col">Ticker</th>
-                  <th scope="col" class="num">Price</th>
-                  <th scope="col" class="num">%Chg 1m</th>
-                  <th scope="col" class="num hide-sm">Volume</th>
-                  <th scope="col">Bull/Sell Press</th>
-                  <th scope="col" class="hide-sm">Trend</th>
-
-                </tr>
-              </thead>
-              <tbody id="scanBody"><tr data-i="0">
-        <td><span class="sym">NVLX</span></td>
-        <td class="num" data-cell="price">$4.64</td>
-        <td class="num up" data-cell="chg">+33.3%</td>
-        <td class="num hide-sm" data-cell="vol">3.0M</td>
-        <td data-cell="pressure"><div class="pressure" title="Buying vs selling pressure"><i class="buy" style="width:84.16170119260686%"></i><i class="sell" style="width:15.838298807393144%"></i></div></td>
-        <td class="hide-sm up" data-cell="spark"><svg class="spark" viewBox="0 0 88 28" aria-hidden="true"><polyline points="0.0,24.6 5.9,25.0 11.7,22.9 17.6,20.6 23.5,19.7 29.3,18.8 35.2,19.1 41.1,16.0 46.9,14.3 52.8,12.5 58.7,10.7 64.5,8.1 70.4,5.1 76.3,5.0 82.1,5.0 88.0,3.0"></polyline></svg></td>
-        
-      </tr><tr data-i="1">
-        <td><span class="sym">BRZN</span></td>
-        <td class="num flash-down" data-cell="price">$11.21</td>
-        <td class="num up" data-cell="chg">+29.4%</td>
-        <td class="num hide-sm" data-cell="vol">2.2M</td>
-        <td data-cell="pressure"><div class="pressure" title="Buying vs selling pressure"><i class="buy" style="width: 67.801%;"></i><i class="sell" style="width: 32.199%;"></i></div></td>
-        <td class="hide-sm up" data-cell="spark"><svg class="spark" viewBox="0 0 88 28" aria-hidden="true"><polyline points="0.0,24.1 5.9,25.0 11.7,21.1 17.6,20.9 23.5,21.3 29.3,18.8 35.2,15.0 41.1,13.9 46.9,15.3 52.8,12.1 58.7,10.0 64.5,10.3 70.4,6.7 76.3,4.9 82.1,3.0 88.0,5.8"></polyline></svg></td>
-        
-      </tr><tr data-i="2">
-        <td><span class="sym">HLIO</span></td>
-        <td class="num" data-cell="price">$2.43</td>
-        <td class="num up" data-cell="chg">+23.5%</td>
-        <td class="num hide-sm" data-cell="vol">4.8M</td>
-        <td data-cell="pressure"><div class="pressure" title="Buying vs selling pressure"><i class="buy" style="width:61.919349522585094%"></i><i class="sell" style="width:38.080650477414906%"></i></div></td>
-        <td class="hide-sm up" data-cell="spark"><svg class="spark" viewBox="0 0 88 28" aria-hidden="true"><polyline points="0.0,25.0 5.9,21.5 11.7,19.6 17.6,21.6 23.5,21.4 29.3,18.8 35.2,17.6 41.1,14.9 46.9,11.0 52.8,8.0 58.7,8.2 64.5,8.8 70.4,6.9 76.3,9.0 82.1,5.2 88.0,3.0"></polyline></svg></td>
-        
-      </tr><tr data-i="3">
-        <td><span class="sym">ZENT</span></td>
-        <td class="num flash-up" data-cell="price">$7.66</td>
-        <td class="num up" data-cell="chg">+10.9%</td>
-        <td class="num hide-sm" data-cell="vol">2.1M</td>
-        <td data-cell="pressure"><div class="pressure" title="Buying vs selling pressure"><i class="buy" style="width: 58.8515%;"></i><i class="sell" style="width: 41.1485%;"></i></div></td>
-        <td class="hide-sm up" data-cell="spark"><svg class="spark" viewBox="0 0 88 28" aria-hidden="true"><polyline points="0.0,25.0 5.9,21.5 11.7,14.6 17.6,18.5 23.5,11.7 29.3,9.3 35.2,7.7 41.1,9.2 46.9,6.9 52.8,4.9 58.7,3.0 64.5,8.5 70.4,10.3 76.3,5.8 82.1,9.4 88.0,5.8"></polyline></svg></td>
-        
-      </tr><tr data-i="4">
-        <td><span class="sym">ORBT</span></td>
-        <td class="num flash-up" data-cell="price">$3.09</td>
-        <td class="num up" data-cell="chg">+11.6%</td>
-        <td class="num hide-sm" data-cell="vol">1.7M</td>
-        <td data-cell="pressure"><div class="pressure" title="Buying vs selling pressure"><i class="buy" style="width: 51.5243%;"></i><i class="sell" style="width: 48.4757%;"></i></div></td>
-        <td class="hide-sm up" data-cell="spark"><svg class="spark" viewBox="0 0 88 28" aria-hidden="true"><polyline points="0.0,22.6 5.9,24.4 11.7,24.7 17.6,25.0 23.5,23.8 29.3,20.5 35.2,16.2 41.1,13.5 46.9,14.5 52.8,8.9 58.7,12.3 64.5,8.1 70.4,3.6 76.3,5.2 82.1,4.9 88.0,3.0"></polyline></svg></td>
-        
-      </tr><tr data-i="5">
-        <td><span class="sym">KRYP</span></td>
-        <td class="num" data-cell="price">$15.69</td>
-        <td class="num up" data-cell="chg">+8.4%</td>
-        <td class="num hide-sm" data-cell="vol">0.8M</td>
-        <td data-cell="pressure"><div class="pressure" title="Buying vs selling pressure"><i class="buy" style="width:39.73234180542067%"></i><i class="sell" style="width:60.26765819457933%"></i></div></td>
-        <td class="hide-sm up" data-cell="spark"><svg class="spark" viewBox="0 0 88 28" aria-hidden="true"><polyline points="0.0,25.0 5.9,18.7 11.7,18.1 17.6,18.6 23.5,16.7 29.3,16.4 35.2,10.8 41.1,11.1 46.9,11.4 52.8,14.2 58.7,15.6 64.5,10.0 70.4,7.3 76.3,7.9 82.1,3.0 88.0,3.4"></polyline></svg></td>
-        
-      </tr></tbody>
+              <thead><tr></tr></thead>
+              <tbody></tbody>
             </table>
           </div>
+
+          <!-- Phones: the same alerts as cards -->
+          <div class="card-view">
+            <button type="button" class="new-pill" data-new-pill hidden>↑ <span data-new-count>0</span> new</button>
+            <div class="card-list" data-cards aria-label="New HoD alerts"></div>
+            <div class="card-rail" data-rail aria-hidden="true"><i></i></div>
+          </div>
         </div>
+
+        <!-- Selling alerts -->
+        <div class="terminal" role="region" aria-labelledby="selling-title" data-tone="bear">
+          <div class="terminal-bar">
+            <span class="terminal-title" id="selling-title">Selling Spikes</span>
+            <div class="terminal-tools">
+              <button type="button" class="icon-btn sound-icon" data-sound aria-pressed="false" aria-label="Alert sound for Selling Spikes" title="Alert sound">
+                <svg class="icon-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+                <svg class="icon-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="m16 9 5 6"/><path d="m21 9-5 6"/></svg>
+              </button>
+              <button type="button" class="icon-btn config-icon" aria-label="Settings for Selling Spikes" title="Settings">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
+              </button>
+              <button type="button" class="icon-btn detach-icon" aria-label="Detach Selling Spikes into its own window" title="Detach">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6"/><path d="m20 4-8 8"/><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="table-wrap" tabindex="0" aria-label="Selling Spikes alerts">
+            <table class="scan-table">
+              <thead><tr></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+
+          <!-- Phones: the same alerts as cards -->
+          <div class="card-view">
+            <button type="button" class="new-pill" data-new-pill hidden>↑ <span data-new-count>0</span> new</button>
+            <div class="card-list" data-cards aria-label="Selling Spikes alerts"></div>
+            <div class="card-rail" data-rail aria-hidden="true"><i></i></div>
+          </div>
+        </div>
+
+        <!-- Trading halts -->
+        <div class="terminal" role="region" aria-labelledby="halts-title" data-tone="halt">
+          <div class="terminal-bar">
+            <span class="terminal-title" id="halts-title">Halts</span>
+            <div class="terminal-tools">
+              <button type="button" class="icon-btn sound-icon" data-sound aria-pressed="false" aria-label="Alert sound for Halts" title="Alert sound">
+                <svg class="icon-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+                <svg class="icon-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="m16 9 5 6"/><path d="m21 9-5 6"/></svg>
+              </button>
+              <button type="button" class="icon-btn config-icon" aria-label="Settings for Halts" title="Settings">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
+              </button>
+              <button type="button" class="icon-btn detach-icon" aria-label="Detach Halts into its own window" title="Detach">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6"/><path d="m20 4-8 8"/><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="table-wrap" tabindex="0" aria-label="Halts alerts">
+            <table class="scan-table">
+              <thead><tr></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+
+          <!-- Phones: the same alerts as cards -->
+          <div class="card-view">
+            <button type="button" class="new-pill" data-new-pill hidden>↑ <span data-new-count>0</span> new</button>
+            <div class="card-list" data-cards aria-label="Halts alerts"></div>
+            <div class="card-rail" data-rail aria-hidden="true"><i></i></div>
+          </div>
+        </div>
+
       </div>
     </section>
   </main>
+  <script src="scanner.js"></script>
 </body>
 </html>
