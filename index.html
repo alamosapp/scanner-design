@@ -18,88 +18,58 @@
         <div class="terminal" role="region" aria-labelledby="buying-title" data-tone="bull">
           <div class="terminal-bar">
             <span class="terminal-title" id="buying-title">New HoD</span>
-            <span class="terminal-count" data-count>0</span>
-            <ul class="float-legend" aria-label="Signal: float size">
-              <li><i class="sig-dot" data-float="low"></i>Low float</li>
-              <li><i class="sig-dot" data-float="mid"></i>Mid</li>
-              <li><i class="sig-dot" data-float="high"></i>High</li>
-            </ul>
-            <button type="button" class="live-pill" data-live aria-pressed="true">
-              <span class="live-dot"></span><span data-live-label>Live</span>
-            </button>
+            <div class="terminal-tools">
+              <button type="button" class="icon-btn sound-icon" data-sound aria-pressed="false" aria-label="Alert sound for New HoD" title="Alert sound">
+                <svg class="icon-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+                <svg class="icon-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="m16 9 5 6"/><path d="m21 9-5 6"/></svg>
+              </button>
+              <button type="button" class="icon-btn config-icon" aria-label="Settings for New HoD" title="Settings">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
+              </button>
+              <button type="button" class="icon-btn detach-icon" aria-label="Detach New HoD into its own window" title="Detach">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6"/><path d="m20 4-8 8"/><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></svg>
+              </button>
+            </div>
           </div>
 
-          <div class="table-wrap">
+          <div class="table-wrap" tabindex="0" aria-label="New HoD alerts">
             <table class="scan-table">
-              <thead>
-                <tr>
-                  <th scope="col" class="col-sig" title="Float size"><span class="sr-only">Signal</span></th>
-                  <th scope="col" class="col-time">Time</th>
-                  <th scope="col" class="col-sym">Ticker</th>
-                  <th scope="col" class="num">Price</th>
-                  <th scope="col" class="num" title="% change, last minute">%Chg 1m</th>
-                  <th scope="col" class="num" title="Volume spike vs. normal 1m volume">Vol 1m</th>
-                  <th scope="col" class="num" title="Relative volume">RVol</th>
-                  <th scope="col" class="num" title="Alerts fired today">Hits</th>
-                  <th scope="col" class="num" title="Distance to VWAP">VWAP D.</th>
-                  <th scope="col" class="num">VWAP</th>
-                  <th scope="col" class="num">%Chg 5m</th>
-                  <th scope="col" class="num">%Chg 15m</th>
-                  <th scope="col" class="num">%Chg 30m</th>
-                  <th scope="col" class="num hide-sm">Volume</th>
-                  <th scope="col" class="num">Float</th>
-                  <th scope="col" class="num">MCap</th>
-                  <th scope="col">Bull/Sell Press</th>
-                  <th scope="col" class="hide-sm">Trend</th>
-                </tr>
-              </thead>
-              <tbody data-body></tbody>
+              <thead><tr></tr></thead>
+              <tbody></tbody>
             </table>
           </div>
+
+          <!-- Phones: the same alerts as cards -->
+          <div class="card-list" data-cards aria-label="New HoD alerts"></div>
         </div>
 
         <!-- Selling alerts -->
         <div class="terminal" role="region" aria-labelledby="selling-title" data-tone="bear">
           <div class="terminal-bar">
             <span class="terminal-title" id="selling-title">Selling Spikes</span>
-            <span class="terminal-count" data-count>0</span>
-            <ul class="float-legend" aria-label="Signal: float size">
-              <li><i class="sig-dot" data-float="low"></i>Low float</li>
-              <li><i class="sig-dot" data-float="mid"></i>Mid</li>
-              <li><i class="sig-dot" data-float="high"></i>High</li>
-            </ul>
-            <button type="button" class="live-pill" data-live aria-pressed="true">
-              <span class="live-dot"></span><span data-live-label>Live</span>
-            </button>
+            <div class="terminal-tools">
+              <button type="button" class="icon-btn sound-icon" data-sound aria-pressed="false" aria-label="Alert sound for Selling Spikes" title="Alert sound">
+                <svg class="icon-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+                <svg class="icon-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="m16 9 5 6"/><path d="m21 9-5 6"/></svg>
+              </button>
+              <button type="button" class="icon-btn config-icon" aria-label="Settings for Selling Spikes" title="Settings">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
+              </button>
+              <button type="button" class="icon-btn detach-icon" aria-label="Detach Selling Spikes into its own window" title="Detach">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6"/><path d="m20 4-8 8"/><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></svg>
+              </button>
+            </div>
           </div>
 
-          <div class="table-wrap">
+          <div class="table-wrap" tabindex="0" aria-label="Selling Spikes alerts">
             <table class="scan-table">
-              <thead>
-                <tr>
-                  <th scope="col" class="col-sig" title="Float size"><span class="sr-only">Signal</span></th>
-                  <th scope="col" class="col-time">Time</th>
-                  <th scope="col" class="col-sym">Ticker</th>
-                  <th scope="col" class="num">Price</th>
-                  <th scope="col" class="num" title="% change, last minute">%Chg 1m</th>
-                  <th scope="col" class="num" title="Volume spike vs. normal 1m volume">Vol 1m</th>
-                  <th scope="col" class="num" title="Relative volume">RVol</th>
-                  <th scope="col" class="num" title="Alerts fired today">Hits</th>
-                  <th scope="col" class="num" title="Distance to VWAP">VWAP D.</th>
-                  <th scope="col" class="num">VWAP</th>
-                  <th scope="col" class="num">%Chg 5m</th>
-                  <th scope="col" class="num">%Chg 15m</th>
-                  <th scope="col" class="num">%Chg 30m</th>
-                  <th scope="col" class="num hide-sm">Volume</th>
-                  <th scope="col" class="num">Float</th>
-                  <th scope="col" class="num">MCap</th>
-                  <th scope="col">Bull/Sell Press</th>
-                  <th scope="col" class="hide-sm">Trend</th>
-                </tr>
-              </thead>
-              <tbody data-body></tbody>
+              <thead><tr></tr></thead>
+              <tbody></tbody>
             </table>
           </div>
+
+          <!-- Phones: the same alerts as cards -->
+          <div class="card-list" data-cards aria-label="Selling Spikes alerts"></div>
         </div>
 
       </div>

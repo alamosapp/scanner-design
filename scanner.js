@@ -1,5 +1,6 @@
 /* ==========================================================================
-   Scanner tables — formatting, color scales and a mock live feed
+   Scanner tables — formatting, color scales, column reordering,
+   mobile cards and a mock live feed
    ========================================================================== */
 
 (() => {
@@ -19,10 +20,14 @@
     hits:    { min: 1,  max: 150 },
   };
 
+  // Heat hue per metric. %Chg follows the table's direction; volume and hits
+  // are direction-neutral so they never read as bullish/bearish.
+  const HUES = { chgUp: "green", chgDown: "red", vol1m: "amber", hits: "violet" };
+
   // VWAP D.: >= +1% green, < -1% red, anything else amber.
   const VWAP_D = { up: 1, down: -1 };
 
-  const MAX_ROWS = 10;
+  const MAX_ROWS = 40;
   const LIVE_INTERVAL = 4000;
 
   /* ---- Formatters -------------------------------------------------------- */
@@ -70,8 +75,7 @@
   const heat = (text, t, hue) => {
     if (t === null) return `<span class="heat is-off">${text}</span>`;
     const cls = t >= 0.85 ? "heat is-hot" : "heat";
-    const hueAttr = hue ? ` data-hue="${hue}"` : "";
-    return `<span class="${cls}"${hueAttr} style="--t:${t.toFixed(3)}">${text}</span>`;
+    return `<span class="${cls}" data-hue="${hue}" style="--t:${t.toFixed(3)}">${text}</span>`;
   };
 
   const floatTier = (f) => (f < FLOAT_TIERS.low ? "low" : f < FLOAT_TIERS.mid ? "mid" : "high");
@@ -107,42 +111,114 @@
       .join(" ");
   };
 
-  /* ---- Row template ------------------------------------------------------ */
+  /* ---- Cell contents (shared by table rows and mobile cards) ------------- */
 
-  const renderRow = (r, tone) => {
+  const derive = (r, tone) => {
     const bear = tone === "bear";
-    const chgScale = bear ? SCALES.chgDown : SCALES.chgUp;
-    const hue = bear ? "red" : null;
-
+    const chgScale = bear ? "chgDown" : "chgUp";
     const chg = (v) => {
       const shown = round(v, 1);
-      return heat(fmtPct(shown, 1), intensity(shown, chgScale), hue);
+      return heat(fmtPct(shown, 1), intensity(shown, SCALES[chgScale]), HUES[chgScale]);
     };
-
     const vwapD = round(((r.price - r.vwap) / r.vwap) * 100, 2);
     const tier = floatTier(r.float);
     const vol1m = round(r.vol1m, r.vol1m >= 100 ? 0 : 1);
 
-    return `
-      <td class="col-sig"><i class="sig-bar" data-float="${tier}" title="${FLOAT_LABEL[tier]} · ${fmtAbbr(r.float)}"></i><span class="sr-only">${FLOAT_LABEL[tier]}</span></td>
-      <td class="col-time">${fmtTime(r.time)}</td>
-      <td class="col-sym"><span class="sym">${r.sym}</span></td>
-      <td class="num">${fmtPrice(r.price)}</td>
-      <td class="num">${chg(r.chg1)}</td>
-      <td class="num">${heat(fmtMult(vol1m), intensity(vol1m, SCALES.vol1m), hue)}</td>
-      <td class="num">${fmtMult(r.rvol)}</td>
-      <td class="num">${heat(String(r.hits), intensity(r.hits, SCALES.hits), hue)}</td>
-      <td class="num"><span class="vwap-d ${vwapClass(vwapD)}">${fmtPct(vwapD, 2)}</span></td>
-      <td class="num">${fmtPrice(r.vwap)}</td>
-      <td class="num">${chg(r.chg5)}</td>
-      <td class="num">${chg(r.chg15)}</td>
-      <td class="num">${chg(r.chg30)}</td>
-      <td class="num muted hide-sm">${fmtAbbr(r.volume)}</td>
-      <td class="num muted">${fmtAbbr(r.float)}</td>
-      <td class="num muted">${fmtAbbr(r.mcap)}</td>
-      <td><div class="pressure" title="Buying vs selling pressure"><i class="buy" style="width:${r.buy}%"></i><i class="sell" style="width:${100 - r.buy}%"></i></div></td>
-      <td class="hide-sm ${bear ? "down" : "up"}"><svg class="spark" viewBox="0 0 88 28" aria-hidden="true"><polyline points="${sparkPoints(r.sym + r.hits, !bear)}"></polyline></svg></td>`;
+    return {
+      tier,
+      sig: `<i class="sig-bar" data-float="${tier}" title="${FLOAT_LABEL[tier]} · ${fmtAbbr(r.float)}"></i><span class="sr-only">${FLOAT_LABEL[tier]}</span>`,
+      time: fmtTime(r.time),
+      sym: `<span class="sym">${r.sym}</span>`,
+      price: fmtPrice(r.price),
+      chg1: chg(r.chg1),
+      vol1m: heat(fmtMult(vol1m), intensity(vol1m, SCALES.vol1m), HUES.vol1m),
+      rvol: fmtMult(r.rvol),
+      hits: heat(String(r.hits), intensity(r.hits, SCALES.hits), HUES.hits),
+      vwapD: `<span class="vwap-d ${vwapClass(vwapD)}">${fmtPct(vwapD, 2)}</span>`,
+      vwap: fmtPrice(r.vwap),
+      chg5: chg(r.chg5),
+      chg15: chg(r.chg15),
+      chg30: chg(r.chg30),
+      volume: fmtAbbr(r.volume),
+      float: fmtAbbr(r.float),
+      mcap: fmtAbbr(r.mcap),
+      press: `<div class="pressure" title="Buying vs selling pressure"><i class="buy" style="width:${r.buy}%"></i><i class="sell" style="width:${100 - r.buy}%"></i></div>`,
+      trend: `<svg class="spark ${bear ? "down" : "up"}" viewBox="0 0 88 28" aria-hidden="true"><polyline points="${sparkPoints(r.sym + r.hits, !bear)}"></polyline></svg>`,
+    };
   };
+
+  /* ---- Columns ------------------------------------------------------------
+     Pinned columns stay first; the rest can be dragged into any order. */
+
+  const COLUMNS = [
+    { key: "sig",    label: "Signal", pinned: true, cls: "col-sig", title: "Float size", srOnly: true },
+    { key: "time",   label: "Time",   pinned: true, cls: "col-time" },
+    { key: "sym",    label: "Ticker", pinned: true, cls: "col-sym" },
+    { key: "price",  label: "Price",    num: true },
+    { key: "chg1",   label: "%Chg 1m",  num: true, title: "% change, last minute" },
+    { key: "vol1m",  label: "Vol 1m",   num: true, title: "Volume spike vs. normal 1m volume" },
+    { key: "rvol",   label: "RVol",     num: true, title: "Relative volume" },
+    { key: "hits",   label: "Hits",     num: true, title: "Alerts fired today" },
+    { key: "vwapD",  label: "VWAP D.",  num: true, title: "Distance to VWAP" },
+    { key: "vwap",   label: "VWAP",     num: true },
+    { key: "chg5",   label: "%Chg 5m",  num: true },
+    { key: "chg15",  label: "%Chg 15m", num: true },
+    { key: "chg30",  label: "%Chg 30m", num: true },
+    { key: "volume", label: "Volume",   num: true, muted: true },
+    { key: "float",  label: "Float",    num: true, muted: true },
+    { key: "mcap",   label: "MCap",     num: true, muted: true },
+    { key: "press",  label: "Bull/Sell Press" },
+    { key: "trend",  label: "Trend" },
+  ];
+  const COL = Object.fromEntries(COLUMNS.map((c) => [c.key, c]));
+  const PINNED = COLUMNS.filter((c) => c.pinned).map((c) => c.key);
+  const MOVABLE = COLUMNS.filter((c) => !c.pinned).map((c) => c.key);
+
+  const cellClass = (c) => [c.cls, c.num && "num", c.muted && "muted"].filter(Boolean).join(" ");
+
+  // Column order per table survives reloads (best effort — storage may be blocked).
+  const storeKey = (tone) => `scanner:columns:${tone}`;
+  const loadOrder = (tone) => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(storeKey(tone)) || "null");
+      if (Array.isArray(saved)) {
+        const known = saved.filter((k) => MOVABLE.includes(k));
+        return [...known, ...MOVABLE.filter((k) => !known.includes(k))];
+      }
+    } catch { /* ignore */ }
+    return [...MOVABLE];
+  };
+  const saveOrder = (tone, order) => {
+    try { localStorage.setItem(storeKey(tone), JSON.stringify(order)); } catch { /* ignore */ }
+  };
+
+  /* ---- Mobile card ------------------------------------------------------- */
+
+  const renderCard = (d) => `
+    <header class="card-head">
+      ${d.sym}
+      <span class="float-chip" data-float="${d.tier}">${FLOAT_LABEL[d.tier].replace(" float", "")} float · ${d.float}</span>
+      <time class="card-time">${d.time}</time>
+    </header>
+    <div class="card-main">
+      <div class="card-price">
+        <span class="card-last">${d.price}</span>
+        <span class="card-vwap">VWAP ${d.vwap} ${d.vwapD}</span>
+      </div>
+      <div class="card-chg">${d.chg1}</div>
+    </div>
+    <div class="tf-strip">
+      <div><span>5m</span>${d.chg5}</div>
+      <div><span>15m</span>${d.chg15}</div>
+      <div><span>30m</span>${d.chg30}</div>
+    </div>
+    <dl class="card-stats">
+      <div><dt>Vol 1m</dt><dd>${d.vol1m}</dd></div>
+      <div><dt>RVol</dt><dd>${d.rvol}</dd></div>
+      <div><dt>Hits</dt><dd>${d.hits}</dd></div>
+      <div><dt>MCap</dt><dd>${d.mcap}</dd></div>
+    </dl>
+    <footer class="card-foot">${d.press}<span class="card-volume">Vol ${d.volume}</span>${d.trend}</footer>`;
 
   /* ---- Mock data --------------------------------------------------------- */
 
@@ -173,37 +249,188 @@
     { sym: "CELR", time: at("16:54:02"), price: 0.0842, chg1: -2.2,  vol1m: 1.6,  rvol: 1.9,  hits: 1,   vwap: 0.0851, chg5: -1.2,  chg15: -3.4,  chg30: -6.8,  volume: 64.2e6,  float: 420.0e6, mcap: 35.4e6,  buy: 44 },
   ];
 
+  // Older alerts to give the tables enough rows to scroll.
+  const backfill = (seed, syms, bear) => {
+    const rnd = seeded(syms.join(""));
+    const s = bear ? -1 : 1;
+    let t = seed[seed.length - 1].time.getTime();
+    return syms.map((sym) => {
+      t -= (20 + rnd() * 70) * 1000;
+      const price = rnd() < 0.25 ? 0.05 + rnd() * 0.9 : 1 + rnd() * 20;
+      const chg1 = s * (1.5 + rnd() ** 2 * 26);
+      const chg5 = chg1 * (0.5 + rnd());
+      const float = 10 ** (6.2 + rnd() * 2.4);
+      return {
+        sym, time: new Date(t), price, chg1, chg5,
+        vol1m: 10 ** (rnd() ** 1.6 * 3.3),
+        rvol: 1.5 + rnd() ** 2 * 30,
+        hits: Math.max(1, Math.round(rnd() ** 2.2 * 110)),
+        vwap: price * (1 - s * (rnd() * 0.1 - 0.025)),
+        chg15: chg5 * (0.3 + rnd() * 1.2) - s * rnd() * 3,
+        chg30: chg5 * (0.2 + rnd() * 1.4) - s * rnd() * 5,
+        volume: 10 ** (5.4 + rnd() * 2.1),
+        float,
+        mcap: float * price * (0.8 + rnd() * 1.5),
+        buy: Math.round(bear ? 15 + rnd() * 35 : 48 + rnd() * 40),
+      };
+    });
+  };
+
+  BULL.push(...backfill(BULL, ["AUXO", "PNTR", "GLYD", "FRST", "MOXY", "TRBO", "LUMA", "KINE", "SPRK", "VOLT", "NEXA", "CRUX"], false));
+  BEAR.push(...backfill(BEAR, ["SLAB", "DUSK", "HALO", "WREN", "OPTX", "BRKN", "FADE", "NUMB", "ASHN", "TIDE"], true));
+
+  /* ---- Alert sound (Web Audio, starts only after the user turns it on) --- */
+
+  let audio = null;
+  const beep = (tone) => {
+    audio ??= new AudioContext();
+    const osc = audio.createOscillator();
+    const gain = audio.createGain();
+    osc.frequency.value = tone === "bear" ? 440 : 880;
+    gain.gain.setValueAtTime(0.0001, audio.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.08, audio.currentTime + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + 0.18);
+    osc.connect(gain).connect(audio.destination);
+    osc.start();
+    osc.stop(audio.currentTime + 0.2);
+  };
+
   /* ---- Table controller -------------------------------------------------- */
 
   const jitter = (v, pct) => v * (1 + (Math.random() - 0.5) * 2 * pct);
 
   const mountTable = (root, seed) => {
     const tone = root.dataset.tone;
-    const body = root.querySelector("[data-body]");
-    const count = root.querySelector("[data-count]");
+    const table = root.querySelector(".scan-table");
+    const headRow = table.querySelector("thead tr");
+    const body = table.querySelector("tbody");
     const wrap = root.querySelector(".table-wrap");
-    const liveBtn = root.querySelector("[data-live]");
-    const liveLabel = root.querySelector("[data-live-label]");
+    const cards = root.querySelector("[data-cards]");
+    const soundBtn = root.querySelector("[data-sound]");
     const rows = seed.map((r) => ({ ...r }));
-    let timer = null;
+    let order = loadOrder(tone);
+    let soundOn = false;
 
-    const rowEl = (r) => {
+    const columns = () => [...PINNED, ...order];
+
+    /* Header + rows */
+
+    const renderHead = () => {
+      headRow.replaceChildren(...columns().map((key) => {
+        const c = COL[key];
+        const th = document.createElement("th");
+        th.scope = "col";
+        th.dataset.key = key;
+        th.className = cellClass(c);
+        if (c.title) th.title = c.title;
+        th.innerHTML = c.srOnly ? `<span class="sr-only">${c.label}</span>` : c.label;
+        if (!c.pinned) {
+          th.draggable = true;
+          th.tabIndex = 0;
+          th.setAttribute("aria-description", "Drag, or Alt + arrow keys, to move this column");
+        }
+        return th;
+      }));
+    };
+
+    const rowEl = (d, sym) => {
       const tr = document.createElement("tr");
-      tr.dataset.sym = r.sym;
-      tr.innerHTML = renderRow(r, tone);
+      tr.dataset.sym = sym;
+      tr.innerHTML = columns().map((key) => `<td class="${cellClass(COL[key])}">${d[key]}</td>`).join("");
       return tr;
     };
 
-    const syncCount = () => { count.textContent = String(rows.length); };
-
-    const renderAll = () => {
-      body.replaceChildren(...rows.map(rowEl));
-      syncCount();
+    const cardEl = (d, sym) => {
+      const el = document.createElement("article");
+      el.className = "alert-card";
+      el.dataset.sym = sym;
+      el.dataset.float = d.tier;
+      el.innerHTML = renderCard(d);
+      return el;
     };
 
-    // A ticker that alerts again moves to the top with hits + 1.
+    const renderAll = () => {
+      renderHead();
+      const derived = rows.map((r) => [derive(r, tone), r.sym]);
+      body.replaceChildren(...derived.map(([d, sym]) => rowEl(d, sym)));
+      cards.replaceChildren(...derived.map(([d, sym]) => cardEl(d, sym)));
+      pin();
+    };
+
+    // Left offsets for the pinned Time/Ticker columns, from real header widths.
+    const pin = () => {
+      const w = (key) => headRow.querySelector(`[data-key="${key}"]`).getBoundingClientRect().width;
+      table.style.setProperty("--pin-time", `${w("sig")}px`);
+      table.style.setProperty("--pin-sym", `${w("sig") + w("time")}px`);
+    };
+
+    /* Column drag & drop */
+
+    const moveColumn = (key, targetKey, after) => {
+      if (key === targetKey) return;
+      const next = order.filter((k) => k !== key);
+      const i = next.indexOf(targetKey) + (after ? 1 : 0);
+      next.splice(i, 0, key);
+      order = next;
+      saveOrder(tone, order);
+      renderAll();
+    };
+
+    let dragKey = null;
+    const clearDrop = () => headRow.querySelectorAll(".drop-before, .drop-after")
+      .forEach((th) => th.classList.remove("drop-before", "drop-after"));
+
+    headRow.addEventListener("dragstart", (e) => {
+      const th = e.target.closest("th[draggable]");
+      if (!th) return;
+      dragKey = th.dataset.key;
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", dragKey);
+      th.classList.add("is-dragging");
+      table.dataset.dragging = dragKey;
+    });
+
+    headRow.addEventListener("dragover", (e) => {
+      const th = e.target.closest("th[draggable]");
+      if (!th || !dragKey) return;
+      e.preventDefault();
+      const box = th.getBoundingClientRect();
+      const after = e.clientX > box.left + box.width / 2;
+      clearDrop();
+      if (th.dataset.key !== dragKey) th.classList.add(after ? "drop-after" : "drop-before");
+    });
+
+    headRow.addEventListener("drop", (e) => {
+      const th = e.target.closest("th[draggable]");
+      if (!th || !dragKey) return;
+      e.preventDefault();
+      moveColumn(dragKey, th.dataset.key, th.classList.contains("drop-after"));
+    });
+
+    headRow.addEventListener("dragend", () => {
+      dragKey = null;
+      delete table.dataset.dragging;
+      clearDrop();
+      headRow.querySelectorAll(".is-dragging").forEach((th) => th.classList.remove("is-dragging"));
+    });
+
+    // Keyboard alternative: Alt + ←/→ on a focused header.
+    headRow.addEventListener("keydown", (e) => {
+      const th = e.target.closest("th[draggable]");
+      if (!th || !e.altKey || !["ArrowLeft", "ArrowRight"].includes(e.key)) return;
+      e.preventDefault();
+      const key = th.dataset.key;
+      const i = order.indexOf(key);
+      const j = e.key === "ArrowLeft" ? i - 1 : i + 1;
+      if (j < 0 || j >= order.length) return;
+      moveColumn(key, order[j], e.key === "ArrowRight");
+      headRow.querySelector(`[data-key="${key}"]`).focus();
+    });
+
+    /* Live feed: a ticker that alerts again moves to the top with hits + 1. */
+
     const pushAlert = () => {
-      const src = seed[Math.floor(Math.random() * seed.length)];
+      const src = seed[Math.floor(Math.random() * Math.min(seed.length, 10))];
       const i = rows.findIndex((r) => r.sym === src.sym);
       const prev = i >= 0 ? rows.splice(i, 1)[0] : { ...src };
       const price = jitter(prev.price, 0.04);
@@ -224,43 +451,35 @@
       rows.unshift(next);
       rows.length = Math.min(rows.length, MAX_ROWS);
 
-      const old = body.querySelector(`tr[data-sym="${next.sym}"]`);
-      if (old) old.remove();
-      const tr = rowEl(next);
-      tr.classList.add("row-new");
-      body.prepend(tr);
-      while (body.children.length > MAX_ROWS) body.lastElementChild.remove();
-      syncCount();
+      const d = derive(next, tone);
+      for (const [list, make] of [[body, rowEl], [cards, cardEl]]) {
+        list.querySelector(`[data-sym="${next.sym}"]`)?.remove();
+        const el = make(d, next.sym);
+        el.classList.add("is-new");
+        list.prepend(el);
+        while (list.children.length > MAX_ROWS) list.lastElementChild.remove();
+      }
+      if (soundOn) beep(tone);
     };
 
-    const setLive = (on) => {
-      clearInterval(timer);
-      timer = on ? setInterval(pushAlert, LIVE_INTERVAL + Math.random() * 1500) : null;
-      liveBtn.setAttribute("aria-pressed", String(on));
-      liveLabel.textContent = on ? "Live" : "Paused";
-    };
+    /* Toolbar */
 
-    liveBtn.addEventListener("click", () => setLive(timer === null));
+    soundBtn.addEventListener("click", () => {
+      soundOn = !soundOn;
+      soundBtn.setAttribute("aria-pressed", String(soundOn));
+      soundBtn.title = soundOn ? "Mute alerts" : "Alert sound";
+      if (soundOn) beep(tone);
+    });
 
     // Edge shadow on the pinned columns once the table scrolls sideways.
     wrap.addEventListener("scroll", () => {
       wrap.classList.toggle("is-scrolled", wrap.scrollLeft > 0);
     }, { passive: true });
 
-    // Left offsets for the pinned Time/Ticker columns, from real header widths.
-    const table = root.querySelector(".scan-table");
-    const pin = () => {
-      const sig = table.querySelector("th.col-sig").getBoundingClientRect().width;
-      const time = table.querySelector("th.col-time").getBoundingClientRect().width;
-      table.style.setProperty("--pin-time", `${sig}px`);
-      table.style.setProperty("--pin-sym", `${sig + time}px`);
-    };
-
     renderAll();
-    pin();
     window.addEventListener("resize", pin);
     document.fonts?.ready.then(pin);
-    setLive(true);
+    setInterval(pushAlert, LIVE_INTERVAL + Math.random() * 1500);
   };
 
   const [bull, bear] = document.querySelectorAll(".terminal[data-tone]");
