@@ -1109,10 +1109,35 @@ tr.is-new td, .alert-card.is-new { animation: rowIn 1.6s var(--ease); }
 .settings-modal--sound .sm-shell { height: auto; max-height: min(720px, calc(100dvh - 48px)); }
 
 /* Table chips (tabs): scroll sideways when they don't fit */
+/* Strip: the chips scroll sideways; an arrow + fade shows on each side that
+   has more (.can-prev / .can-next, set by scanner.js) */
+.snd-strip { position: relative; flex: none; margin: 0 20px 14px; }
 .snd-tables {
-  flex: none; display: flex; gap: 6px; margin: 0 20px 14px; padding: 2px 28px 2px 2px; overflow-x: auto; scroll-padding-inline: 2px 28px;
-  scrollbar-width: none; mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+  --fade-l: 0px; --fade-r: 0px;
+  display: flex; gap: 6px; padding: 2px; overflow-x: auto; scroll-behavior: smooth; scroll-padding-inline: 36px;
+  scrollbar-width: none; overscroll-behavior-x: contain;
+  mask-image: linear-gradient(to right, transparent, #000 var(--fade-l), #000 calc(100% - var(--fade-r)), transparent);
 }
+.snd-strip.can-prev .snd-tables { --fade-l: 44px; }
+.snd-strip.can-next .snd-tables { --fade-r: 44px; }
+.snd-strip__arrow {
+  position: absolute; top: 50%; z-index: 1; display: grid; place-items: center; width: 28px; height: 28px; padding: 0;
+  border: 1px solid var(--line-strong); border-radius: 50%; background: var(--surface-2); color: var(--text-2);
+  box-shadow: 0 4px 12px -4px var(--shadow-color); transform: translateY(-50%);
+  transition: color var(--t-fast), background var(--t-fast), transform var(--t-spring);
+}
+.snd-strip__arrow[data-snd-scroll="-1"] { left: -4px; }
+.snd-strip__arrow[data-snd-scroll="1"] { right: -4px; }
+.snd-strip__arrow[hidden] { display: none; }
+.snd-strip__arrow svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.snd-strip__arrow:hover { background: var(--surface-3); color: var(--text); }
+.snd-strip__arrow:active { transform: translateY(-50%) scale(0.9); }
+
+/* Voice speed */
+.snd-rate { margin-top: 12px; }
+.snd-rate__control { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.snd-rate__end { font-size: 11px; font-weight: 600; color: var(--text-3); }
+.snd-rate__out { min-width: 38px; padding: 2px 6px; border-radius: var(--radius-xs); background: var(--surface-2); font-family: var(--font-mono); font-size: 11.5px; font-weight: 700; color: var(--text); text-align: center; }
 .snd-tables::-webkit-scrollbar { display: none; }
 .snd-tab {
   display: inline-flex; align-items: center; gap: 7px; flex: none; height: 30px; padding: 0 12px 0 10px;
@@ -1258,7 +1283,7 @@ tr.is-new td, .alert-card.is-new { animation: rowIn 1.6s var(--ease); }
 @media (max-width: 720px) {
   .settings-modal.settings-modal--sound { height: fit-content; }
   .settings-modal--sound .sm-shell { max-height: 90dvh; }
-  .snd-tables { margin-inline: var(--space-4); }
+  .snd-strip { margin-inline: var(--space-4); }
   .snd-mode { padding: 10px; }
   .snd-mode span { display: none; }
   .snd-drop { grid-template-columns: 38px minmax(0, 1fr) auto; row-gap: 10px; }
@@ -1268,6 +1293,7 @@ tr.is-new td, .alert-card.is-new { animation: rowIn 1.6s var(--ease); }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .snd-tables { scroll-behavior: auto; }
   .snd-eq i { animation: none; transform: scaleY(0.7); }
   .snd-detail { animation: none; }
   .snd-mode, .range::-webkit-slider-thumb { transition: none; }

@@ -482,7 +482,7 @@
   const SOUND_KEY = "scanner:sound:v1";
   const SOUND_MODES = ["voice", "chime", "custom"];
   const CHIME_STYLES = ["ping", "chime", "blip"];
-  const SOUND_DEFAULT = { on: false, mode: "chime", chime: "ping", voice: "", volume: 70, file: null }; // file: { name, size }
+  const SOUND_DEFAULT = { on: false, mode: "chime", chime: "ping", voice: "", rate: 1, volume: 70, file: null }; // file: { name, size }; rate: voice speed
   const MAX_SOUND_BYTES = 10 * 1024 * 1024;
 
   const cleanSound = (s = {}) => ({
@@ -490,6 +490,7 @@
     mode: SOUND_MODES.includes(s.mode) ? s.mode : SOUND_DEFAULT.mode,
     chime: CHIME_STYLES.includes(s.chime) ? s.chime : SOUND_DEFAULT.chime,
     voice: typeof s.voice === "string" ? s.voice : "",
+    rate: Number.isFinite(s.rate) ? Math.round(Math.max(0.6, Math.min(1.8, s.rate)) * 10) / 10 : SOUND_DEFAULT.rate,
     volume: Number.isFinite(s.volume) ? Math.max(0, Math.min(100, s.volume)) : SOUND_DEFAULT.volume,
     file: s.file && typeof s.file.name === "string" ? { name: s.file.name, size: Number(s.file.size) || 0 } : null,
   });
@@ -572,14 +573,14 @@
   const canSpeak = "speechSynthesis" in window && "SpeechSynthesisUtterance" in window;
   const spell = (sym) => sym.replace(/[^A-Z0-9]/gi, "").split("").join(" ");
   const englishVoices = () => (canSpeak ? speechSynthesis.getVoices().filter((v) => /^en(-|_|$)/i.test(v.lang)) : []);
-  const speak = (text, voiceURI, volume) => {
+  const speak = (text, voiceURI, volume, rate = 1) => {
     if (!canSpeak) return null;
     const u = new SpeechSynthesisUtterance(text);
     const list = englishVoices();
     const voice = list.find((v) => v.voiceURI === voiceURI) || list.find((v) => v.lang === "en-US") || list[0];
     if (voice) u.voice = voice;
     u.lang = voice?.lang || "en-US";
-    u.rate = 1.05;
+    u.rate = rate;
     u.volume = volume / 100;
     speechSynthesis.speak(u);
     return u;
@@ -594,7 +595,7 @@
     lastSound.set(panel, now);
     if (s.mode === "voice") {
       if (canSpeak && speechSynthesis.pending) return; // don't pile up a backlog of tickers
-      speak(spell(sym), s.voice, s.volume);
+      speak(spell(sym), s.voice, s.volume, s.rate);
     } else if (s.mode === "custom" && soundFiles.has(panel)) {
       const clip = new Audio(soundFiles.get(panel));
       clip.volume = s.volume / 100;
@@ -2263,6 +2264,10 @@
     const modes = [...dlg.querySelectorAll("[data-snd-mode]")];
     const details = Object.fromEntries([...dlg.querySelectorAll("[data-snd-detail]")].map((d) => [d.dataset.sndDetail, d]));
     const voiceSel = $("[data-snd-voice]");
+    const rateIn = $("[data-snd-rate]");
+    const rateOut = $("[data-snd-rate-out]");
+    const strip = $("[data-snd-strip]");
+    const arrows = [...dlg.querySelectorAll("[data-snd-scroll]")];
     const sampleEl = $("[data-snd-sample]");
     const chimes = [...dlg.querySelectorAll("[data-snd-chime]")];
     const drop = $("[data-snd-drop]");
@@ -2341,6 +2346,10 @@
 
       voiceSel.value = [...voiceSel.options].some((o) => o.value === s.voice) ? s.voice : "";
       sampleEl.textContent = spell(t.rows()[0]?.sym || "NVLX");
+      rateIn.value = String(s.rate);
+      rateIn.style.setProperty("--fill", `${((s.rate - 0.6) / 1.2) * 100}%`);
+      rateIn.setAttribute("aria-valuetext", `${s.rate.toFixed(1)} times`);
+      rateOut.textContent = `${s.rate.toFixed(1)}×`;
       chimes.forEach((c) => {
         const on = c.dataset.sndChime === s.chime;
         c.setAttribute("aria-checked", String(on));
@@ -2398,7 +2407,7 @@
         if (!canSpeak) { setStatus("This browser can't read tickers aloud.", true); return; }
         speechSynthesis.cancel();
         const text = sampleEl.textContent;
-        const u = speak(text, s.voice, s.volume);
+        const u = speak(text, s.voice, s.volume, s.rate);
         handle = { stop: () => speechSynthesis.cancel() };
         u.addEventListener("end", done(`Read “${text}”.`));
         u.addEventListener("error", done(""));
@@ -2461,6 +2470,9 @@
 
     onSwitch.addEventListener("click", () => edit({ on: !draft().on }));
     voiceSel.addEventListener("change", () => edit({ voice: voiceSel.value }));
+    rateIn.addEventListener("input", () => { stopPreview(); edit({ rate: Number(rateIn.value) }); });
+    // Letting go of the speed slider reads the sample at the new speed
+    rateIn.addEventListener("change", () => { if (canSpeak) startPreview(); });
     volume.addEventListener("input", () => edit({ volume: Number(volume.value) }));
 
     const takeFile = (f) => {
@@ -2537,6 +2549,28 @@
       b.scrollIntoView({ block: "nearest", inline: "nearest" });
     });
 
+    // Strip arrows: shown on each side that has more chips; a click slides
+    // about two thirds of the visible width. Wheel scrolls it sideways too.
+    const syncArrows = () => {
+      const max = tabsEl.scrollWidth - tabsEl.clientWidth;
+      const prev = tabsEl.scrollLeft > 1;
+      const next = tabsEl.scrollLeft < max - 1;
+      strip.classList.toggle("can-prev", prev);
+      strip.classList.toggle("can-next", next);
+      arrows[0].hidden = !prev;
+      arrows[1].hidden = !next;
+    };
+    arrows.forEach((a) => a.addEventListener("click", () => {
+      tabsEl.scrollBy({ left: Number(a.dataset.sndScroll) * tabsEl.clientWidth * 0.66 });
+    }));
+    tabsEl.addEventListener("scroll", syncArrows, { passive: true });
+    tabsEl.addEventListener("wheel", (e) => {
+      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX) || tabsEl.scrollWidth <= tabsEl.clientWidth) return;
+      e.preventDefault();
+      tabsEl.scrollLeft += e.deltaY;
+    }, { passive: false });
+    new ResizeObserver(syncArrows).observe(tabsEl);
+
     /* Open / close / save */
 
     const open = (panel, btn) => {
@@ -2555,6 +2589,7 @@
       dlg.showModal();
       panelEl.scrollTop = 0;
       tabsEl.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest", inline: "nearest" });
+      syncArrows();
     };
 
     const close = () => dlg.close();
