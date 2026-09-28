@@ -701,8 +701,6 @@ html:has(.settings-modal[open]) { overflow: hidden; }
 .fl-input:focus { outline: none; border-color: var(--tone); box-shadow: var(--ring); }
 .fl-input[aria-invalid="true"] { border-color: var(--red); box-shadow: 0 0 0 3px var(--red-a16); }
 
-.fl-swatches { display: grid; grid-template-columns: repeat(4, 18px); gap: 7px; }
-.fl-swatches .swatch { width: 18px; height: 18px; }
 .fl-error {
   display: flex; align-items: center; gap: 8px; margin: 10px 2px 0; padding: 8px 10px;
   border-radius: var(--radius-md); background: var(--red-a08); color: var(--red); font-size: 12.5px; font-weight: 600;
@@ -714,9 +712,7 @@ html:has(.settings-modal[open]) { overflow: hidden; }
 @media (max-width: 720px) {
   .settings-modal.settings-modal--float { height: fit-content; }
   .settings-modal--float .sm-shell { max-height: 90dvh; }
-  .fl-tier { grid-template-columns: 12px minmax(0, 1fr); row-gap: 10px; }
-  .fl-swatches { grid-column: 2; grid-template-columns: repeat(7, 26px); gap: 8px; }
-  .fl-swatches .swatch { width: 26px; height: 26px; }
+  .fl-tier [data-fl-swatch] { width: 26px; height: 26px; }
   .fl-input { height: 32px; font-size: 14px; }
   .fl-thumb { width: 36px; margin-left: -18px; }
   .settings-modal {
@@ -1091,3 +1087,9 @@ tr.is-new td, .alert-card.is-new { animation: rowIn 1.6s var(--ease); }
 .callout p { color: var(--text-2); font-size: var(--fs-sm); }
 
 @media (max-width: 820px) { .callouts { grid-template-columns: 1fr; } }
+
+/* Float tiers: one swatch per tier, the palette opens in a pop (7 colors, 4 per row) */
+.fl-tier .swatch-pop { grid-template-columns: repeat(4, 22px); }
+.swatch-pop[hidden] { display: none; }
+/* Closed popover toast stays out of the page */
+.toast[popover]:not(:popover-open) { display: none; }

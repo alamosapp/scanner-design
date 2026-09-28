@@ -1870,8 +1870,9 @@
       t.setAttribute("aria-valuemin", String(FLOAT_RANGE.min));
       t.setAttribute("aria-valuemax", String(FLOAT_RANGE.max));
     });
-    Object.values(groups).forEach((g) => {
-      g.innerHTML = FLOAT_SWATCHES.map((s) => `<button type="button" class="swatch" role="radio" data-pick="${s}" style="--sw: ${swatchVar(s)}" aria-checked="false" aria-label="${SWATCH_LABEL[s]}" title="${SWATCH_LABEL[s]}"></button>`).join("");
+    // One swatch per tier; its palette opens in a pop, like Table settings.
+    Object.values(groups).forEach((wrap) => {
+      wrap.querySelector(".swatch-pop").innerHTML = FLOAT_SWATCHES.map((s) => `<button type="button" class="swatch" role="radio" data-pick="${s}" style="--sw: ${swatchVar(s)}" aria-checked="false" aria-label="${SWATCH_LABEL[s]}" title="${SWATCH_LABEL[s]}"></button>`).join("");
     });
 
     const snapshot = () => JSON.stringify([draft.low, draft.mid, draft.colors]);
@@ -1896,8 +1897,12 @@
       [...dotsEl.children].forEach((dot, i) => { dot.dataset.float = floatTier(floats[i], draft); });
       for (const [tier, el] of Object.entries(counts)) el.textContent = floats.length ? `${n[tier]} on screen` : "";
 
-      for (const [tier, g] of Object.entries(groups)) {
-        g.querySelectorAll("[data-pick]").forEach((b) => {
+      for (const [tier, wrap] of Object.entries(groups)) {
+        const btn = wrap.querySelector("[data-fl-swatch]");
+        btn.style.setProperty("--sw", swatchVar(colors[tier]));
+        btn.setAttribute("aria-label", `${FLOAT_LABEL[tier]} color: ${SWATCH_LABEL[colors[tier]]}`);
+        btn.title = "Change color";
+        wrap.querySelectorAll("[data-pick]").forEach((b) => {
           const on = b.dataset.pick === colors[tier];
           b.setAttribute("aria-checked", String(on));
           b.tabIndex = on ? 0 : -1;
@@ -2008,28 +2013,57 @@
 
     /* Colors */
 
+    let openPop = null; // tier whose palette is open
+    const popOf = (tier) => groups[tier].querySelector(".swatch-pop");
+    const btnOf = (tier) => groups[tier].querySelector("[data-fl-swatch]");
+    const closePop = ({ focus = false } = {}) => {
+      if (!openPop) return;
+      const tier = openPop;
+      openPop = null;
+      popOf(tier).hidden = true;
+      btnOf(tier).setAttribute("aria-expanded", "false");
+      if (focus) btnOf(tier).focus();
+    };
+    const showPop = (tier) => {
+      closePop();
+      const pop = popOf(tier);
+      openPop = tier;
+      pop.hidden = false;
+      btnOf(tier).setAttribute("aria-expanded", "true");
+      // Open upward when the panel has no room below
+      pop.classList.remove("is-up");
+      if (pop.getBoundingClientRect().bottom > panel.getBoundingClientRect().bottom) pop.classList.add("is-up");
+      pop.querySelector('[aria-checked="true"]')?.focus();
+    };
     const pick = (tier, c) => {
       const other = Object.keys(draft.colors).find((t) => t !== tier && draft.colors[t] === c);
       if (other) draft.colors[other] = draft.colors[tier];
       draft.colors[tier] = c;
       render();
     };
-    Object.entries(groups).forEach(([tier, g]) => {
-      g.addEventListener("click", (e) => {
+    Object.entries(groups).forEach(([tier, wrap]) => {
+      wrap.addEventListener("click", (e) => {
+        if (e.target.closest("[data-fl-swatch]")) { if (openPop === tier) closePop(); else showPop(tier); return; }
         const b = e.target.closest("[data-pick]");
-        if (b) pick(tier, b.dataset.pick);
+        if (b) { pick(tier, b.dataset.pick); closePop({ focus: true }); }
       });
       // Radio group: arrows move the choice
-      g.addEventListener("keydown", (e) => {
+      popOf(tier).addEventListener("keydown", (e) => {
         const dir = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
         if (!dir) return;
         e.preventDefault();
         const i = FLOAT_SWATCHES.indexOf(draft.colors[tier]);
         const next = FLOAT_SWATCHES[(i + dir + FLOAT_SWATCHES.length) % FLOAT_SWATCHES.length];
         pick(tier, next);
-        g.querySelector(`[data-pick="${next}"]`).focus();
+        popOf(tier).querySelector(`[data-pick="${next}"]`).focus();
       });
     });
+    // Esc closes the palette first, then the dialog
+    dlg.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && openPop) { e.preventDefault(); closePop({ focus: true }); }
+    });
+    dlg.addEventListener("cancel", (e) => { if (openPop) { e.preventDefault(); closePop({ focus: true }); } });
+    dlg.addEventListener("click", (e) => { if (openPop && !e.target.closest(".swatch-wrap")) closePop(); });
 
     /* Open / close / save */
 
@@ -2056,6 +2090,7 @@
 
     const close = () => dlg.close();
     dlg.addEventListener("close", () => {
+      closePop();
       if (drag) thumbs[drag.tier].classList.remove("is-dragging");
       drag = null;
       draft = null;
