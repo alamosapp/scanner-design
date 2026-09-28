@@ -16,6 +16,13 @@
     <nav class="app-nav" aria-label="Main navigation">
       <span class="app-brand">Scanner</span>
 
+      <!-- Global filter (design only — no behaviour yet) -->
+      <button type="button" class="filter-btn" data-global-filter aria-haspopup="dialog" title="Global filters">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16l-6 7.5V18l-4 2v-7.5z"/></svg>
+        <span>Filter</span>
+        <span class="filter-count" data-filter-count data-count="0" aria-label="0 filters applied">0</span>
+      </button>
+
       <!-- Market session (the scanner's status) · New York time (scanner.js) -->
       <div class="app-status">
         <span class="nav-chip market-session" data-session="closed" role="status" title="Market session">
