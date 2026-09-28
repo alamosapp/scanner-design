@@ -472,21 +472,146 @@
     };
   };
 
-  /* ---- Alert sound (Web Audio, starts only after the user turns it on) --- */
+  /* ---- Alert sound ----------------------------------------------------------
+     One setup per alert table, off by default (set in the Alert sound dialog):
+     - voice: reads the ticker letter by letter (Web Speech);
+     - chime: a short synthesized tone, pitched by the table's tone (Web Audio);
+     - custom: the user's own audio file, kept in IndexedDB.
+     Browsers only allow audio after a click, so nothing plays before one. */
 
-  let audio = null;
-  const beep = (tone) => {
-    audio ??= new AudioContext();
-    const osc = audio.createOscillator();
-    const gain = audio.createGain();
-    osc.frequency.value = { bull: 880, bear: 440, halt: 660 }[tone];
-    gain.gain.setValueAtTime(0.0001, audio.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.08, audio.currentTime + 0.01);
-    gain.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + 0.18);
-    osc.connect(gain).connect(audio.destination);
-    osc.start();
-    osc.stop(audio.currentTime + 0.2);
+  const SOUND_KEY = "scanner:sound:v1";
+  const SOUND_MODES = ["voice", "chime", "custom"];
+  const CHIME_STYLES = ["ping", "chime", "blip"];
+  const SOUND_DEFAULT = { on: false, mode: "chime", chime: "ping", voice: "", volume: 70, file: null }; // file: { name, size }
+  const MAX_SOUND_BYTES = 10 * 1024 * 1024;
+
+  const cleanSound = (s = {}) => ({
+    on: s.on === true,
+    mode: SOUND_MODES.includes(s.mode) ? s.mode : SOUND_DEFAULT.mode,
+    chime: CHIME_STYLES.includes(s.chime) ? s.chime : SOUND_DEFAULT.chime,
+    voice: typeof s.voice === "string" ? s.voice : "",
+    volume: Number.isFinite(s.volume) ? Math.max(0, Math.min(100, s.volume)) : SOUND_DEFAULT.volume,
+    file: s.file && typeof s.file.name === "string" ? { name: s.file.name, size: Number(s.file.size) || 0 } : null,
+  });
+  const soundPrefs = {}; // panel → setup
+  try {
+    const saved = JSON.parse(localStorage.getItem(SOUND_KEY) || "{}");
+    for (const [panel, s] of Object.entries(saved || {})) soundPrefs[panel] = cleanSound(s);
+  } catch { /* ignore */ }
+  const soundOf = (panel) => soundPrefs[panel] || cleanSound();
+  const saveSoundPrefs = () => {
+    try { localStorage.setItem(SOUND_KEY, JSON.stringify(soundPrefs)); } catch { /* ignore */ }
   };
+
+  // Custom files: { panel, blob } records in IndexedDB, played from object URLs.
+  const soundFiles = new Map(); // panel → object URL
+  let soundDb = null;
+  const openSoundDb = () => (soundDb ??= new Promise((resolve, reject) => {
+    const req = indexedDB.open("scanner-sounds", 1);
+    req.onupgradeneeded = () => req.result.createObjectStore("files", { keyPath: "panel" });
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  }));
+  const soundStore = async (mode, fn) => {
+    const db = await openSoundDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction("files", mode);
+      const req = fn(tx.objectStore("files"));
+      tx.oncomplete = () => resolve(req.result);
+      tx.onerror = () => reject(tx.error);
+    });
+  };
+  const setSoundFile = (panel, blob) => {
+    if (soundFiles.has(panel)) URL.revokeObjectURL(soundFiles.get(panel));
+    if (blob) soundFiles.set(panel, URL.createObjectURL(blob));
+    else soundFiles.delete(panel);
+  };
+  if ("indexedDB" in window) {
+    soundStore("readonly", (s) => s.getAll())
+      .then((records) => records.forEach((r) => setSoundFile(r.panel, r.blob)))
+      .catch(() => { /* storage blocked: custom sounds last this session only */ });
+  }
+
+  // Chime: notes of [frequency, start, length] in seconds.
+  let audioCtx = null;
+  const audioNow = () => {
+    audioCtx ??= new AudioContext();
+    if (audioCtx.state === "suspended") audioCtx.resume();
+    return audioCtx;
+  };
+  const CHIMES = {
+    ping:  { wave: "sine",     notes: [[880, 0, 0.26]] },
+    chime: { wave: "sine",     notes: [[660, 0, 0.18], [990, 0.13, 0.3]] },
+    blip:  { wave: "triangle", notes: [[1320, 0, 0.07], [1320, 0.1, 0.07]] },
+  };
+  const PITCH = { bull: 1, halt: 0.84, bear: 0.67 };
+  // Returns how long it rings, in ms.
+  const playChime = (style, tone, volume) => {
+    const { wave, notes } = CHIMES[style];
+    const a = audioNow();
+    const t0 = a.currentTime;
+    const peak = 0.16 * (volume / 100);
+    if (peak > 0) {
+      for (const [f, at, len] of notes) {
+        const osc = a.createOscillator();
+        const gain = a.createGain();
+        osc.type = wave;
+        osc.frequency.value = f * (PITCH[tone] ?? 1);
+        gain.gain.setValueAtTime(0.0001, t0 + at);
+        gain.gain.exponentialRampToValueAtTime(peak, t0 + at + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t0 + at + len);
+        osc.connect(gain).connect(a.destination);
+        osc.start(t0 + at);
+        osc.stop(t0 + at + len + 0.02);
+      }
+    }
+    return Math.max(...notes.map(([, at, len]) => at + len)) * 1000;
+  };
+
+  // Voice: "NVLX" → "N V L X", in the chosen English voice.
+  const canSpeak = "speechSynthesis" in window && "SpeechSynthesisUtterance" in window;
+  const spell = (sym) => sym.replace(/[^A-Z0-9]/gi, "").split("").join(" ");
+  const englishVoices = () => (canSpeak ? speechSynthesis.getVoices().filter((v) => /^en(-|_|$)/i.test(v.lang)) : []);
+  const speak = (text, voiceURI, volume) => {
+    if (!canSpeak) return null;
+    const u = new SpeechSynthesisUtterance(text);
+    const list = englishVoices();
+    const voice = list.find((v) => v.voiceURI === voiceURI) || list.find((v) => v.lang === "en-US") || list[0];
+    if (voice) u.voice = voice;
+    u.lang = voice?.lang || "en-US";
+    u.rate = 1.05;
+    u.volume = volume / 100;
+    speechSynthesis.speak(u);
+    return u;
+  };
+
+  const lastSound = new Map();
+  const playAlertSound = (panel, tone, sym) => {
+    const s = soundOf(panel);
+    if (!s.on || s.volume === 0) return;
+    const now = performance.now();
+    if (now - (lastSound.get(panel) || 0) < 150) return; // a burst of alerts plays once
+    lastSound.set(panel, now);
+    if (s.mode === "voice") {
+      if (canSpeak && speechSynthesis.pending) return; // don't pile up a backlog of tickers
+      speak(spell(sym), s.voice, s.volume);
+    } else if (s.mode === "custom" && soundFiles.has(panel)) {
+      const clip = new Audio(soundFiles.get(panel));
+      clip.volume = s.volume / 100;
+      clip.play().catch(() => { /* blocked until the page gets a click */ });
+    } else {
+      playChime(s.chime, tone, s.volume);
+    }
+  };
+
+  // Speaker icon in each alert table's bar: lit while its sound is on.
+  const syncSoundButtons = () => document.querySelectorAll(".terminal [data-sound]").forEach((btn) => {
+    const root = btn.closest(".terminal");
+    const on = soundOf(root.dataset.panel).on;
+    btn.dataset.on = String(on);
+    btn.title = `Alert sound: ${on ? "on" : "off"}`;
+    btn.setAttribute("aria-label", `Alert sound for ${root.dataset.title}: ${on ? "on" : "off"}`);
+  });
 
   /* ---- Table controller -------------------------------------------------- */
 
@@ -548,7 +673,6 @@
     const rows = seed.map((r) => ({ ...r }));
     let order = loadOrder(panel, cols);
     let prefs = loadPrefs(panel, cols);
-    let soundOn = false;
 
     const columns = () => [...pins, ...order.filter((k) => !prefs.hidden.has(k))];
     const isExcluded = (sym) => prefs.excluded.has(sym) || globalExcluded.has(sym);
@@ -711,7 +835,7 @@
       card.classList.add("is-new");
       feed.insert(card);
       tickTimers();
-      if (soundOn) beep(tone);
+      playAlertSound(panel, tone, alert.sym);
     };
 
     const feed = mountCardFeed(root.querySelector(".card-view"));
@@ -733,12 +857,7 @@
 
     /* Toolbar */
 
-    soundBtn?.addEventListener("click", () => {
-      soundOn = !soundOn;
-      soundBtn.setAttribute("aria-pressed", String(soundOn));
-      soundBtn.title = soundOn ? "Mute alerts" : "Alert sound";
-      if (soundOn) beep(tone);
-    });
+    soundBtn?.addEventListener("click", () => soundSettings.open(panel, soundBtn));
 
     // Edge shadow on Ticker while it is stuck. With display scaling scrollLeft
     // can rest a fraction of a pixel off 0; that still counts as "not stuck".
@@ -2118,6 +2237,357 @@
     return { open };
   };
 
+  /* ---- Alert sound dialog --------------------------------------------------
+     The speaker icon of an alert table opens it on that table; the chips on
+     top switch tables. Each table has its own draft, all saved together.
+     - Switch: sound on or off for new alerts.
+     - Output: Voice (+ voice pick), Chime (+ style), Custom (+ audio file).
+     - Volume and a preview of the draft.
+     Cancel, Esc or a click outside drops every draft. */
+
+  const SOUND_MODE_LABEL = { voice: "Voice", chime: "Chime", custom: "Custom file" };
+  const fmtBytes = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`);
+  const fmtClip = (sec) => (!Number.isFinite(sec) ? "" : sec < 10 ? `${sec.toFixed(1)} s` : `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, "0")}`);
+  const isAudioFile = (f) => f.type.startsWith("audio/") || /\.(mp3|wav|ogg|m4a|aac)$/i.test(f.name);
+
+  const mountSoundSettings = () => {
+    const dlg = document.getElementById("sound-settings");
+    const $ = (sel) => dlg.querySelector(sel);
+    const titleEl = $("[data-snd-title]");
+    const tabsEl = $("[data-snd-tables]");
+    const panelEl = $("[data-snd-panel]");
+    const master = $("[data-snd-master]");
+    const onSwitch = $("[data-snd-on]");
+    const stateEl = $("[data-snd-state]");
+    const settingsEl = $("[data-snd-settings]");
+    const modes = [...dlg.querySelectorAll("[data-snd-mode]")];
+    const details = Object.fromEntries([...dlg.querySelectorAll("[data-snd-detail]")].map((d) => [d.dataset.sndDetail, d]));
+    const voiceSel = $("[data-snd-voice]");
+    const sampleEl = $("[data-snd-sample]");
+    const chimes = [...dlg.querySelectorAll("[data-snd-chime]")];
+    const drop = $("[data-snd-drop]");
+    const fileInput = $("[data-snd-file]");
+    const fileName = $("[data-snd-file-name]");
+    const fileMeta = $("[data-snd-file-meta]");
+    const chooseLabel = $("[data-snd-choose]");
+    const removeBtn = $("[data-snd-remove]");
+    const volume = $("[data-snd-volume]");
+    const volumeOut = $("[data-snd-volume-out]");
+    const playBtn = $("[data-snd-play]");
+    const playLabel = $("[data-snd-play-label]");
+    const statusEl = $("[data-snd-status]");
+    const dirtyEl = $("[data-snd-dirty]");
+    const saveBtn = $("[data-snd-save]");
+
+    let panels = [];         // alert tables, in page order
+    let key = null;          // table on screen
+    let drafts = null;       // panel → setup
+    let files = null;        // panel → File (new) | null (removed); absent = unchanged
+    let clipLength = new Map(); // File → seconds, for the meta line
+    let baseline = "";
+    let trigger = null;
+    let preview = null;      // { stop } while a preview plays
+    let fileError = "";
+
+    const snapshot = () => JSON.stringify([panels.map((p) => drafts[p]), [...files].map(([p, f]) => [p, f ? f.name + f.size + f.lastModified : null])]);
+    const draft = () => drafts[key];
+    const setStatus = (text = "", error = false) => {
+      statusEl.textContent = text;
+      statusEl.classList.toggle("is-error", error);
+    };
+    // Custom needs a file: the new one, or the saved one if not removed.
+    const hasFile = (p) => (files.has(p) ? Boolean(files.get(p)) : soundFiles.has(p) && Boolean(drafts[p].file));
+    const missingFile = (p) => drafts[p].on && drafts[p].mode === "custom" && !hasFile(p);
+
+    const fillVoices = () => {
+      const list = englishVoices();
+      voiceSel.innerHTML = `<option value="">Default English voice</option>` + list
+        .map((v) => `<option value="${v.voiceURI}">${v.name.replace(/^(Microsoft|Google)\s+/, "")} · ${v.lang}</option>`).join("");
+      voiceSel.disabled = !canSpeak;
+      if (drafts) voiceSel.value = list.some((v) => v.voiceURI === draft().voice) ? draft().voice : "";
+    };
+    if (canSpeak) speechSynthesis.addEventListener("voiceschanged", () => { if (dlg.open) fillVoices(); });
+
+    const renderTabs = () => {
+      tabsEl.innerHTML = panels.map((p) => {
+        const t = tables.get(p);
+        return `<button type="button" class="snd-tab" role="tab" data-snd-tab="${p}" style="--tab-tone: ${t.tone}" aria-selected="false" tabindex="-1"><i aria-hidden="true"></i>${t.title}</button>`;
+      }).join("");
+    };
+
+    const render = () => {
+      const s = draft();
+      const t = tables.get(key);
+      titleEl.textContent = t.title;
+      dlg.style.setProperty("--tone", t.tone);
+      tabsEl.querySelectorAll("[data-snd-tab]").forEach((b) => {
+        const on = b.dataset.sndTab === key;
+        b.setAttribute("aria-selected", String(on));
+        b.tabIndex = on ? 0 : -1;
+        b.dataset.on = String(drafts[b.dataset.sndTab].on);
+      });
+
+      onSwitch.setAttribute("aria-checked", String(s.on));
+      master.classList.toggle("is-on", s.on);
+      settingsEl.classList.toggle("is-muted", !s.on);
+      stateEl.textContent = s.on ? `On · ${SOUND_MODE_LABEL[s.mode]} at ${s.volume}%` : "Off · this table stays silent";
+
+      modes.forEach((m) => {
+        const on = m.dataset.sndMode === s.mode;
+        m.setAttribute("aria-checked", String(on));
+        m.tabIndex = on ? 0 : -1;
+      });
+      Object.entries(details).forEach(([m, d]) => { d.hidden = m !== s.mode; });
+
+      voiceSel.value = [...voiceSel.options].some((o) => o.value === s.voice) ? s.voice : "";
+      sampleEl.textContent = spell(t.rows()[0]?.sym || "NVLX");
+      chimes.forEach((c) => {
+        const on = c.dataset.sndChime === s.chime;
+        c.setAttribute("aria-checked", String(on));
+        c.tabIndex = on ? 0 : -1;
+      });
+
+      // Custom file row
+      const pending = files.get(key);
+      const has = hasFile(key);
+      drop.classList.toggle("has-file", has);
+      drop.classList.toggle("is-error", Boolean(fileError));
+      removeBtn.hidden = !has;
+      chooseLabel.textContent = has ? "Replace" : "Choose file";
+      if (has) {
+        const name = pending ? pending.name : s.file.name;
+        const size = pending ? pending.size : s.file.size;
+        const len = pending ? fmtClip(clipLength.get(pending)) : "";
+        fileName.textContent = name;
+        fileMeta.textContent = fileError || [fmtBytes(size), len].filter(Boolean).join(" · ");
+      } else {
+        fileName.textContent = "Drop an audio file here";
+        fileMeta.textContent = fileError || "MP3, WAV, OGG, M4A or AAC · up to 10 MB";
+      }
+
+      volume.value = String(s.volume);
+      volume.style.setProperty("--fill", `${s.volume}%`);
+      volume.setAttribute("aria-valuetext", `${s.volume}%`);
+      volumeOut.textContent = `${s.volume}%`;
+
+      const blocked = panels.find(missingFile);
+      const dirty = snapshot() !== baseline;
+      saveBtn.disabled = !dirty || Boolean(blocked);
+      dirtyEl.hidden = !dirty;
+      if (blocked && !preview && !fileError) {
+        setStatus(blocked === key ? "Choose an audio file to use Custom." : `${tables.get(blocked).title} needs an audio file.`, true);
+      } else if (!preview && statusEl.classList.contains("is-error") && !fileError) setStatus();
+    };
+
+    /* Preview */
+
+    const stopPreview = (text = "") => {
+      if (!preview) return;
+      const p = preview;
+      preview = null;
+      p.stop();
+      playBtn.setAttribute("aria-pressed", "false");
+      playLabel.textContent = "Play preview";
+      setStatus(text);
+    };
+    const startPreview = () => {
+      const s = draft();
+      const done = (text) => () => { if (preview === handle) stopPreview(text); };
+      let handle = null;
+      if (s.mode === "voice") {
+        if (!canSpeak) { setStatus("This browser can't read tickers aloud.", true); return; }
+        speechSynthesis.cancel();
+        const text = sampleEl.textContent;
+        const u = speak(text, s.voice, s.volume);
+        handle = { stop: () => speechSynthesis.cancel() };
+        u.addEventListener("end", done(`Read “${text}”.`));
+        u.addEventListener("error", done(""));
+        setStatus(`Reading “${text}”…`);
+      } else if (s.mode === "custom") {
+        const pending = files.get(key);
+        const url = pending ? URL.createObjectURL(pending) : soundFiles.get(key);
+        if (!url) { setStatus("Choose an audio file first.", true); return; }
+        const clip = new Audio(url);
+        clip.volume = s.volume / 100;
+        handle = { stop: () => { clip.pause(); if (pending) URL.revokeObjectURL(url); } };
+        clip.addEventListener("ended", done("Preview finished."));
+        clip.play().catch(done("This file can't be played in this browser."));
+        setStatus("Playing your file…");
+      } else {
+        const ms = playChime(s.chime, toneOf(key), s.volume);
+        const timer = setTimeout(done(""), ms + 250);
+        handle = { stop: () => clearTimeout(timer) };
+        setStatus("");
+      }
+      preview = handle;
+      playBtn.setAttribute("aria-pressed", "true");
+      playLabel.textContent = "Stop";
+    };
+    const toneOf = (p) => document.querySelector(`.terminal[data-panel="${p}"]`)?.dataset.tone || "bull";
+    playBtn.addEventListener("click", () => (preview ? stopPreview() : startPreview()));
+
+    /* Controls */
+
+    const edit = (patch) => {
+      Object.assign(draft(), patch);
+      render();
+    };
+
+    // Radio groups (output cards, chime styles): arrows move and pick.
+    const radioKeys = (items, pick) => items.forEach((el, i) => el.addEventListener("keydown", (e) => {
+      const dir = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+      if (!dir) return;
+      e.preventDefault();
+      const next = items[(i + dir + items.length) % items.length];
+      pick(next);
+      next.focus();
+    }));
+
+    const pickMode = (m) => {
+      stopPreview();
+      fileError = "";
+      edit({ mode: m.dataset.sndMode });
+    };
+    modes.forEach((m) => m.addEventListener("click", () => pickMode(m)));
+    radioKeys(modes, pickMode);
+
+    const pickChime = (c) => {
+      stopPreview();
+      edit({ chime: c.dataset.sndChime });
+      playChime(c.dataset.sndChime, toneOf(key), draft().volume); // hear it right away
+    };
+    chimes.forEach((c) => c.addEventListener("click", () => pickChime(c)));
+    radioKeys(chimes, pickChime);
+
+    onSwitch.addEventListener("click", () => edit({ on: !draft().on }));
+    voiceSel.addEventListener("change", () => edit({ voice: voiceSel.value }));
+    volume.addEventListener("input", () => edit({ volume: Number(volume.value) }));
+
+    const takeFile = (f) => {
+      stopPreview();
+      if (!f) return;
+      if (!isAudioFile(f)) fileError = "That's not an audio file. Try MP3, WAV, OGG, M4A or AAC.";
+      else if (f.size > MAX_SOUND_BYTES) fileError = `${fmtBytes(f.size)} is too big: the limit is 10 MB.`;
+      else {
+        fileError = "";
+        files.set(key, f);
+        draft().file = { name: f.name, size: f.size };
+        // Length for the meta line, once the browser has read it
+        const url = URL.createObjectURL(f);
+        const probe = new Audio();
+        probe.preload = "metadata";
+        probe.addEventListener("loadedmetadata", () => {
+          clipLength.set(f, probe.duration);
+          URL.revokeObjectURL(url);
+          if (dlg.open) render();
+        }, { once: true });
+        probe.addEventListener("error", () => URL.revokeObjectURL(url), { once: true });
+        probe.src = url;
+        setStatus(`${f.name} ready. Press Play preview to hear it.`);
+      }
+      render();
+    };
+    fileInput.addEventListener("change", () => {
+      takeFile(fileInput.files[0]);
+      fileInput.value = "";
+    });
+    drop.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      drop.classList.add("is-over");
+    });
+    drop.addEventListener("dragleave", (e) => { if (!drop.contains(e.relatedTarget)) drop.classList.remove("is-over"); });
+    drop.addEventListener("drop", (e) => {
+      e.preventDefault();
+      drop.classList.remove("is-over");
+      takeFile(e.dataTransfer.files[0]);
+    });
+    removeBtn.addEventListener("click", () => {
+      stopPreview();
+      fileError = "";
+      files.set(key, null);
+      draft().file = null;
+      render();
+      fileInput.focus();
+    });
+
+    /* Table chips */
+
+    const showTable = (p) => {
+      if (p === key) return;
+      stopPreview();
+      fileError = "";
+      setStatus();
+      key = p;
+      render();
+      panelEl.scrollTop = 0;
+      tabsEl.querySelector(`[data-snd-tab="${p}"]`)?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    };
+    tabsEl.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-snd-tab]");
+      if (b) showTable(b.dataset.sndTab);
+    });
+    tabsEl.addEventListener("keydown", (e) => {
+      const dir = { ArrowRight: 1, ArrowLeft: -1 }[e.key];
+      if (!dir) return;
+      e.preventDefault();
+      const next = panels[(panels.indexOf(key) + dir + panels.length) % panels.length];
+      showTable(next);
+      const b = tabsEl.querySelector(`[data-snd-tab="${next}"]`);
+      b.focus();
+      b.scrollIntoView({ block: "nearest", inline: "nearest" });
+    });
+
+    /* Open / close / save */
+
+    const open = (panel, btn) => {
+      trigger = btn;
+      panels = [...document.querySelectorAll(".terminal [data-sound]")].map((b) => b.closest(".terminal").dataset.panel);
+      drafts = Object.fromEntries(panels.map((p) => [p, cleanSound(soundOf(p))]));
+      files = new Map();
+      clipLength = new Map();
+      key = panel;
+      fileError = "";
+      baseline = snapshot();
+      renderTabs();
+      fillVoices();
+      setStatus();
+      render();
+      dlg.showModal();
+      panelEl.scrollTop = 0;
+      tabsEl.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    };
+
+    const close = () => dlg.close();
+    dlg.addEventListener("close", () => {
+      stopPreview();
+      drafts = null;
+      files = null;
+      trigger?.focus();
+    });
+    dlg.addEventListener("click", (e) => { if (e.target === dlg) close(); });
+    $("[data-snd-close]").addEventListener("click", close);
+    $("[data-snd-cancel]").addEventListener("click", close);
+
+    saveBtn.addEventListener("click", () => {
+      if (saveBtn.disabled) return;
+      stopPreview();
+      panels.forEach((p) => { soundPrefs[p] = drafts[p]; });
+      saveSoundPrefs();
+      files.forEach((f, p) => {
+        setSoundFile(p, f);
+        if (!("indexedDB" in window)) return;
+        soundStore("readwrite", (s) => (f ? s.put({ panel: p, blob: f }) : s.delete(p))).catch(() => { /* this session only */ });
+      });
+      if (panels.some((p) => drafts[p].on)) audioNow(); // unlock audio while we have a click
+      syncSoundButtons();
+      const on = panels.filter((p) => drafts[p].on).length;
+      close();
+      showToast(`Alert sound saved · ${on ? `on for ${on} table${on === 1 ? "" : "s"}` : "all tables muted"}`);
+    });
+
+    return { open };
+  };
+
   /* ---- Mount -------------------------------------------------------------- */
 
   const panel = (id) => document.querySelector(`.terminal[data-panel="${id}"]`);
@@ -2126,6 +2596,7 @@
   mountAppFullscreen();
   mountNavStatus();
   mountGuide();
+  const soundSettings = mountSoundSettings();
   const floatSettings = mountFloatSettings();
   const tableSettings = mountTableSettings();
 
@@ -2140,6 +2611,7 @@
   // Bottom row: momentum + halts
   mountTable(panel("momentum"), MOMENTUM, { cols: MOMENTUM_COLS, next: nextAlert(MOMENTUM) });
   mountTable(panel("halts"), HALTS, { cols: HALT_COLS, next: nextHalt, every: 18000, expires: true });
+  syncSoundButtons();
 
   setInterval(() => {
     tickTimers();

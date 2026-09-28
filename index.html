@@ -145,7 +145,7 @@
           <li><b>Buying / Selling Pressure</b>: strong one-sided order flow.</li>
           <li><b>Fast-Growing Momentum</b>: fast gains over 1, 5, 15 and 30 minutes.</li>
         </ul>
-        <p>New alerts appear at the top. Turn on the speaker icon in a table's bar to hear a sound for each new alert.</p>
+        <p>New alerts appear at the top. The speaker icon in a table's bar sets its alert sound.</p>
       </details>
 
       <details class="guide-item">
@@ -193,6 +193,15 @@
           <li><b>Columns</b>: drag to reorder, switch columns on or off, and pick the color of Vol. 1m and Hits. <b>Reset</b> restores the defaults.</li>
           <li><b>Exclude tickers</b>: search a ticker and exclude it from the table. Tick <b>all tables</b> to exclude it everywhere.</li>
           <li><b>Float tiers</b>: the colored dots on the Signal (or Float) row open them. Set where Low, Mid and High float start and their colors; they apply to every table.</li>
+        </ul>
+      </details>
+
+      <details class="guide-item">
+        <summary>Alert sound</summary>
+        <p>The speaker icon in an alert table's bar opens its sound settings. It lights up while that table's sound is on.</p>
+        <ul>
+          <li><b>Voice</b> reads each new ticker, <b>Chime</b> plays a short tone, <b>Custom</b> plays your own audio file.</li>
+          <li>Set the volume and press <b>Play preview</b> to try it. Switch tables with the chips at the top.</li>
         </ul>
       </details>
 
@@ -420,6 +429,126 @@
     </div>
   </dialog>
 
+  <!-- Alert sound: opened by the speaker icon of an alert table. One sound
+       setup per table; the chips switch between tables. -->
+  <dialog class="settings-modal settings-modal--sound" id="sound-settings" aria-labelledby="snd-title" aria-describedby="snd-eyebrow">
+    <div class="sm-shell">
+      <span class="sm-grabber" aria-hidden="true"></span>
+      <header class="sm-head">
+        <span class="sm-badge" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+        </span>
+        <div class="sm-heading">
+          <p class="sm-eyebrow" id="snd-eyebrow">Alert sound</p>
+          <h2 class="sm-title" id="snd-title" data-snd-title>Table</h2>
+        </div>
+        <button type="button" class="icon-btn sm-close" data-snd-close aria-label="Close alert sound" title="Close">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+      </header>
+
+      <div class="snd-tables" role="tablist" aria-label="Alert tables" data-snd-tables></div>
+
+      <div class="sm-body">
+        <section class="sm-panel" role="tabpanel" aria-labelledby="snd-title" data-snd-panel>
+          <!-- On / off for this table -->
+          <div class="snd-master" data-snd-master>
+            <span class="snd-master__icon" aria-hidden="true">
+              <svg class="icon-on" viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+              <svg class="icon-off" viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="m16 9 5 6"/><path d="m21 9-5 6"/></svg>
+            </span>
+            <span class="snd-master__text">
+              <b id="snd-on-label">Sound for new alerts</b>
+              <span data-snd-state></span>
+            </span>
+            <button type="button" class="switch" role="switch" aria-checked="false" aria-labelledby="snd-on-label" data-snd-on></button>
+          </div>
+
+          <div class="snd-settings" data-snd-settings>
+            <div class="sm-section-head"><h3 id="snd-output-label">Output</h3></div>
+            <div class="snd-modes" role="radiogroup" aria-labelledby="snd-output-label">
+              <button type="button" class="snd-mode" role="radio" aria-checked="false" data-snd-mode="voice">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3.5" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v2.5"/></svg>
+                <b>Voice</b><span>Reads the ticker</span>
+              </button>
+              <button type="button" class="snd-mode" role="radio" aria-checked="false" data-snd-mode="chime">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15z"/><path d="M10 21h4"/></svg>
+                <b>Chime</b><span>Short tone</span>
+              </button>
+              <button type="button" class="snd-mode" role="radio" aria-checked="false" data-snd-mode="custom">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18V5.5l11-2V16"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="16" r="2.5"/></svg>
+                <b>Custom</b><span>Your own file</span>
+              </button>
+            </div>
+
+            <!-- Details of the chosen output -->
+            <div class="snd-detail" data-snd-detail="voice" hidden>
+              <label class="snd-field">
+                <span>Voice</span>
+                <span class="snd-select">
+                  <select data-snd-voice></select>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>
+                </span>
+              </label>
+              <p class="snd-note">Says each new ticker letter by letter: <q data-snd-sample>N V L X</q></p>
+            </div>
+
+            <div class="snd-detail" data-snd-detail="chime" hidden>
+              <div class="snd-chimes" role="radiogroup" aria-label="Chime">
+                <button type="button" class="snd-chip" role="radio" aria-checked="false" data-snd-chime="ping">Ping</button>
+                <button type="button" class="snd-chip" role="radio" aria-checked="false" data-snd-chime="chime">Two-tone</button>
+                <button type="button" class="snd-chip" role="radio" aria-checked="false" data-snd-chime="blip">Blip</button>
+              </div>
+              <p class="snd-note">Pitch follows the table: higher for bullish alerts, lower for bearish ones.</p>
+            </div>
+
+            <div class="snd-detail" data-snd-detail="custom" hidden>
+              <div class="snd-drop" data-snd-drop>
+                <input class="sr-only" type="file" id="snd-file" accept="audio/*,.mp3,.wav,.ogg,.m4a,.aac" data-snd-file>
+                <span class="snd-drop__icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24"><path d="M12 15.5V4.5M7.5 9 12 4.5 16.5 9"/><path d="M4.5 15v2.5a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V15"/></svg>
+                </span>
+                <span class="snd-drop__text">
+                  <b data-snd-file-name>Drop an audio file here</b>
+                  <span data-snd-file-meta>MP3, WAV, OGG, M4A or AAC · up to 10 MB</span>
+                </span>
+                <label class="btn btn-secondary btn-sm" for="snd-file" data-snd-choose>Choose file</label>
+                <button type="button" class="icon-btn snd-drop__remove" data-snd-remove aria-label="Remove file" title="Remove file" hidden>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V5h6v2M6.5 7l1 12h9l1-12"/></svg>
+                </button>
+              </div>
+            </div>
+
+            <div class="sm-section-head">
+              <h3 id="snd-volume-label">Volume</h3>
+              <span class="sm-meta" data-snd-volume-out></span>
+            </div>
+            <div class="snd-volume">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/></svg>
+              <input type="range" class="range" min="0" max="100" step="5" aria-labelledby="snd-volume-label" data-snd-volume>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+            </div>
+
+            <div class="snd-preview">
+              <button type="button" class="btn btn-secondary" data-snd-play aria-pressed="false">
+                <span class="snd-eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+                <svg class="snd-play-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5z"/></svg>
+                <span data-snd-play-label>Play preview</span>
+              </button>
+              <p class="snd-status" data-snd-status role="status" aria-live="polite"></p>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <footer class="sm-foot">
+        <span class="sm-dirty" data-snd-dirty hidden><i aria-hidden="true"></i>Unsaved</span>
+        <button type="button" class="btn btn-secondary" data-snd-cancel>Cancel</button>
+        <button type="button" class="btn btn-primary" data-snd-save disabled>Save changes</button>
+      </footer>
+    </div>
+  </dialog>
+
   <!-- Short confirmations (e.g. "settings saved"). A manual popover, so it
        shows above open dialogs too. -->
   <div class="toast" data-toast role="status" aria-live="polite" popover="manual" hidden>
@@ -433,7 +562,7 @@
     <div class="terminal-bar">
       <span class="terminal-title"></span>
       <div class="terminal-tools">
-        <button type="button" class="icon-btn sound-icon" data-sound aria-pressed="false" data-label="Alert sound for {title}" title="Alert sound">
+        <button type="button" class="icon-btn sound-icon" data-sound data-on="false" aria-haspopup="dialog" aria-controls="sound-settings" data-label="Alert sound for {title}" title="Alert sound: off">
           <svg class="icon-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
           <svg class="icon-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="m16 9 5 6"/><path d="m21 9-5 6"/></svg>
         </button>
