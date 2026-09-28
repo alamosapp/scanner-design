@@ -192,6 +192,7 @@
         <ul>
           <li><b>Columns</b>: drag to reorder, switch columns on or off, and pick the color of Vol. 1m and Hits. <b>Reset</b> restores the defaults.</li>
           <li><b>Exclude tickers</b>: search a ticker and exclude it from the table. Tick <b>all tables</b> to exclude it everywhere.</li>
+          <li><b>Float tiers</b>: the colored dots on the Signal (or Float) row open them. Set where Low, Mid and High float start and their colors; they apply to every table.</li>
         </ul>
       </details>
 
@@ -319,8 +320,109 @@
     </div>
   </dialog>
 
-  <!-- Short confirmations (e.g. "settings saved") -->
-  <div class="toast" data-toast role="status" aria-live="polite" hidden>
+  <!-- Float tiers: opened from Table settings (Signal / Float rows). Sets where
+       each float tier starts and its color, for every table. -->
+  <dialog class="settings-modal settings-modal--float" id="float-settings" aria-labelledby="fl-title" aria-describedby="fl-lead">
+    <div class="sm-shell">
+      <span class="sm-grabber" aria-hidden="true"></span>
+      <header class="sm-head">
+        <span class="sm-badge" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M6 19V11M12 19V5M18 19v-5"/></svg>
+        </span>
+        <div class="sm-heading">
+          <p class="sm-eyebrow">Signal column · all tables</p>
+          <h2 class="sm-title" id="fl-title">Float tiers</h2>
+        </div>
+        <button type="button" class="icon-btn sm-close" data-fl-close aria-label="Close float tiers" title="Close">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+      </header>
+
+      <div class="sm-body">
+        <section class="sm-panel">
+          <p class="sm-lead" id="fl-lead">The bar at the start of every row shows the stock's float: the shares free to trade. Smaller floats move faster.</p>
+
+          <!-- Spectrum: 1M → 1B on a log scale. Dots are the tickers on screen now. -->
+          <div class="fl-spectrum" data-fl-spectrum>
+            <div class="fl-track" data-fl-track>
+              <i class="fl-zone" data-float="low" aria-hidden="true"></i>
+              <i class="fl-zone" data-float="mid" aria-hidden="true"></i>
+              <i class="fl-zone" data-float="high" aria-hidden="true"></i>
+              <div class="fl-dots" data-fl-dots aria-hidden="true"></div>
+              <span class="fl-thumb" data-fl-thumb="low" role="slider" tabindex="0" aria-label="Low float ends at" aria-valuemin="0" aria-valuemax="100">
+                <span class="fl-thumb__tip" data-fl-tip="low"></span>
+              </span>
+              <span class="fl-thumb" data-fl-thumb="mid" role="slider" tabindex="0" aria-label="Mid float ends at" aria-valuemin="0" aria-valuemax="100">
+                <span class="fl-thumb__tip" data-fl-tip="mid"></span>
+              </span>
+            </div>
+            <div class="fl-scale" aria-hidden="true">
+              <span style="--x: 0">1M</span><span style="--x: 33.333">10M</span><span style="--x: 66.667">100M</span><span style="--x: 100">1B</span>
+            </div>
+          </div>
+
+          <div class="fl-presets" role="group" aria-label="Quick presets">
+            <button type="button" class="fl-preset" data-fl-preset="5e6,20e6" aria-pressed="false"><b>Tight</b><span>5M · 20M</span></button>
+            <button type="button" class="fl-preset" data-fl-preset="10e6,50e6" aria-pressed="false"><b>Classic</b><span>10M · 50M</span></button>
+            <button type="button" class="fl-preset" data-fl-preset="20e6,100e6" aria-pressed="false"><b>Wide</b><span>20M · 100M</span></button>
+          </div>
+
+          <div class="sm-section-head">
+            <h3>Tiers</h3>
+            <span class="sm-meta" data-fl-live></span>
+          </div>
+          <ul class="fl-tiers">
+            <li class="fl-tier" data-float="low">
+              <i class="sig-bar" aria-hidden="true"></i>
+              <div class="fl-tier__main">
+                <div class="fl-tier__top"><b>Low float</b><span class="fl-count" data-fl-count="low"></span></div>
+                <div class="fl-tier__range">
+                  <span>Under</span>
+                  <input class="fl-input" type="text" inputmode="decimal" maxlength="8" autocomplete="off" spellcheck="false" data-fl-input="low" aria-label="Low float ends at" aria-describedby="fl-error">
+                </div>
+              </div>
+              <div class="fl-swatches" role="radiogroup" aria-label="Low float color" data-fl-swatches="low"></div>
+            </li>
+            <li class="fl-tier" data-float="mid">
+              <i class="sig-bar" aria-hidden="true"></i>
+              <div class="fl-tier__main">
+                <div class="fl-tier__top"><b>Mid float</b><span class="fl-count" data-fl-count="mid"></span></div>
+                <div class="fl-tier__range">
+                  <span data-fl-from="mid"></span><span>to</span>
+                  <input class="fl-input" type="text" inputmode="decimal" maxlength="8" autocomplete="off" spellcheck="false" data-fl-input="mid" aria-label="Mid float ends at" aria-describedby="fl-error">
+                </div>
+              </div>
+              <div class="fl-swatches" role="radiogroup" aria-label="Mid float color" data-fl-swatches="mid"></div>
+            </li>
+            <li class="fl-tier" data-float="high">
+              <i class="sig-bar" aria-hidden="true"></i>
+              <div class="fl-tier__main">
+                <div class="fl-tier__top"><b>High float</b><span class="fl-count" data-fl-count="high"></span></div>
+                <div class="fl-tier__range"><span data-fl-from="high"></span><span>and up</span></div>
+              </div>
+              <div class="fl-swatches" role="radiogroup" aria-label="High float color" data-fl-swatches="high"></div>
+            </li>
+          </ul>
+          <p class="fl-error" id="fl-error" data-fl-error role="alert" hidden></p>
+          <p class="sm-hint">Type a size like <kbd>10M</kbd> or <kbd>800K</kbd>, or drag the handles. Picking a color another tier uses swaps them.</p>
+        </section>
+      </div>
+
+      <footer class="sm-foot">
+        <button type="button" class="btn btn-ghost btn-sm sm-reset" data-fl-reset title="10M · 50M, default colors">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4.5V9h4.5"/></svg>
+          <span>Reset</span>
+        </button>
+        <span class="sm-dirty" data-fl-dirty hidden><i aria-hidden="true"></i>Unsaved</span>
+        <button type="button" class="btn btn-secondary" data-fl-cancel>Cancel</button>
+        <button type="button" class="btn btn-primary" data-fl-save disabled>Save changes</button>
+      </footer>
+    </div>
+  </dialog>
+
+  <!-- Short confirmations (e.g. "settings saved"). A manual popover, so it
+       shows above open dialogs too. -->
+  <div class="toast" data-toast role="status" aria-live="polite" popover="manual" hidden>
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5.5 12.5 4 4 9-9"/></svg>
     <span data-toast-text></span>
   </div>

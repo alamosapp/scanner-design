@@ -9,7 +9,11 @@
   /* ---- Config ------------------------------------------------------------ */
 
   // Signal column: float tiers (shares). < low → low float, < mid → mid, else high.
-  const FLOAT_TIERS = { low: 10e6, mid: 50e6 };
+  // These are the defaults; the Float tiers dialog can change both cuts and
+  // the tier colors (palette token names; "muted" is --text-3).
+  const FLOAT_DEFAULTS = { low: 10e6, mid: 50e6, colors: { low: "cyan", mid: "violet", high: "muted" } };
+  const FLOAT_TIERS = { low: FLOAT_DEFAULTS.low, mid: FLOAT_DEFAULTS.mid };
+  const FLOAT_RANGE = { min: 1e6, max: 1e9 }; // what the dialog accepts (and its log scale)
 
   // Color scales. `min` is the faintest value, `max` the brightest; values
   // past `max` stay at full brightness, values short of `min` get no color.
@@ -87,7 +91,7 @@
     return `<span class="${cls}" data-hue="${hue}" style="--t:${t.toFixed(3)}">${text}</span>`;
   };
 
-  const floatTier = (f) => (f < FLOAT_TIERS.low ? "low" : f < FLOAT_TIERS.mid ? "mid" : "high");
+  const floatTier = (f, tiers = FLOAT_TIERS) => (f < tiers.low ? "low" : f < tiers.mid ? "mid" : "high");
   const FLOAT_LABEL = { low: "Low float", mid: "Mid float", high: "High float" };
 
   const vwapClass = (d) => (d >= VWAP_D.up ? "up" : d < VWAP_D.down ? "down" : "flat");
@@ -281,6 +285,30 @@
   } catch { /* ignore */ }
   const saveGlobalExcluded = () => {
     try { localStorage.setItem(GLOBAL_EXCLUDED_KEY, JSON.stringify([...globalExcluded])); } catch { /* ignore */ }
+  };
+
+  // Float tiers, shared by every table: cuts in FLOAT_TIERS, colors as the
+  // --float-* tokens on :root.
+  const FLOAT_SWATCHES = ["cyan", "violet", "pink", "orange", "teal", "amber", "muted"];
+  const FLOAT_KEY = "scanner:float:v1";
+  const swatchVar = (s) => (s === "muted" ? "var(--text-3)" : `var(--${s})`);
+  const floatColors = { ...FLOAT_DEFAULTS.colors };
+  const validCuts = (low, mid) => [low, mid].every((v) => Number.isFinite(v) && v >= FLOAT_RANGE.min && v <= FLOAT_RANGE.max) && low < mid;
+  const applyFloat = () => {
+    for (const [tier, c] of Object.entries(floatColors)) document.documentElement.style.setProperty(`--float-${tier}`, swatchVar(c));
+  };
+  try {
+    const saved = JSON.parse(localStorage.getItem(FLOAT_KEY) || "null");
+    if (saved) {
+      if (validCuts(saved.low, saved.mid)) Object.assign(FLOAT_TIERS, { low: saved.low, mid: saved.mid });
+      for (const tier of Object.keys(floatColors)) {
+        if (FLOAT_SWATCHES.includes(saved.colors?.[tier])) floatColors[tier] = saved.colors[tier];
+      }
+    }
+  } catch { /* ignore */ }
+  applyFloat();
+  const saveFloat = () => {
+    try { localStorage.setItem(FLOAT_KEY, JSON.stringify({ ...FLOAT_TIERS, colors: floatColors })); } catch { /* ignore */ }
   };
 
   // Every mounted table, by panel id: what the settings dialog reads and writes.
@@ -1247,15 +1275,24 @@
 
   /* Toast: a short confirmation at the bottom of the screen. */
   const toastEl = document.querySelector("[data-toast]");
+  // As a popover it sits in the top layer, above any open dialog; re-showing
+  // it puts it back on top. Without popover support it falls back to `hidden`.
+  const toastPops = typeof toastEl.showPopover === "function";
+  if (toastPops) toastEl.hidden = false;
+  const setToast = (on) => {
+    if (!toastPops) { toastEl.hidden = !on; return; }
+    if (toastEl.matches(":popover-open")) toastEl.hidePopover();
+    if (on) toastEl.showPopover();
+  };
   let toastTimer = 0;
   const showToast = (text) => {
     clearTimeout(toastTimer);
     toastEl.querySelector("[data-toast-text]").textContent = text;
     toastEl.classList.remove("is-leaving");
-    toastEl.hidden = false;
+    setToast(true);
     toastTimer = setTimeout(() => {
       toastEl.classList.add("is-leaving");
-      toastTimer = setTimeout(() => { toastEl.hidden = true; }, reduceMotion.matches ? 0 : 220);
+      toastTimer = setTimeout(() => setToast(false), reduceMotion.matches ? 0 : 220);
     }, 2600);
   };
 
@@ -1267,7 +1304,7 @@
      - Exclude tickers: hide tickers from this table, or from every table.
      Everything is a draft until Save; Cancel, Esc or a click outside drops it. */
 
-  const SWATCH_LABEL = { amber: "Amber", violet: "Violet", cyan: "Cyan", pink: "Pink", orange: "Orange", teal: "Teal" };
+  const SWATCH_LABEL = { amber: "Amber", violet: "Violet", cyan: "Cyan", pink: "Pink", orange: "Orange", teal: "Teal", muted: "Gray" };
   const ICON = {
     grip: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>',
     lock: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5.5" y="10.5" width="13" height="9" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/></svg>',
@@ -1331,13 +1368,18 @@
     const colorOf = (k) => draft.colors[k] || COLORABLE[k];
     const desc = (c) => (c.title ? `<span class="col-item__desc">${c.title}</span>` : "");
 
+    // Opens the Float tiers dialog; the dots show the current tier colors.
+    const floatOpener = (compact) => `<button type="button" class="float-open${compact ? " float-open--icon" : ""}" data-float-open aria-haspopup="dialog" aria-controls="float-settings" aria-label="Float tiers" title="Float tiers: sizes and colors">
+      <span class="float-dots" aria-hidden="true"><i data-float="low"></i><i data-float="mid"></i><i data-float="high"></i></span>${compact ? "" : "<span>Float tiers</span>"}
+    </button>`;
+
     const renderColumns = () => {
       closePopover();
       pinnedList.innerHTML = table.pins.map((k) => `
         <li class="col-item">
           <span class="col-item__lead">${ICON.lock}</span>
           <span class="col-item__text"><span class="col-item__name">${COL[k].label}</span>${desc(COL[k])}</span>
-          <span class="col-tag">Pinned</span>
+          ${k === "sig" ? floatOpener(false) : '<span class="col-tag">Pinned</span>'}
         </li>`).join("");
       colList.innerHTML = draft.order.map((k) => {
         const c = COL[k];
@@ -1349,7 +1391,7 @@
           <li class="col-item${on ? "" : " is-off"}" data-key="${k}">
             <button type="button" class="col-item__grip" data-grip aria-label="Move ${c.label}" aria-describedby="ts-cols-hint" title="Drag to reorder">${ICON.grip}</button>
             <span class="col-item__text"><span class="col-item__name">${c.label}</span>${desc(c)}</span>
-            <span class="col-item__actions">${color}<button type="button" class="switch" role="switch" data-toggle aria-checked="${on}" aria-label="Show ${c.label}" title="${on ? "Hide" : "Show"} column"></button></span>
+            <span class="col-item__actions">${k === "float" ? floatOpener(true) : ""}${color}<button type="button" class="switch" role="switch" data-toggle aria-checked="${on}" aria-label="Show ${c.label}" title="${on ? "Hide" : "Show"} column"></button></span>
           </li>`;
       }).join("");
       syncShown();
@@ -1374,6 +1416,11 @@
     };
 
     // Switch in place (no re-render) so the knob animates.
+    dlg.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-float-open]");
+      if (btn) floatSettings.open(btn, table.tone);
+    });
+
     colList.addEventListener("click", (e) => {
       const sw = e.target.closest("[data-toggle]");
       if (sw) {
@@ -1763,6 +1810,279 @@
     return { open };
   };
 
+  /* ---- Float tiers dialog --------------------------------------------------
+     Opened from Table settings (Signal / Float rows), on top of it. Sets the
+     two cuts (Low | Mid | High) and a color per tier, for every table.
+     - Spectrum: 1M → 1B on a log scale. Drag a handle (or focus it and use
+       the arrow keys), or press the track to bring the nearest one there.
+       The dots are the tickers on screen now, colored by the draft tiers.
+     - Or type a size: 10M, 800K, 1.5B (a bare number means millions).
+     - Picking a color another tier uses swaps the two, so tiers stay apart.
+     Everything is a draft until Save; Cancel, Esc or a click outside drops it. */
+
+  // Handle stops: round sizes, so a drag never lands on 12.37M.
+  const FLOAT_STOPS = [1e6, 1e7, 1e8]
+    .flatMap((d) => [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 7, 8, 9].map((s) => s * d))
+    .concat(1e9);
+  const LOG_MIN = Math.log10(FLOAT_RANGE.min);
+  const LOG_SPAN = Math.log10(FLOAT_RANGE.max) - LOG_MIN;
+  const floatPos = (v) => Math.max(0, Math.min(100, ((Math.log10(v) - LOG_MIN) / LOG_SPAN) * 100));
+  const floatAt = (pct) => 10 ** (LOG_MIN + (pct / 100) * LOG_SPAN);
+  const fmtShares = (v) => {
+    const [div, unit] = v >= 1e9 ? [1e9, "B"] : v >= 1e6 ? [1e6, "M"] : [1e3, "K"];
+    return `${Number((v / div).toFixed(2))}${unit}`;
+  };
+  const parseShares = (text) => {
+    const m = /^(\d+(?:\.\d*)?|\.\d+)\s*([KMB])?$/i.exec(text.trim());
+    if (!m) return NaN;
+    return Math.round(Number(m[1]) * { K: 1e3, M: 1e6, B: 1e9 }[(m[2] || "M").toUpperCase()]);
+  };
+
+  const mountFloatSettings = () => {
+    const dlg = document.getElementById("float-settings");
+    const $ = (sel) => dlg.querySelector(sel);
+    const all = (attr) => Object.fromEntries([...dlg.querySelectorAll(`[${attr}]`)].map((el) => [el.getAttribute(attr), el]));
+    const panel = $(".sm-panel");
+    const spectrum = $("[data-fl-spectrum]");
+    const track = $("[data-fl-track]");
+    const dotsEl = $("[data-fl-dots]");
+    const thumbs = all("data-fl-thumb");
+    const tips = all("data-fl-tip");
+    const inputs = all("data-fl-input");
+    const froms = all("data-fl-from");
+    const counts = all("data-fl-count");
+    const groups = all("data-fl-swatches");
+    const presets = [...dlg.querySelectorAll("[data-fl-preset]")];
+    const liveEl = $("[data-fl-live]");
+    const errorEl = $("[data-fl-error]");
+    const dirtyEl = $("[data-fl-dirty]");
+    const saveBtn = $("[data-fl-save]");
+    const CUTS = ["low", "mid"];
+
+    let draft = null;   // { low, mid, colors }
+    let baseline = "";
+    let trigger = null;
+    let floats = [];    // float of each ticker on screen
+    let bad = {};       // cut → message, while its field holds an invalid size
+    let drag = null;
+
+    Object.values(thumbs).forEach((t) => {
+      t.setAttribute("aria-valuemin", String(FLOAT_RANGE.min));
+      t.setAttribute("aria-valuemax", String(FLOAT_RANGE.max));
+    });
+    Object.values(groups).forEach((g) => {
+      g.innerHTML = FLOAT_SWATCHES.map((s) => `<button type="button" class="swatch" role="radio" data-pick="${s}" style="--sw: ${swatchVar(s)}" aria-checked="false" aria-label="${SWATCH_LABEL[s]}" title="${SWATCH_LABEL[s]}"></button>`).join("");
+    });
+
+    const snapshot = () => JSON.stringify([draft.low, draft.mid, draft.colors]);
+
+    const render = () => {
+      const { low, mid, colors } = draft;
+      // The dialog previews the draft colors; the page keeps the saved ones.
+      for (const [tier, c] of Object.entries(colors)) dlg.style.setProperty(`--sig-${tier}`, swatchVar(c));
+      spectrum.style.setProperty("--a", floatPos(low).toFixed(3));
+      spectrum.style.setProperty("--b", floatPos(mid).toFixed(3));
+      spectrum.classList.toggle("is-close", floatPos(mid) - floatPos(low) < 14); // tips side by side
+      for (const tier of CUTS) {
+        tips[tier].textContent = fmtShares(draft[tier]);
+        thumbs[tier].setAttribute("aria-valuenow", String(draft[tier]));
+        thumbs[tier].setAttribute("aria-valuetext", fmtShares(draft[tier]));
+      }
+      froms.mid.textContent = fmtShares(low);
+      froms.high.textContent = fmtShares(mid);
+
+      const n = { low: 0, mid: 0, high: 0 };
+      floats.forEach((f) => n[floatTier(f, draft)]++);
+      [...dotsEl.children].forEach((dot, i) => { dot.dataset.float = floatTier(floats[i], draft); });
+      for (const [tier, el] of Object.entries(counts)) el.textContent = floats.length ? `${n[tier]} on screen` : "";
+
+      for (const [tier, g] of Object.entries(groups)) {
+        g.querySelectorAll("[data-pick]").forEach((b) => {
+          const on = b.dataset.pick === colors[tier];
+          b.setAttribute("aria-checked", String(on));
+          b.tabIndex = on ? 0 : -1;
+        });
+      }
+      presets.forEach((b) => {
+        const [l, m] = b.dataset.flPreset.split(",").map(Number);
+        b.setAttribute("aria-pressed", String(l === low && m === mid));
+      });
+
+      const msg = bad.low || bad.mid || "";
+      errorEl.textContent = msg;
+      errorEl.hidden = !msg;
+      CUTS.forEach((tier) => inputs[tier].setAttribute("aria-invalid", String(Boolean(bad[tier]))));
+      const dirty = snapshot() !== baseline;
+      saveBtn.disabled = !dirty || Boolean(msg);
+      dirtyEl.hidden = !dirty;
+    };
+
+    const writeInputs = () => CUTS.forEach((tier) => { inputs[tier].value = fmtShares(draft[tier]); });
+    const setCuts = (cuts) => {
+      Object.assign(draft, cuts);
+      bad = {};
+      writeInputs();
+      render();
+    };
+
+    /* Typed sizes: the draft only takes them once both are valid and in order. */
+    const readInputs = (edited) => {
+      bad = {};
+      const next = {};
+      for (const tier of CUTS) {
+        const v = parseShares(inputs[tier].value);
+        if (!(v > 0)) bad[tier] = "Enter a size like 10M or 800K.";
+        else if (v < FLOAT_RANGE.min || v > FLOAT_RANGE.max) bad[tier] = "Pick a size between 1M and 1B.";
+        else next[tier] = v;
+      }
+      if (!bad.low && !bad.mid) {
+        if (next.low < next.mid) Object.assign(draft, next);
+        else bad[edited] = "Low float has to end before Mid float starts.";
+      }
+      render();
+    };
+    CUTS.forEach((tier) => {
+      const input = inputs[tier];
+      input.addEventListener("input", () => readInputs(tier));
+      input.addEventListener("change", () => { if (!bad.low && !bad.mid) writeInputs(); }); // 10 → 10M
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); input.dispatchEvent(new Event("change")); }
+      });
+    });
+
+    /* Spectrum handles */
+
+    // Stops a handle can take: it never reaches the other one.
+    const stopsFor = (tier) => FLOAT_STOPS.filter((s) => (tier === "low" ? s < draft.mid : s > draft.low));
+    const snap = (tier, v) => stopsFor(tier).reduce((a, b) => (Math.abs(Math.log(b / v)) < Math.abs(Math.log(a / v)) ? b : a));
+    const valueAt = (x) => {
+      const r = track.getBoundingClientRect();
+      return floatAt(((x - r.left) / r.width) * 100);
+    };
+
+    track.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0 || !draft) return;
+      const v = valueAt(e.clientX);
+      const tier = e.target.closest("[data-fl-thumb]")?.dataset.flThumb
+        || (Math.abs(Math.log(v / draft.low)) <= Math.abs(Math.log(v / draft.mid)) ? "low" : "mid");
+      e.preventDefault();
+      drag = { tier, id: e.pointerId };
+      track.setPointerCapture(e.pointerId);
+      thumbs[tier].classList.add("is-dragging");
+      thumbs[tier].focus({ preventScroll: true });
+      setCuts({ [tier]: snap(tier, v) });
+    });
+    track.addEventListener("pointermove", (e) => {
+      if (!drag || e.pointerId !== drag.id || !draft) return;
+      const v = snap(drag.tier, valueAt(e.clientX));
+      if (v !== draft[drag.tier]) setCuts({ [drag.tier]: v });
+    });
+    const endDrag = (e) => {
+      if (!drag || e.pointerId !== drag.id) return;
+      thumbs[drag.tier].classList.remove("is-dragging");
+      drag = null;
+    };
+    track.addEventListener("pointerup", endDrag);
+    track.addEventListener("pointercancel", endDrag);
+    track.addEventListener("lostpointercapture", endDrag);
+
+    Object.entries(thumbs).forEach(([tier, thumb]) => thumb.addEventListener("keydown", (e) => {
+      const stops = stopsFor(tier);
+      const cur = draft[tier];
+      const above = stops.filter((s) => s > cur);
+      const below = stops.filter((s) => s < cur);
+      const target = {
+        ArrowRight: above[0], ArrowUp: above[0], ArrowLeft: below.at(-1), ArrowDown: below.at(-1),
+        PageUp: above[2] ?? above.at(-1), PageDown: below.at(-3) ?? below[0],
+        Home: stops[0], End: stops.at(-1),
+      };
+      if (!(e.key in target)) return;
+      e.preventDefault();
+      if (target[e.key] !== undefined) setCuts({ [tier]: target[e.key] });
+    }));
+
+    presets.forEach((b) => b.addEventListener("click", () => {
+      const [low, mid] = b.dataset.flPreset.split(",").map(Number);
+      setCuts({ low, mid });
+    }));
+
+    /* Colors */
+
+    const pick = (tier, c) => {
+      const other = Object.keys(draft.colors).find((t) => t !== tier && draft.colors[t] === c);
+      if (other) draft.colors[other] = draft.colors[tier];
+      draft.colors[tier] = c;
+      render();
+    };
+    Object.entries(groups).forEach(([tier, g]) => {
+      g.addEventListener("click", (e) => {
+        const b = e.target.closest("[data-pick]");
+        if (b) pick(tier, b.dataset.pick);
+      });
+      // Radio group: arrows move the choice
+      g.addEventListener("keydown", (e) => {
+        const dir = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+        if (!dir) return;
+        e.preventDefault();
+        const i = FLOAT_SWATCHES.indexOf(draft.colors[tier]);
+        const next = FLOAT_SWATCHES[(i + dir + FLOAT_SWATCHES.length) % FLOAT_SWATCHES.length];
+        pick(tier, next);
+        g.querySelector(`[data-pick="${next}"]`).focus();
+      });
+    });
+
+    /* Open / close / save */
+
+    const open = (btn, tone) => {
+      trigger = btn;
+      draft = { low: FLOAT_TIERS.low, mid: FLOAT_TIERS.mid, colors: { ...floatColors } };
+      baseline = snapshot();
+      bad = {};
+      // Tickers on screen, one dot each; the height is a stable per-ticker jitter.
+      const seen = new Map();
+      tables.forEach((t) => t.rows().forEach((r) => { if (!seen.has(r.sym)) seen.set(r.sym, r.float); }));
+      floats = [...seen.values()];
+      dotsEl.innerHTML = [...seen].map(([sym, f]) => {
+        const y = [...sym].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) % 997, 7) % 100;
+        return `<i style="--x: ${floatPos(f).toFixed(2)}; --y: ${y}"></i>`;
+      }).join("");
+      liveEl.textContent = floats.length ? `Dots: ${floats.length} tickers on screen` : "";
+      dlg.style.setProperty("--tone", tone || "var(--green)");
+      writeInputs();
+      render();
+      dlg.showModal();
+      panel.scrollTop = 0;
+    };
+
+    const close = () => dlg.close();
+    dlg.addEventListener("close", () => {
+      if (drag) thumbs[drag.tier].classList.remove("is-dragging");
+      drag = null;
+      draft = null;
+      trigger?.focus();
+    });
+    dlg.addEventListener("click", (e) => { if (e.target === dlg) close(); });
+    $("[data-fl-close]").addEventListener("click", close);
+    $("[data-fl-cancel]").addEventListener("click", close);
+    $("[data-fl-reset]").addEventListener("click", () => {
+      draft.colors = { ...FLOAT_DEFAULTS.colors };
+      setCuts({ low: FLOAT_DEFAULTS.low, mid: FLOAT_DEFAULTS.mid });
+    });
+
+    saveBtn.addEventListener("click", () => {
+      if (saveBtn.disabled) return;
+      Object.assign(FLOAT_TIERS, { low: draft.low, mid: draft.mid });
+      Object.assign(floatColors, draft.colors);
+      applyFloat();
+      saveFloat();
+      tables.forEach((t) => t.refresh());
+      close();
+      showToast("Float tiers saved · all tables");
+    });
+
+    return { open };
+  };
+
   /* ---- Mount -------------------------------------------------------------- */
 
   const panel = (id) => document.querySelector(`.terminal[data-panel="${id}"]`);
@@ -1771,6 +2091,7 @@
   mountAppFullscreen();
   mountNavStatus();
   mountGuide();
+  const floatSettings = mountFloatSettings();
   const tableSettings = mountTableSettings();
 
   // Vertical container: toplists
