@@ -614,6 +614,311 @@
     btn.setAttribute("aria-label", `Alert sound for ${root.dataset.title}: ${on ? "on" : "off"}`);
   });
 
+  /* ---- Filters -------------------------------------------------------------
+     Global row filters, set in the Filters dialog (rules: FILTER_RULES.md of
+     the dashboard). A filter is a variable, the sessions and tables it works
+     in, a condition and one or two values. A table keeps a row only if it
+     passes every enabled filter aimed at (current session, that table).
+     Variable and session names are the scanner's contract: keep them as is. */
+
+  const FILTER_KEY = "scanner:filters:v1";
+  const MARKET_SESSIONS = ["Regular Market", "Premarket", "Postmarket"];
+  const ALL_SESSIONS = "All sessions";
+  const ALL_TABLES = "All tables";
+  const FILTER_TABLES = [
+    ["gainers", "Gainers"], ["gainers-open", "Gainers Open"], ["volume-leaders", "Volume Leaders"],
+    ["new-hod", "New HoD"], ["buying", "Buying Pressure"], ["selling", "Selling Pressure"],
+    ["momentum", "Fast-Growing Momentum"], ["halts", "Halts"],
+  ];
+  const TABLE_NAME = Object.fromEntries(FILTER_TABLES);
+
+  // Table sets of the compatibility matrix. Gainers Open only runs in the
+  // regular session; Halts windows publish no VWAP.
+  const STATUS_R = ["gainers", "gainers-open", "volume-leaders"];
+  const STATUS_X = ["gainers", "volume-leaders"];
+  const FLOW = ["new-hod", "buying", "selling", "momentum"];
+  const ALL_R = [...STATUS_R, ...FLOW, "halts"];
+  const ALL_X = [...STATUS_X, ...FLOW, "halts"];
+  const inEvery = (t) => Object.fromEntries(MARKET_SESSIONS.map((s) => [s, t]));
+  const EVERY_TABLE = { "Regular Market": ALL_R, Premarket: ALL_X, Postmarket: ALL_X };
+  const VWAP_TABLES = { "Regular Market": [...STATUS_R, ...FLOW], Premarket: [...STATUS_X, ...FLOW], Postmarket: [...STATUS_X, ...FLOW] };
+
+  // What each variable reads from a row, rounded as the tables show it.
+  // Pmkt Vol., the gaps and the post-market changes have no column yet: the
+  // mock derives them from the same day data.
+  const pctVs = (v, ref) => round(((v - ref) / ref) * 100, 1);
+  const absVs = (v, ref) => Number((v - ref).toFixed(Math.abs(v - ref) >= 1 ? 2 : 4));
+  const asMult = (v) => round(v, v >= 100 ? 0 : 1);
+  const pctOf = (v) => (v == null ? null : round(v, 1));
+  const FILTER_VARS = {
+    Price:        { group: "Price",    about: "Last price",                    bySession: EVERY_TABLE, get: (r) => Number(fmtPrice(r.price)) },
+    VWAP:         { group: "Price",    about: "Volume-weighted average price", bySession: VWAP_TABLES, get: (r) => Number(fmtPrice(r.vwap)) },
+    "VWAP D.":    { group: "Price",    about: "Distance to VWAP",              bySession: VWAP_TABLES, unit: "%", get: (r) => round(((r.price - r.vwap) / r.vwap) * 100, 2) },
+    "Vol.":       { group: "Volume",   about: "Volume today",                  bySession: { "Regular Market": ALL_R, Premarket: ALL_X }, get: (r) => r.volume },
+    "Pmkt Vol.":  { group: "Volume",   about: "Post-market volume",            bySession: { Postmarket: ALL_X }, get: (r) => r.volume },
+    RVol:         { group: "Volume",   about: "Relative volume",               bySession: EVERY_TABLE, unit: "x", get: (r) => asMult(r.rvol) },
+    "Vol. 1m":    { group: "Volume",   about: "1-minute volume vs. normal",    bySession: inEvery(FLOW), unit: "x", get: (r) => asMult(r.vol1m) },
+    "%Gap":       { group: "Change",   about: "% gap vs. previous close",      bySession: { Premarket: ALL_X }, unit: "%", get: (r) => pctVs(r.open, r.close) },
+    Gap:          { group: "Change",   about: "Gap vs. previous close",        bySession: { Premarket: STATUS_X }, get: (r) => absVs(r.open, r.close) },
+    "%Chg Close": { group: "Change",   about: "% change vs. previous close",   bySession: { "Regular Market": ALL_R }, unit: "%", get: (r) => pctVs(r.price, r.close) },
+    "Chg Close":  { group: "Change",   about: "Change vs. previous close",     bySession: { "Regular Market": STATUS_R }, get: (r) => absVs(r.price, r.close) },
+    "%Chg Open":  { group: "Change",   about: "% change vs. today's open",     bySession: { "Regular Market": ALL_R }, unit: "%", get: (r) => pctVs(r.price, r.open) },
+    "Chg Open":   { group: "Change",   about: "Change vs. today's open",       bySession: { "Regular Market": STATUS_R }, get: (r) => absVs(r.price, r.open) },
+    "%Chg Pmkt":  { group: "Change",   about: "% change after the close",      bySession: { Postmarket: ALL_X }, unit: "%", get: (r) => pctVs(r.price, r.close) },
+    "Chg Pmkt":   { group: "Change",   about: "Change after the close",        bySession: { Postmarket: STATUS_X }, get: (r) => absVs(r.price, r.close) },
+    "%Chg 1m":    { group: "Momentum", about: "% change, last minute",         bySession: inEvery(FLOW), unit: "%", get: (r) => pctOf(r.chg1) },
+    "%Chg 5m":    { group: "Momentum", about: "% change, last 5 minutes",      bySession: inEvery(["momentum"]), unit: "%", get: (r) => pctOf(r.chg5) },
+    "%Chg 15m":   { group: "Momentum", about: "% change, last 15 minutes",     bySession: inEvery(["momentum"]), unit: "%", get: (r) => pctOf(r.chg15) },
+    "%Chg 30m":   { group: "Momentum", about: "% change, last 30 minutes",     bySession: inEvery(["momentum"]), unit: "%", get: (r) => pctOf(r.chg30) },
+    Hits:         { group: "Momentum", about: "Alerts fired today",            bySession: inEvery(["new-hod"]), get: (r) => r.hits },
+    Float:        { group: "Size",     about: "Shares free to trade",          bySession: EVERY_TABLE, get: (r) => r.float },
+    MCap:         { group: "Size",     about: "Market cap",                    bySession: EVERY_TABLE, get: (r) => r.mcap },
+  };
+  const isFilterVar = (v) => Object.hasOwn(FILTER_VARS, v);
+
+  // What the scanner can publish, per variable (and per table where that
+  // differs). Multipliers are plain here (1 = 1x), as the tables show them.
+  const FILTER_LIMITS = {
+    Price: { default: { min: 0.1, max: 50, minLabel: "0.1", maxLabel: "50" } },
+    "Vol.": { default: { min: 5e3, minLabel: "5K" } },
+    "Pmkt Vol.": { default: { min: 5e3, minLabel: "5K" } },
+    Float: { default: { max: 200e6, maxLabel: "200M" } },
+    MCap: { default: { min: 1e6, minLabel: "1M" } },
+    "%Chg 1m": { default: { min: 2.5, minLabel: "2.5%" }, byTable: { selling: { max: -2.5, maxLabel: "-2.5%" } } },
+    "%Chg 5m": { default: { min: 3, minLabel: "3%" } },
+    "%Chg 15m": { default: { min: 5, minLabel: "5%" } },
+    "%Chg 30m": { default: { min: 8, minLabel: "8%" } },
+    Hits: { default: { min: 1, minLabel: "1" } },
+    "Vol. 1m": { default: { min: 1, minLabel: "1x" } },
+  };
+
+  // Conditions: the stored name, and the short form the chips show.
+  const FILTER_OPS = [
+    ["between", "Between"], ["not between", "Not between"],
+    ["less than", "<"], ["less than or equal to", "≤"],
+    ["greater than", ">"], ["greater than or equal to", "≥"],
+    ["equal to", "="], ["not equal to", "≠"],
+  ];
+  const OP_SHORT = Object.fromEntries(FILTER_OPS);
+  const isRangeOp = (op) => op === "between" || op === "not between";
+  const valueCount = (op) => (isRangeOp(op) ? 2 : 1);
+
+  /* Values: negatives, decimals, thousands separators and K/M/B. The % or x
+     of a percent or multiplier variable sits beside the field, so typing it
+     is fine but it is not kept. */
+  const VALUE_RE = /^-?(?:\d{1,3}(?:,\d{3})*|\d+)(?:\.\d+)?[KMB]?[x%]?$/i;
+  const formatValue = (value, variable) => {
+    const src = String(value ?? "").trim();
+    const typed = /[x%]\s*$/i.exec(src);
+    const suffix = FILTER_VARS[variable]?.unit || !typed ? "" : typed[0].trim().toLowerCase();
+    let s = src.replace(/[x%]\s*$/i, "").replace(/[^\d.KMB]/gi, "");
+    const mag = (/[KMB]/i.exec(s)?.[0] || "").toUpperCase();
+    s = s.replace(/[KMB]/gi, "");
+    const dot = s.indexOf(".");
+    let int = (dot >= 0 ? s.slice(0, dot) : s).replace(/^0+(?=\d)/, "");
+    const dec = dot >= 0 ? s.slice(dot + 1).replace(/\./g, "") : null;
+    int = int ? int.replace(/\B(?=(\d{3})+(?!\d))/g, ",") : dec !== null ? "0" : "";
+    return `${src.startsWith("-") ? "-" : ""}${int}${dec !== null ? `.${dec}` : ""}${mag}${suffix}`;
+  };
+  const isValidValue = (value, variable) => {
+    const v = String(value ?? "").trim();
+    const unit = FILTER_VARS[variable]?.unit;
+    return VALUE_RE.test(v) && (!/x$/i.test(v) || unit === "x") && (!/%$/.test(v) || unit === "%");
+  };
+  const parseValue = (value) => {
+    const m = /^(-?\d*\.?\d+)([KMB])?$/i.exec(String(value ?? "").trim().replace(/,/g, "").replace(/[x%]$/i, ""));
+    return m ? Number(m[1]) * ({ K: 1e3, M: 1e6, B: 1e9 }[m[2]?.toUpperCase()] || 1) : NaN;
+  };
+
+  /* Sessions and tables. Stored as { allSessions, sessions } and
+     { allTables, tables }; picking every option equals picking "All". */
+  const sessionsOf = (variable) => MARKET_SESSIONS.filter((s) => FILTER_VARS[variable]?.bySession[s]?.length);
+  const tablesIn = (variable, session) => FILTER_VARS[variable]?.bySession[session] || [];
+  const normSessions = (sel, variable) => {
+    const picked = sessionsOf(variable).filter((s) => sel?.allSessions === true || (Array.isArray(sel?.sessions) && sel.sessions.includes(s)));
+    if (!picked.length) return null;
+    return picked.length === MARKET_SESSIONS.length ? { allSessions: true, sessions: [] } : { allSessions: false, sessions: picked };
+  };
+  const pickedSessions = (variable, sel) => {
+    const n = normSessions(sel, variable);
+    return !n ? [] : n.allSessions ? MARKET_SESSIONS : n.sessions;
+  };
+  // Every table the chosen sessions allow, in display order.
+  const eligibleTables = (variable, sel) => {
+    const sessions = pickedSessions(variable, sel);
+    return FILTER_TABLES.map(([k]) => k).filter((k) => sessions.some((s) => tablesIn(variable, s).includes(k)));
+  };
+  const normScope = (scope, variable, sessions) => {
+    const eligible = eligibleTables(variable, sessions);
+    if (!eligible.length) return null;
+    const picked = eligible.filter((k) => scope?.allTables === true || (Array.isArray(scope?.tables) && scope.tables.includes(k)));
+    if (!picked.length) return null;
+    return picked.length === eligible.length && eligible.length > 1 ? { allTables: true, tables: [] } : { allTables: false, tables: picked };
+  };
+  const hasSessions = (f) => f.sessions.allSessions || f.sessions.sessions.length > 0;
+  const hasScope = (f) => f.scope.allTables || f.scope.tables.length > 0;
+  const sameJSON = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+  const isFilterComplete = (f) => {
+    const values = f.values.slice(0, valueCount(f.operator));
+    return isFilterVar(f.variable)
+      && sameJSON(normSessions(f.sessions, f.variable), f.sessions)
+      && sameJSON(normScope(f.scope, f.variable, f.sessions), f.scope)
+      && Object.hasOwn(OP_SHORT, f.operator)
+      && values.length === valueCount(f.operator)
+      && values.every((v) => isValidValue(v, f.variable));
+  };
+
+  // The (session, table) pairs a filter really covers: not the cross product
+  // of both picks, only the pairs where the variable exists.
+  const filterTargets = (f) => {
+    if (!isFilterVar(f.variable) || !hasSessions(f) || !hasScope(f)) return [];
+    return pickedSessions(f.variable, f.sessions).flatMap((s) => tablesIn(f.variable, s)
+      .filter((k) => f.scope.allTables || f.scope.tables.includes(k))
+      .map((k) => `${s}|${k}`));
+  };
+  // Identity: variable, targets, condition and values on the comparison
+  // scale (a range typed high-to-low is the same range).
+  const filterSignature = (f) => {
+    if (!isFilterComplete(f)) return "";
+    const values = f.values.slice(0, valueCount(f.operator)).map(parseValue);
+    if (isRangeOp(f.operator)) values.sort((a, b) => a - b);
+    return JSON.stringify([f.variable, filterTargets(f).sort(), f.operator, values]);
+  };
+
+  /* Validation. Messages describe the invalid state; they don't give orders. */
+
+  // No two identical filters (on or off), and no two enabled filters of one
+  // variable on the same (session, table).
+  const filterConflict = (f, list) => {
+    const others = list.filter((o) => o.id !== f.id && isFilterComplete(o));
+    const sig = filterSignature(f);
+    if (sig && others.some((o) => filterSignature(o) === sig)) {
+      return { type: "duplicate", message: "An identical filter already exists.", notice: "An identical filter has already been created." };
+    }
+    if (!f.enabled) return null;
+    const mine = new Set(filterTargets(f));
+    const pair = others.filter((o) => o.enabled && o.variable === f.variable).flatMap(filterTargets).find((p) => mine.has(p));
+    if (!pair) return null;
+    const [session, key] = pair.split("|");
+    const message = `${f.variable} is already filtered in ${session} for ${TABLE_NAME[key]}.`;
+    return { type: "overlap", message, notice: message };
+  };
+
+  const limitText = (l) => (l.min !== undefined && l.max !== undefined ? `between ${l.minLabel} and ${l.maxLabel}`
+    : l.min !== undefined ? `${l.minLabel} or higher` : `${l.maxLabel} or lower`);
+  // The distinct limits of the tables a filter is aimed at.
+  const filterLimits = (f) => {
+    const cfg = FILTER_LIMITS[f.variable];
+    if (!cfg || !hasScope(f)) return [];
+    const aimed = eligibleTables(f.variable, f.sessions).filter((k) => f.scope.allTables || f.scope.tables.includes(k));
+    const limits = [...new Set(aimed.map((k) => cfg.byTable?.[k] || cfg.default))];
+    return limits.length ? limits : [cfg.default];
+  };
+  const inLimit = (n, l) => (l.min === undefined || n >= l.min) && (l.max === undefined || n <= l.max);
+  // Can the condition match anything inside the limit?
+  const canMatch = (op, [a, b], l) => {
+    const lo = l.min ?? -Infinity;
+    const hi = l.max ?? Infinity;
+    if (op === "between") return hi >= Math.min(a, b) && lo <= Math.max(a, b);
+    if (op === "not between") return lo < Math.min(a, b) || hi > Math.max(a, b);
+    if (op === "less than") return lo < a;
+    if (op === "less than or equal to") return lo <= a;
+    if (op === "greater than") return hi > a;
+    if (op === "greater than or equal to") return hi >= a;
+    if (op === "equal to") return inLimit(a, l);
+    if (op === "not equal to") return lo !== hi || lo !== a;
+    return true;
+  };
+
+  // null, or { type, message, notice?, invalid: value indexes at fault }
+  const validateFilter = (f, list) => {
+    const conflict = filterConflict(f, list);
+    if (conflict) return { ...conflict, invalid: [] };
+    if (!f.operator) return null;
+    const values = f.values.slice(0, valueCount(f.operator));
+    const unit = FILTER_VARS[f.variable]?.unit;
+    const badFormat = values.flatMap((v, i) => (String(v).trim() && !isValidValue(v, f.variable) ? [i] : []));
+    if (badFormat.length) {
+      const message = unit === "%" ? "Percentage values must be valid numbers, such as 2.8."
+        : unit === "x" ? "Multiplier values must be valid numbers, such as 2.8." : "Filter values must be valid numbers.";
+      return { type: "format", message, invalid: badFormat };
+    }
+    const limits = filterLimits(f);
+    if (!limits.length || values.length < valueCount(f.operator) || !values.every((v) => isValidValue(v, f.variable))) return null;
+    const nums = values.map(parseValue);
+    const outside = nums.flatMap((n, i) => (limits.some((l) => inLimit(n, l)) ? [] : [i]));
+    if (!outside.length && limits.some((l) => canMatch(f.operator, nums, l))) return null;
+    const rule = `${f.variable} values must be ${limits.map(limitText).join(" or ")}.`;
+    return outside.length
+      ? { type: "limit", message: rule, invalid: outside }
+      : { type: "limit", message: `The selected ${f.variable} ${isRangeOp(f.operator) ? "range" : "condition"} has no matches; ${rule}`, invalid: nums.map((_, i) => i) };
+  };
+  const isFilterValid = (f, list) => isFilterComplete(f) && !validateFilter(f, list);
+
+  /* Saved filters: best effort (storage may be blocked). Invalid ones are
+     dropped on load; so are later duplicates and later enabled filters that
+     overlap one already kept. */
+  const newFilterId = () => globalThis.crypto?.randomUUID?.() ?? `f-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const cleanFilter = (c, ids) => {
+    if (!c || typeof c !== "object" || !isFilterVar(c.variable)) return null;
+    const sessions = normSessions(c.sessions, c.variable);
+    const scope = sessions && normScope(c.scope, c.variable, sessions);
+    if (!scope) return null;
+    const id = typeof c.id === "string" && c.id && !ids.has(c.id) ? c.id : newFilterId();
+    const values = (Array.isArray(c.values) ? c.values : []).slice(0, valueCount(c.operator)).map((v) => formatValue(v, c.variable));
+    const f = { id, variable: c.variable, sessions, scope, operator: c.operator, values, enabled: c.enabled !== false };
+    if (!isFilterComplete(f)) return null;
+    ids.add(id);
+    return f;
+  };
+  const filters = [];
+  const saveFilters = () => {
+    try { localStorage.setItem(FILTER_KEY, JSON.stringify(filters)); } catch { /* ignore */ }
+  };
+  try {
+    const raw = localStorage.getItem(FILTER_KEY);
+    const saved = JSON.parse(raw || "[]");
+    const ids = new Set();
+    (Array.isArray(saved) ? saved : []).forEach((c) => {
+      const f = cleanFilter(c, ids);
+      if (f && !filterConflict(f, filters)) filters.push(f);
+    });
+    if (raw && raw !== JSON.stringify(filters)) saveFilters();
+  } catch { /* ignore */ }
+
+  // The session filters follow: the nav status (mountNavStatus) keeps it.
+  // Outside trading hours the post-market filters stay in force.
+  const FILTER_SESSION_OF = { pre: "Premarket", regular: "Regular Market", after: "Postmarket", closed: "Postmarket" };
+  let marketState = "closed";
+  const filterSession = () => FILTER_SESSION_OF[marketState];
+  const onSessionChange = [];
+
+  const passesFilter = (f, r) => {
+    const v = FILTER_VARS[f.variable].get(r);
+    if (v == null) return true; // no such value in this row: nothing to judge
+    if (!Number.isFinite(v)) return false;
+    const [a, b] = f.values.map(parseValue);
+    const lo = Math.min(a, b);
+    const hi = Math.max(a, b);
+    switch (f.operator) {
+      case "between": return v >= lo && v <= hi;
+      case "not between": return v < lo || v > hi;
+      case "less than": return v < a;
+      case "less than or equal to": return v <= a;
+      case "greater than": return v > a;
+      case "greater than or equal to": return v >= a;
+      case "equal to": return v === a;
+      case "not equal to": return v !== a;
+      default: return true;
+    }
+  };
+  // Enabled filters aimed at this table in the current session.
+  const filtersOn = (panel, list = filters) => {
+    const pair = `${filterSession()}|${panel}`;
+    return list.filter((f) => f.enabled && filterTargets(f).includes(pair));
+  };
+
   /* ---- Table controller -------------------------------------------------- */
 
   // Fill a panel from the shared <template>. Anything already inside it
@@ -677,6 +982,11 @@
 
     const columns = () => [...pins, ...order.filter((k) => !prefs.hidden.has(k))];
     const isExcluded = (sym) => prefs.excluded.has(sym) || globalExcluded.has(sym);
+    // Rows on screen: not excluded, and passing every filter on this table.
+    const shownTest = () => {
+      const on = filtersOn(panel);
+      return (r) => !isExcluded(r.sym) && on.every((f) => passesFilter(f, r));
+    };
     const applyColors = () => Object.keys(COLORABLE).forEach((k) => {
       if (prefs.colors[k]) root.style.setProperty(`--hue-${k}`, `var(--${prefs.colors[k]})`);
       else root.style.removeProperty(`--hue-${k}`);
@@ -741,7 +1051,7 @@
 
     const renderAll = () => {
       renderHead();
-      const derived = rows.filter((r) => !isExcluded(r.sym)).map((r) => [derive(r, tone), r.sym]);
+      const derived = rows.filter(shownTest()).map((r) => [derive(r, tone), r.sym]);
       body.replaceChildren(...derived.map(([d, sym]) => rowEl(d, sym)));
       cards.replaceChildren(...derived.map(([d, sym]) => cardEl(d, sym)));
       tickTimers();
@@ -822,11 +1132,12 @@
       if (i >= 0) rows.splice(i, 1);
       rows.unshift(alert);
       rows.length = Math.min(rows.length, MAX_ROWS);
-      // Excluded tickers are tracked but never shown (nor sounded).
-      if (isExcluded(alert.sym)) return;
+      // Excluded or filtered-out tickers are tracked but never shown (nor
+      // sounded); an earlier row of the ticker leaves, as it no longer passes.
+      body.querySelector(`[data-sym="${alert.sym}"]`)?.remove();
+      if (!shownTest()(alert)) return;
 
       const d = derive(alert, tone);
-      body.querySelector(`[data-sym="${alert.sym}"]`)?.remove();
       const tr = rowEl(d, alert.sym);
       tr.classList.add("is-new");
       body.prepend(tr);
@@ -881,6 +1192,7 @@
 
     const tickPrices = () => {
       const count = 1 + Math.floor(Math.random() * 3);
+      const shown = shownTest();
       for (let n = 0; n < count; n++) {
         const r = pick(rows);
         const before = fmtPrice(r.price);
@@ -890,6 +1202,8 @@
         const up = Number(after) > Number(before);
         // Refresh every cell that follows the price (%Chg Close, VWAP D., …)
         const tr = body.querySelector(`[data-sym="${r.sym}"]`);
+        // The new price crossed a filter: the row joins or leaves the table.
+        if (Boolean(tr) !== shown(r)) { renderAll(); return; }
         if (tr) {
           const d = derive(r, tone);
           columns().forEach((key, i) => {
@@ -917,6 +1231,7 @@
       pins,
       defaults: cols,
       rows: () => rows,
+      excluded: isExcluded,
       state: () => ({ order: [...order], hidden: new Set(prefs.hidden), colors: { ...prefs.colors }, excluded: new Set(prefs.excluded) }),
       apply: (s) => {
         order = [...s.order];
@@ -1344,6 +1659,9 @@
       if (session.dataset.session !== s.id) {
         session.dataset.session = s.id;
         sessionLabel.textContent = s.label;
+        const before = filterSession();
+        marketState = s.id;
+        onSessionChange.forEach((fn) => fn(filterSession() !== before));
       }
       clock.firstChild.textContent = `${p.hour}:${p.minute}:${p.second} `;
     };
@@ -2623,6 +2941,747 @@
     return { open };
   };
 
+  /* ---- Filters dialog ------------------------------------------------------
+     Opened from the Filter button in the nav, or from the funnel a filtered
+     table shows in its bar. Saved filters are cards: the switch turns one on
+     or off, a click opens it in the editor. The editor goes step by step
+     (variable → sessions → tables → condition) and saves that one filter:
+     Apply filter, or Save draft while it is off. One filter is edited at a
+     time; closing the dialog drops unsaved edits. */
+
+  const FLT_GROUPS = ["Price", "Volume", "Change", "Momentum", "Size"];
+  const FLT_PRESETS = [
+    { variable: "Price", operator: "between", values: ["1", "20"] },
+    { variable: "Float", operator: "less than or equal to", values: ["20M"] },
+    { variable: "RVol", operator: "greater than or equal to", values: ["2"] },
+  ];
+  const FLT_ICON = {
+    clock: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>',
+    table: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M3.5 9.5h17M9.5 9.5v10"/></svg>',
+    check: '<svg class="flt-chip__check" viewBox="0 0 24 24" aria-hidden="true"><path d="m5.5 12.5 4 4 9-9"/></svg>',
+    done: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5.5 12.5 4 4 9-9"/></svg>',
+    trash: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V5h6v2M6.5 7l1 12h9l1-12"/></svg>',
+    chevron: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>',
+    alert: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5.5M12 16.5h.01"/></svg>',
+  };
+  const escHTML = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+
+  const mountFilters = () => {
+    const dlg = document.getElementById("filters");
+    const $ = (sel) => dlg.querySelector(sel);
+    const list = $("[data-flt-list]");
+    const empty = $("[data-flt-empty]");
+    const notice = $("[data-flt-notice]");
+    const statsEl = $("[data-flt-stats]");
+    const nowEl = $("[data-flt-now]");
+    const addBtn = $("[data-flt-add]");
+    const scroller = $(".sm-panel");
+    const navBtn = document.querySelector("[data-global-filter]");
+    const navCount = navBtn.querySelector("[data-filter-count]");
+
+    let editor = null;     // { isNew, data, auto }: the one filter being edited
+    let picking = false;   // the editor shows every variable
+    let confirming = null; // id of the card asking "delete?"
+    let trigger = null;
+    let noticeTimer = 0;
+    let escHandled = false;
+    let drag = null;
+
+    const blank = () => ({ id: newFilterId(), variable: "", sessions: { allSessions: false, sessions: [] }, scope: { allTables: false, tables: [] }, operator: "", values: [""], enabled: true });
+    const clone = (f) => JSON.parse(JSON.stringify(f));
+    const savedOf = (id) => filters.find((f) => f.id === id);
+    const unitOf = (f) => FILTER_VARS[f.variable]?.unit || "";
+    const comparable = (f) => JSON.stringify([f.enabled, f.variable, f.sessions, f.scope, f.operator, f.values.slice(0, valueCount(f.operator)).map((v) => formatValue(v, f.variable))]);
+    const isBlank = (f) => !f.variable && !hasSessions(f) && !hasScope(f) && !f.operator && f.values.every((v) => !String(v).trim());
+    const isDirty = () => Boolean(editor) && (editor.isNew ? !isBlank(editor.data) : comparable(editor.data) !== comparable(savedOf(editor.data.id)));
+    const canSave = () => isFilterValid(editor.data, filters) && (editor.isNew || isDirty());
+    const cardOf = (id) => list.querySelector(`[data-id="${id}"]`);
+    const liveNow = (f) => filterTargets(f).some((p) => p.startsWith(`${filterSession()}|`));
+
+    /* Saved filter: a card */
+
+    const sessionsText = (f) => (f.sessions.allSessions ? ALL_SESSIONS : f.sessions.sessions.join(", "));
+    const tablesText = (f) => {
+      if (f.scope.allTables) return ALL_TABLES;
+      const names = f.scope.tables.map((k) => TABLE_NAME[k]);
+      return names.length > 2 ? `${names.slice(0, 2).join(", ")} +${names.length - 2}` : names.join(", ");
+    };
+    const valueTag = (f, v) => `<span class="flt-val">${escHTML(v)}${unitOf(f)}</span>`;
+    const ruleHTML = (f) => {
+      const cond = isRangeOp(f.operator)
+        ? `<span class="flt-op">${f.operator}</span> ${valueTag(f, f.values[0])} <span class="flt-op">and</span> ${valueTag(f, f.values[1])}`
+        : `<span class="flt-op flt-op--sym" aria-hidden="true">${OP_SHORT[f.operator]}</span><span class="sr-only">${f.operator}</span> ${valueTag(f, f.values[0])}`;
+      return `<b class="flt-var">${escHTML(f.variable)}</b> ${cond}`;
+    };
+    const tagHTML = (f) => (!f.enabled ? '<span class="flt-tag">Draft</span>'
+      : liveNow(f) ? '<span class="flt-tag is-live"><i aria-hidden="true"></i>Live</span>'
+      : `<span class="flt-tag" title="Not in use during ${filterSession()}">Other session</span>`);
+
+    const cardHTML = (f) => {
+      const name = escHTML(f.variable);
+      const locked = Boolean(editor || confirming);
+      return `
+        <li class="flt-card${f.enabled ? "" : " is-off"}" data-id="${f.id}">
+          <button type="button" class="flt-grip" data-flt-grip aria-label="Move ${name} filter" aria-describedby="flt-move-hint" title="Drag to reorder"${locked ? " disabled" : ""}>${ICON.grip}</button>
+          <button type="button" class="flt-card__main" data-flt-edit title="Edit filter">
+            <span class="sr-only">Edit filter:</span>
+            <span class="flt-rule">${ruleHTML(f)}</span>
+            <span class="flt-scope">${FLT_ICON.clock}<span>${escHTML(sessionsText(f))}</span>${FLT_ICON.table}<span>${escHTML(tablesText(f))}</span></span>
+          </button>
+          <span class="flt-card__side">
+            ${tagHTML(f)}
+            <button type="button" class="switch" role="switch" data-flt-toggle aria-checked="${f.enabled}" aria-label="${name} filter" title="${f.enabled ? "Turn off" : "Turn on"}"></button>
+            <button type="button" class="icon-btn flt-del" data-flt-delete aria-label="Delete ${name} filter" title="Delete">${FLT_ICON.trash}</button>
+          </span>
+        </li>`;
+    };
+
+    const confirmHTML = (f) => `
+      <li class="flt-card is-confirm" data-id="${f.id}">
+        <span class="flt-confirm__icon" aria-hidden="true">${FLT_ICON.trash}</span>
+        <p class="flt-confirm__text" id="flt-del-text"><b>Delete the ${escHTML(f.variable)} filter?</b>
+          <span>${f.enabled ? `${escHTML(f.variable)} will be removed from the tables where it’s currently active.` : "This filter is currently inactive. Are you sure you want to delete it?"}</span></p>
+        <span class="flt-confirm__actions">
+          <button type="button" class="btn btn-ghost btn-sm" data-flt-keep>Keep</button>
+          <button type="button" class="btn btn-danger btn-sm" data-flt-confirm aria-describedby="flt-del-text">Delete</button>
+        </span>
+      </li>`;
+
+    /* The editor: four steps */
+
+    const chipHTML = (attrs, label, pressed, { disabled = false, title = "" } = {}) =>
+      `<button type="button" class="flt-chip" ${attrs} aria-pressed="${pressed}"${disabled ? " disabled" : ""}${title ? ` title="${escHTML(title)}"` : ""}>${FLT_ICON.check}<span>${escHTML(label)}</span></button>`;
+
+    const stepHTML = (n, key, label, state, body, hint = "") => `
+      <div class="flt-step is-${state}" data-step="${key}">
+        <span class="flt-step__n" aria-hidden="true">${state === "done" ? FLT_ICON.done : n}</span>
+        <div class="flt-step__head"><span class="flt-step__label" id="${editor.data.id}-${key}">${label}</span>${hint ? `<span class="flt-step__hint">${hint}</span>` : ""}</div>
+        ${state === "locked" ? "" : `<div class="flt-step__body">${body}</div>`}
+      </div>`;
+
+    const variableStep = (f) => {
+      if (f.variable && !picking) {
+        return stepHTML(1, "variable", "Variable", "done", `
+          <button type="button" class="flt-chip is-picked" data-flt-change aria-pressed="true" aria-label="Variable: ${escHTML(f.variable)}. Change it" title="Change the variable">
+            <span>${escHTML(f.variable)}</span>${FLT_ICON.chevron}
+          </button>
+          <span class="flt-step__about">${FILTER_VARS[f.variable].about}</span>`);
+      }
+      const groups = FLT_GROUPS.map((g) => `
+        <div class="flt-group">
+          <span class="flt-group__label" id="${f.id}-g-${g}">${g}</span>
+          <div class="flt-chips" role="group" aria-labelledby="${f.id}-g-${g}">
+            ${Object.entries(FILTER_VARS).filter(([, v]) => v.group === g)
+              .map(([name, v]) => chipHTML(`data-flt-var="${escHTML(name)}"`, name, f.variable === name, { title: v.about })).join("")}
+          </div>
+        </div>`).join("");
+      return stepHTML(1, "variable", "Variable", "current", `<div class="flt-palette">${groups}</div>`, "What to filter by");
+    };
+
+    const sessionsStep = (f) => {
+      if (!f.variable) return stepHTML(2, "sessions", "Sessions", "locked", "", "After the variable");
+      const avail = sessionsOf(f.variable);
+      const all = f.sessions.allSessions;
+      const body = `<div class="flt-chips" role="group" aria-labelledby="${f.id}-sessions">
+        ${avail.length === MARKET_SESSIONS.length ? chipHTML("data-flt-session-all", ALL_SESSIONS, all) : ""}
+        ${avail.map((s) => chipHTML(`data-flt-session="${s}"`, s, !all && f.sessions.sessions.includes(s), { disabled: all })).join("")}
+      </div>`;
+      const hint = avail.length < MARKET_SESSIONS.length ? `${escHTML(f.variable)} only exists in ${avail.join(" and ")}` : "";
+      return stepHTML(2, "sessions", "Sessions", hasSessions(f) ? "done" : "current", body, hint);
+    };
+
+    const tablesStep = (f) => {
+      if (!hasSessions(f)) return stepHTML(3, "tables", "Apply to", "locked", "", "After the sessions");
+      const eligible = eligibleTables(f.variable, f.sessions);
+      const all = f.scope.allTables;
+      const body = `<div class="flt-chips" role="group" aria-labelledby="${f.id}-tables">
+        ${eligible.length > 1 ? chipHTML("data-flt-table-all", ALL_TABLES, all) : ""}
+        ${eligible.map((k) => chipHTML(`data-flt-table="${k}"`, TABLE_NAME[k], !all && f.scope.tables.includes(k), { disabled: all })).join("")}
+      </div>`;
+      return stepHTML(3, "tables", "Apply to", hasScope(f) ? "done" : "current", body);
+    };
+
+    const inputHTML = (f, i, invalid) => {
+      const unit = unitOf(f);
+      const range = isRangeOp(f.operator);
+      const label = (range ? (i ? "To" : "From") : "Value") + (unit === "%" ? ", in percent" : unit === "x" ? ", as a multiple" : "");
+      return `<span class="flt-input${unit ? " has-unit" : ""}">
+        <input type="text" autocomplete="off" spellcheck="false" maxlength="16" data-flt-value="${i}" value="${escHTML(f.values[i] ?? "")}"
+               placeholder="${range ? (i ? "Max" : "Min") : "Value"}" aria-label="${label}"${invalid ? ` aria-invalid="true" aria-describedby="${f.id}-error"` : ""}>
+        ${unit ? `<span class="flt-input__unit" aria-hidden="true">${unit}</span>` : ""}
+      </span>`;
+    };
+
+    const limitHTML = (f) => {
+      const limits = f.operator ? filterLimits(f) : [];
+      return limits.length ? `<p class="flt-limit">Scanner range: ${limits.map(limitText).join(" or ")}</p>` : "";
+    };
+
+    const conditionStep = (f, v) => {
+      if (!hasScope(f)) return stepHTML(4, "condition", "Condition", "locked", "", "After the tables");
+      const ops = `<div class="flt-chips flt-ops" role="group" aria-labelledby="${f.id}-condition">
+        ${FILTER_OPS.map(([op, short]) => `<button type="button" class="flt-chip flt-chip--op${short.length === 1 ? " is-sym" : ""}" data-flt-op="${op}" aria-pressed="${f.operator === op}" aria-label="${op}" title="${op}">${escHTML(short)}</button>`).join("")}
+      </div>`;
+      const values = f.operator ? `<div class="flt-values">
+        ${Array.from({ length: valueCount(f.operator) }, (_, i) => (i ? '<span class="flt-and">and</span>' : "") + inputHTML(f, i, v?.invalid?.includes(i))).join("")}
+      </div>` : "";
+      const done = isFilterComplete(f) && !(v && v.invalid.length);
+      return stepHTML(4, "condition", "Condition", done ? "done" : "current", ops + values + limitHTML(f));
+    };
+
+    // Live check: how many rows now on screen the filter keeps.
+    const previewHTML = (f, v) => {
+      if (!isFilterComplete(f) || (v && v.invalid.length)) return '<div class="flt-preview" data-flt-preview hidden></div>';
+      const now = filterSession();
+      const aimed = filterTargets(f).filter((p) => p.startsWith(`${now}|`)).map((p) => p.split("|")[1]);
+      if (!aimed.length) {
+        return `<div class="flt-preview is-idle" data-flt-preview>${FLT_ICON.clock}<span>Not in use right now: it’s ${now}.</span></div>`;
+      }
+      const others = filters.filter((o) => o.id !== f.id);
+      let base = 0;
+      let kept = 0;
+      aimed.forEach((k) => {
+        const t = tables.get(k);
+        if (!t) return;
+        const on = filtersOn(k, others);
+        t.rows().forEach((r) => {
+          if (t.excluded(r.sym) || !on.every((o) => passesFilter(o, r))) return;
+          base += 1;
+          if (passesFilter(f, r)) kept += 1;
+        });
+      });
+      const where = aimed.length === 1 ? TABLE_NAME[aimed[0]] : `${aimed.length} tables`;
+      return `<div class="flt-preview" data-flt-preview>
+        <span class="flt-meter" aria-hidden="true"><i style="--keep: ${base ? Math.round((kept / base) * 100) : 0}%"></i></span>
+        <span>Keeps <b>${kept}</b> of ${base} rows on screen · ${where}</span>
+      </div>`;
+    };
+
+    const errorHTML = (f, v) => `<p class="flt-error" id="${f.id}-error" data-flt-error${v ? "" : " hidden"}>${FLT_ICON.alert}<span>${v ? escHTML(v.message) : ""}</span></p>`;
+
+    const editorHTML = (f) => {
+      const v = validateFilter(f, filters);
+      return `
+        <li class="flt-card is-editing${f.enabled ? "" : " is-off"}" data-id="${f.id}" aria-label="${editor.isNew ? "New filter" : `Editing the ${escHTML(f.variable)} filter`}">
+          <div class="flt-ed__head">
+            <span class="flt-ed__title">${editor.isNew ? "New filter" : "Edit filter"}</span>
+            <span class="flt-ed__switch"><span id="${f.id}-on">Active</span><button type="button" class="switch" role="switch" data-flt-toggle aria-checked="${f.enabled}" aria-labelledby="${f.id}-on"></button></span>
+          </div>
+          <div class="flt-steps">
+            ${variableStep(f)}${sessionsStep(f)}${tablesStep(f)}${conditionStep(f, v)}
+          </div>
+          ${previewHTML(f, v)}
+          ${errorHTML(f, v)}
+          <div class="flt-ed__foot">
+            ${editor.isNew
+              ? '<button type="button" class="btn btn-ghost btn-sm" data-flt-discard>Discard</button>'
+              : `<button type="button" class="btn btn-ghost btn-sm flt-ed__delete" data-flt-delete>${FLT_ICON.trash}<span>Delete</span></button>`}
+            <span class="flt-ed__actions">
+              ${editor.isNew ? "" : '<button type="button" class="btn btn-secondary btn-sm" data-flt-cancel>Cancel</button>'}
+              <button type="button" class="btn btn-primary btn-sm" data-flt-save${canSave() ? "" : " disabled"}>${f.enabled ? "Apply filter" : "Save draft"}</button>
+            </span>
+          </div>
+        </li>`;
+    };
+
+    /* Render */
+
+    const items = () => {
+      const out = filters.map((f) => (editor && !editor.isNew && editor.data.id === f.id ? editor.data : f));
+      if (editor?.isNew) out.unshift(editor.data);
+      return out;
+    };
+
+    const syncStats = () => {
+      const active = filters.filter((f) => f.enabled).length;
+      const drafts = filters.length - active;
+      statsEl.innerHTML = `<span><b>${active}</b> active</span><span><b>${drafts}</b> draft${drafts === 1 ? "" : "s"}</span>`;
+      const live = marketState !== "closed";
+      nowEl.classList.toggle("is-live", live);
+      nowEl.querySelector("span").textContent = live ? filterSession() : `Closed · ${filterSession()}`;
+      nowEl.title = `Filters set for ${filterSession()} are in use now`;
+    };
+
+    const setNotice = (kind, title = "", text = "") => {
+      clearTimeout(noticeTimer);
+      if (!kind) { notice.hidden = true; delete notice.dataset.kind; return; }
+      if (notice.dataset.kind === kind && notice.dataset.text === text && !notice.hidden) return;
+      notice.dataset.kind = kind;
+      notice.dataset.text = text;
+      notice.innerHTML = `${FLT_ICON.alert}<p><b>${title}</b> ${escHTML(text)}</p>`;
+      notice.hidden = false;
+      if (kind === "progress") noticeTimer = setTimeout(() => setNotice(null), 5000);
+    };
+    // A conflict notice stays for as long as the edited filter has one.
+    const syncNotice = () => {
+      const v = editor && validateFilter(editor.data, filters);
+      if (v?.notice) setNotice("conflict", "Filter conflict", v.notice);
+      else if (notice.dataset.kind === "conflict") setNotice(null);
+    };
+
+    const render = (focus) => {
+      const all = items();
+      list.innerHTML = all.map((f) => (editor?.data.id === f.id ? editorHTML(f) : confirming === f.id ? confirmHTML(f) : cardHTML(f))).join("");
+      list.hidden = !all.length;
+      empty.hidden = all.length > 0;
+      dlg.classList.toggle("is-editing", Boolean(editor));
+      syncStats();
+      syncNotice();
+      const el = typeof focus === "string" ? list.querySelector(focus) : focus;
+      el?.focus();
+    };
+
+    // Typing a value re-checks the filter without rebuilding the card, so
+    // the caret stays put.
+    const syncEditor = () => {
+      const f = editor.data;
+      const card = cardOf(f.id);
+      if (!card) return;
+      const v = validateFilter(f, filters);
+      card.classList.toggle("is-off", !f.enabled);
+      card.querySelectorAll("[data-flt-value]").forEach((input) => {
+        const bad = Boolean(v?.invalid.includes(Number(input.dataset.fltValue)));
+        if (bad) {
+          input.setAttribute("aria-invalid", "true");
+          input.setAttribute("aria-describedby", `${f.id}-error`);
+        } else {
+          input.removeAttribute("aria-invalid");
+          input.removeAttribute("aria-describedby");
+        }
+      });
+      const step = card.querySelector("[data-step='condition']");
+      if (!step.classList.contains("is-locked")) {
+        const done = isFilterComplete(f) && !(v && v.invalid.length);
+        step.classList.toggle("is-done", done);
+        step.classList.toggle("is-current", !done);
+        step.querySelector(".flt-step__n").innerHTML = done ? FLT_ICON.done : "4";
+      }
+      card.querySelector("[data-flt-preview]").outerHTML = previewHTML(f, v);
+      const err = card.querySelector("[data-flt-error]");
+      err.hidden = !v;
+      err.querySelector("span").textContent = v ? v.message : "";
+      const save = card.querySelector("[data-flt-save]");
+      save.disabled = !canSave();
+      save.textContent = f.enabled ? "Apply filter" : "Save draft";
+      syncNotice();
+    };
+
+    // Where the editor needs input next.
+    const focusNext = () => {
+      if (!editor) return;
+      const f = editor.data;
+      const card = cardOf(f.id);
+      if (!card) return;
+      const q = (sel) => card.querySelector(sel);
+      const v = validateFilter(f, filters);
+      const missing = f.operator ? f.values.slice(0, valueCount(f.operator)).findIndex((x) => !isValidValue(x, f.variable)) : -1;
+      const el = !f.variable || picking ? q("[data-flt-var][aria-pressed='true']") || q("[data-flt-var]")
+        : !hasSessions(f) ? q("[data-flt-session-all], [data-flt-session]:not(:disabled)")
+        : !hasScope(f) ? q("[data-flt-table-all], [data-flt-table]:not(:disabled)")
+        : !f.operator ? q("[data-flt-op]")
+        : missing >= 0 ? q(`[data-flt-value="${missing}"]`)
+        : v?.invalid.length ? q(`[data-flt-value="${v.invalid[0]}"]`)
+        : v ? q("[data-flt-table-all], [data-flt-table]:not(:disabled)")
+        : q("[data-flt-save]:not(:disabled)") || q("[data-flt-toggle]");
+      el?.focus();
+    };
+
+    /* Only one filter is edited at a time. One without changes gives way;
+       one with changes asks to be finished (or saved) first. */
+    const leaveEditor = () => {
+      if (!editor) return true;
+      if (!isDirty()) { editor = null; picking = false; return true; }
+      const v = validateFilter(editor.data, filters);
+      if (!v?.notice) setNotice("progress", "Filter in progress", "Finish or save it before creating or editing another filter.");
+      focusNext();
+      return false;
+    };
+
+    const commit = () => {
+      saveFilters();
+      tables.forEach((t) => t.refresh());
+      syncBadges();
+    };
+
+    /* Actions */
+
+    const add = (preset) => {
+      if (!leaveEditor()) return;
+      confirming = null;
+      const f = blank();
+      if (preset) {
+        Object.assign(f, { variable: preset.variable, operator: preset.operator, values: [...preset.values] });
+        f.sessions = normSessions({ allSessions: true }, f.variable);
+        f.scope = normScope({ allTables: true }, f.variable, f.sessions);
+      }
+      editor = { isNew: true, data: f };
+      picking = !preset;
+      render();
+      if (!preset) { focusNext(); return; }
+      const first = cardOf(f.id).querySelector("[data-flt-value='0']");
+      first?.focus();
+      first?.select();
+    };
+
+    const edit = (id) => {
+      if (editor?.data.id === id) return;
+      if (!leaveEditor()) return;
+      confirming = null;
+      editor = { isNew: false, data: clone(savedOf(id)) };
+      picking = false;
+      render(`[data-id="${id}"] [data-flt-change]`);
+    };
+
+    const pickVariable = (name) => {
+      const f = editor.data;
+      f.variable = name;
+      f.sessions = normSessions(f.sessions, name) || { allSessions: false, sessions: [] };
+      f.scope = normScope(f.scope, name, f.sessions) || { allTables: false, tables: [] };
+      f.values = f.values.map((v) => (String(v).trim() ? formatValue(v, name) : v));
+      picking = false;
+      render();
+      focusNext();
+    };
+
+    // After a pick, focus stays on that chip (or on its "All" chip, when the
+    // pick completed the set).
+    const reRender = (sel, fallback) => {
+      render();
+      const card = cardOf(editor.data.id);
+      const el = card.querySelector(`${sel}:not(:disabled)`) || card.querySelector(fallback);
+      el?.focus();
+    };
+
+    const toggleSession = (session) => {
+      const f = editor.data;
+      if (!session) {
+        f.sessions = { allSessions: !f.sessions.allSessions, sessions: [] };
+      } else {
+        const set = new Set(f.sessions.allSessions ? [] : f.sessions.sessions);
+        if (set.has(session)) set.delete(session); else set.add(session);
+        f.sessions = normSessions({ allSessions: false, sessions: [...set] }, f.variable) || { allSessions: false, sessions: [] };
+      }
+      f.scope = normScope(f.scope, f.variable, f.sessions) || { allTables: false, tables: [] };
+      reRender(session ? `[data-flt-session="${session}"]` : "[data-flt-session-all]", "[data-flt-session-all]");
+    };
+
+    const toggleTable = (key) => {
+      const f = editor.data;
+      if (!key) {
+        f.scope = { allTables: !f.scope.allTables, tables: [] };
+      } else {
+        const set = new Set(f.scope.allTables ? [] : f.scope.tables);
+        if (set.has(key)) set.delete(key); else set.add(key);
+        f.scope = normScope({ allTables: false, tables: [...set] }, f.variable, f.sessions) || { allTables: false, tables: [] };
+      }
+      reRender(key ? `[data-flt-table="${key}"]` : "[data-flt-table-all]", "[data-flt-table-all]");
+    };
+
+    const pickOperator = (op) => {
+      const f = editor.data;
+      f.operator = op;
+      f.values = Array.from({ length: valueCount(op) }, (_, i) => f.values[i] ?? "");
+      render();
+      const next = f.values.findIndex((v) => !String(v).trim());
+      cardOf(f.id).querySelector(`[data-flt-value="${Math.max(0, next)}"]`)?.focus();
+    };
+
+    const setValue = (input, formatted = false) => {
+      const i = Number(input.dataset.fltValue);
+      if (formatted) input.value = formatValue(input.value, editor.data.variable);
+      editor.data.values[i] = input.value;
+      syncEditor();
+    };
+
+    const save = () => {
+      if (!editor) return;
+      const f = editor.data;
+      f.values = f.values.slice(0, valueCount(f.operator)).map((v) => formatValue(v, f.variable));
+      if (!canSave()) { render(); focusNext(); return; }
+      if (editor.isNew) filters.unshift(f);
+      else filters.splice(filters.findIndex((o) => o.id === f.id), 1, f);
+      editor = null;
+      picking = false;
+      setNotice(null);
+      commit();
+      render(`[data-id="${f.id}"] [data-flt-edit]`);
+      showToast(f.enabled ? `${f.variable} filter applied` : `${f.variable} draft saved`);
+    };
+
+    const closeEditor = (focus) => {
+      editor = null;
+      picking = false;
+      setNotice(null);
+      render(focus);
+    };
+
+    // A card's switch saves at once. Turning on a filter that would clash
+    // with another one opens it in the editor instead, with the conflict.
+    const toggle = (id, btn) => {
+      if (editor?.data.id === id) {
+        editor.data.enabled = !editor.data.enabled;
+        // Opened by that clash and switched back: nothing left to edit.
+        if (editor.auto && !isDirty()) { closeEditor(`[data-id="${id}"] [data-flt-toggle]`); return; }
+        btn.setAttribute("aria-checked", String(editor.data.enabled));
+        syncEditor();
+        return;
+      }
+      const busy = Boolean(editor || confirming); // the list needs a rebuild
+      if (!leaveEditor()) return;
+      confirming = null;
+      const f = savedOf(id);
+      if (!f.enabled && filterConflict({ ...f, enabled: true }, filters)) {
+        editor = { isNew: false, data: { ...clone(f), enabled: true }, auto: true };
+        picking = false;
+        render(`[data-id="${id}"] [data-flt-toggle]`);
+        return;
+      }
+      f.enabled = !f.enabled;
+      commit();
+      if (busy) {
+        render(`[data-id="${id}"] [data-flt-toggle]`);
+      } else {
+        // In place, so the knob slides.
+        const card = cardOf(id);
+        btn.setAttribute("aria-checked", String(f.enabled));
+        btn.title = f.enabled ? "Turn off" : "Turn on";
+        card.classList.toggle("is-off", !f.enabled);
+        card.querySelector(".flt-tag").outerHTML = tagHTML(f);
+        syncStats();
+      }
+      showToast(`${f.variable} filter ${f.enabled ? "on" : "off"}`);
+    };
+
+    const askDelete = (id) => {
+      if (editor?.data.id !== id && !leaveEditor()) return;
+      if (editor?.data.id === id) { editor = null; picking = false; setNotice(null); }
+      confirming = id;
+      render(`[data-id="${id}"] [data-flt-confirm]`);
+    };
+    const keep = () => {
+      const id = confirming;
+      confirming = null;
+      render(`[data-id="${id}"] [data-flt-delete]`);
+    };
+    const remove = () => {
+      const i = filters.findIndex((f) => f.id === confirming);
+      const [f] = filters.splice(i, 1);
+      confirming = null;
+      commit();
+      const next = filters[i] ?? filters[i - 1];
+      render(next ? `[data-id="${next.id}"] [data-flt-edit]` : addBtn);
+      showToast(`${f.variable} filter deleted`);
+    };
+
+    const move = (id, to) => {
+      const from = filters.findIndex((f) => f.id === id);
+      to = Math.max(0, Math.min(filters.length - 1, to));
+      if (from === to) return;
+      filters.splice(to, 0, ...filters.splice(from, 1));
+      saveFilters(); // order never changes what a table shows
+      render(`[data-id="${id}"] [data-flt-grip]`);
+    };
+
+    /* Events */
+
+    list.addEventListener("click", (e) => {
+      const card = e.target.closest(".flt-card");
+      if (!card) return;
+      const id = card.dataset.id;
+      const hit = (sel) => e.target.closest(sel);
+      let el;
+      if ((el = hit("[data-flt-var]"))) pickVariable(el.dataset.fltVar);
+      else if (hit("[data-flt-change]")) { picking = true; render(`[data-id="${id}"] [data-flt-var][aria-pressed="true"]`); }
+      else if (hit("[data-flt-session-all]")) toggleSession(null);
+      else if ((el = hit("[data-flt-session]"))) toggleSession(el.dataset.fltSession);
+      else if (hit("[data-flt-table-all]")) toggleTable(null);
+      else if ((el = hit("[data-flt-table]"))) toggleTable(el.dataset.fltTable);
+      else if ((el = hit("[data-flt-op]"))) pickOperator(el.dataset.fltOp);
+      else if ((el = hit("[data-flt-toggle]"))) toggle(id, el);
+      else if (hit("[data-flt-delete]")) askDelete(id);
+      else if (hit("[data-flt-keep]")) keep();
+      else if (hit("[data-flt-confirm]")) remove();
+      else if (hit("[data-flt-save]")) save();
+      else if (hit("[data-flt-cancel]")) closeEditor(`[data-id="${id}"] [data-flt-edit]`);
+      else if (hit("[data-flt-discard]")) closeEditor(addBtn);
+      else if (hit("[data-flt-edit]")) edit(id);
+    });
+
+    list.addEventListener("input", (e) => {
+      const input = e.target.closest("[data-flt-value]");
+      if (input && editor) setValue(input);
+    });
+    // The typed value is tidied up (1,500 · 2.5M) once the field is left.
+    list.addEventListener("focusout", (e) => {
+      const input = e.target.closest("[data-flt-value]");
+      if (input && editor && input.isConnected) setValue(input, true);
+    });
+
+    list.addEventListener("keydown", (e) => {
+      const grip = e.target.closest("[data-flt-grip]");
+      if (grip && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+        e.preventDefault();
+        const id = grip.closest(".flt-card").dataset.id;
+        move(id, filters.findIndex((f) => f.id === id) + (e.key === "ArrowUp" ? -1 : 1));
+        return;
+      }
+      // Arrow keys move between the chips of a group (all the variables are one).
+      const chip = e.target.closest(".flt-chip");
+      const dir = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+      if (chip && dir) {
+        e.preventDefault();
+        const group = chip.closest(".flt-palette") || chip.closest(".flt-chips");
+        const all = [...group.querySelectorAll(".flt-chip:not(:disabled)")];
+        all[(all.indexOf(chip) + dir + all.length) % all.length]?.focus();
+        return;
+      }
+      const input = e.target.closest("[data-flt-value]");
+      if (input && e.key === "Enter") {
+        e.preventDefault();
+        setValue(input, true);
+        if (canSave()) save(); else focusNext();
+      }
+    });
+
+    /* Drag a grip to reorder: the card follows the pointer, the others make
+       room; the order is committed on release. */
+    list.addEventListener("pointerdown", (e) => {
+      const grip = e.target.closest("[data-flt-grip]");
+      if (!grip || grip.disabled || e.button !== 0) return;
+      e.preventDefault();
+      const item = grip.closest(".flt-card");
+      const all = [...list.children];
+      grip.setPointerCapture(e.pointerId);
+      drag = {
+        id: e.pointerId, item, all,
+        from: all.indexOf(item), to: all.indexOf(item),
+        step: all.length > 1 ? all[1].offsetTop - all[0].offsetTop : item.offsetHeight,
+        y: e.clientY, scroll: scroller.scrollTop, moved: false,
+      };
+    });
+    list.addEventListener("pointermove", (e) => {
+      if (!drag || e.pointerId !== drag.id) return;
+      const box = scroller.getBoundingClientRect();
+      if (e.clientY < box.top + 36) scroller.scrollTop -= 10;
+      else if (e.clientY > box.bottom - 36) scroller.scrollTop += 10;
+      const dy = e.clientY - drag.y + scroller.scrollTop - drag.scroll;
+      if (!drag.moved) {
+        if (Math.abs(dy) < 4) return;
+        drag.moved = true;
+        list.classList.add("is-sorting");
+        drag.item.classList.add("is-dragging");
+      }
+      const { from, all, step } = drag;
+      const to = Math.max(0, Math.min(all.length - 1, Math.round(from + dy / step)));
+      drag.to = to;
+      drag.item.style.transform = `translateY(${dy}px)`;
+      all.forEach((el, i) => {
+        if (el === drag.item) return;
+        const shift = from < i && i <= to ? -step : to <= i && i < from ? step : 0;
+        el.style.transform = shift ? `translateY(${shift}px)` : "";
+      });
+    });
+    const endDrag = (e) => {
+      if (!drag || e.pointerId !== drag.id) return;
+      const { item, from, to, moved } = drag;
+      drag = null;
+      list.classList.remove("is-sorting");
+      if (!moved) return;
+      const id = item.dataset.id;
+      filters.splice(to, 0, ...filters.splice(from, 1));
+      saveFilters();
+      render();
+      cardOf(id)?.querySelector("[data-flt-grip]")?.focus({ preventScroll: true });
+    };
+    window.addEventListener("pointerup", endDrag);
+    window.addEventListener("pointercancel", endDrag);
+    list.addEventListener("lostpointercapture", endDrag);
+
+    /* Badges: the nav button counts the active filters; a table's bar shows
+       a funnel with the filters working on it right now. */
+    const syncBadges = () => {
+      const active = filters.filter((f) => f.enabled).length;
+      navCount.textContent = String(active);
+      navCount.dataset.count = String(active);
+      navCount.setAttribute("aria-label", `${active} filter${active === 1 ? "" : "s"} applied`);
+      navBtn.title = active ? `Filters · ${active} active` : "Filters";
+      document.querySelectorAll(".terminal[data-panel]").forEach((root) => {
+        const btn = root.querySelector("[data-bar-filter]");
+        if (!btn) return;
+        const n = filtersOn(root.dataset.panel).length;
+        btn.hidden = n === 0;
+        btn.querySelector("[data-bar-filter-count]").textContent = String(n);
+        btn.title = `${n} filter${n === 1 ? "" : "s"} on this table`;
+        btn.setAttribute("aria-label", `${root.dataset.title}: ${n} filter${n === 1 ? "" : "s"} on. Open filters`);
+      });
+    };
+
+    // A new session brings its own filters into force.
+    onSessionChange.push((changed) => {
+      if (changed) tables.forEach((t) => t.refresh());
+      syncBadges();
+      if (!dlg.open) return;
+      if (editor) { syncStats(); syncEditor(); } else render();
+    });
+
+    /* Open / close */
+
+    const open = (btn) => {
+      trigger = btn;
+      editor = null;
+      picking = false;
+      confirming = null;
+      setNotice(null);
+      render();
+      dlg.showModal();
+      scroller.scrollTop = 0;
+      addBtn.focus();
+    };
+    const close = () => dlg.close();
+
+    dlg.addEventListener("close", () => {
+      editor = null;
+      picking = false;
+      confirming = null;
+      drag = null;
+      list.classList.remove("is-sorting");
+      setNotice(null);
+      trigger?.focus();
+    });
+    // Esc steps back one layer: a delete question, then the editor, then the
+    // dialog. Handled on keydown: Chrome won't always let `cancel` be
+    // prevented; the flag stops that same key press from closing the dialog.
+    const stepBack = () => {
+      if (confirming) keep();
+      else if (editor) closeEditor(editor.isNew ? addBtn : `[data-id="${editor.data.id}"] [data-flt-edit]`);
+      else return false;
+      return true;
+    };
+    dlg.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape" || !stepBack()) return;
+      e.preventDefault();
+      escHandled = true;
+    });
+    dlg.addEventListener("keyup", () => { escHandled = false; });
+    dlg.addEventListener("cancel", (e) => {
+      if (escHandled || stepBack()) e.preventDefault();
+      escHandled = false;
+    });
+    dlg.addEventListener("click", (e) => { if (e.target === dlg) close(); });
+    $("[data-flt-close]").addEventListener("click", close);
+    $("[data-flt-done]").addEventListener("click", close);
+    addBtn.addEventListener("click", () => add());
+    empty.addEventListener("click", (e) => {
+      const preset = e.target.closest("[data-flt-preset]");
+      if (preset) add(FLT_PRESETS[Number(preset.dataset.fltPreset)]);
+    });
+    navBtn.addEventListener("click", () => open(navBtn));
+    document.querySelectorAll("[data-bar-filter]").forEach((btn) => btn.addEventListener("click", () => open(btn)));
+
+    syncBadges();
+    return { open };
+  };
+
   /* ---- Mount -------------------------------------------------------------- */
 
   const panel = (id) => document.querySelector(`.terminal[data-panel="${id}"]`);
@@ -2634,6 +3693,7 @@
   const soundSettings = mountSoundSettings();
   const floatSettings = mountFloatSettings();
   const tableSettings = mountTableSettings();
+  mountFilters();
 
   // Vertical container: toplists
   mountTable(panel("gainers"), GAINERS, { cols: TOPLIST_COLS, pins: TOPLIST_PINS, quotes: true });

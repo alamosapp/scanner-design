@@ -16,8 +16,8 @@
     <nav class="app-nav" aria-label="Main navigation">
       <span class="app-brand">Scanner</span>
 
-      <!-- Global filter (design only — no behaviour yet) -->
-      <button type="button" class="filter-btn" data-global-filter aria-haspopup="dialog" title="Global filters">
+      <!-- Global filters: opens the Filters dialog; the badge counts the active ones -->
+      <button type="button" class="filter-btn" data-global-filter aria-haspopup="dialog" aria-controls="filters" title="Filters">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16l-6 7.5V18l-4 2v-7.5z"/></svg>
         <span>Filter</span>
         <span class="filter-count" data-filter-count data-count="0" aria-label="0 filters applied">0</span>
@@ -567,6 +567,65 @@
     </div>
   </dialog>
 
+  <!-- Filters: opened from the Filter button in the nav (or the funnel of a
+       filtered table). Global row filters; scanner.js builds the cards and
+       the step-by-step editor, and saves each filter on its own. -->
+  <dialog class="settings-modal settings-modal--filters" id="filters" aria-labelledby="flt-title" aria-describedby="flt-note">
+    <div class="sm-shell">
+      <span class="sm-grabber" aria-hidden="true"></span>
+      <header class="sm-head">
+        <span class="sm-badge" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M4 5h16l-6 7.5V18l-4 2v-7.5z"/></svg>
+        </span>
+        <div class="sm-heading">
+          <p class="sm-eyebrow">All tables</p>
+          <h2 class="sm-title" id="flt-title">Filters</h2>
+        </div>
+        <button type="button" class="icon-btn sm-close" data-flt-close aria-label="Close filters" title="Close">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+      </header>
+
+      <!-- Counts · the session whose filters are in use · new filter -->
+      <div class="flt-bar">
+        <p class="flt-stats" data-flt-stats aria-live="polite"></p>
+        <span class="flt-now" data-flt-now><i aria-hidden="true"></i><span></span></span>
+        <button type="button" class="btn btn-secondary btn-sm flt-add" data-flt-add>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          <span>Add filter</span>
+        </button>
+      </div>
+
+      <div class="flt-notice" data-flt-notice role="status" aria-live="polite" hidden></div>
+
+      <div class="sm-body">
+        <section class="sm-panel flt-panel" aria-labelledby="flt-title">
+          <ol class="flt-list" data-flt-list aria-label="Filters"></ol>
+          <p class="sr-only" id="flt-move-hint">Up and down arrow keys move the filter.</p>
+
+          <div class="flt-empty" data-flt-empty hidden>
+            <span class="flt-empty__icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M4 5h16l-6 7.5V18l-4 2v-7.5z"/></svg>
+            </span>
+            <b>No filters yet</b>
+            <p>Hide the rows you don't care about: pick a variable, where it works and a condition.</p>
+            <div class="flt-presets" role="group" aria-label="Quick start">
+              <span class="flt-presets__label">Try</span>
+              <button type="button" class="flt-chip" data-flt-preset="0"><span>Price 1 – 20</span></button>
+              <button type="button" class="flt-chip" data-flt-preset="1"><span>Float ≤ 20M</span></button>
+              <button type="button" class="flt-chip" data-flt-preset="2"><span>RVol ≥ 2x</span></button>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <footer class="sm-foot">
+        <p class="flt-note" id="flt-note">A row has to pass <b>every</b> active filter of its table.</p>
+        <button type="button" class="btn btn-secondary" data-flt-done>Done</button>
+      </footer>
+    </div>
+  </dialog>
+
   <!-- Short confirmations (e.g. "settings saved"). A manual popover, so it
        shows above open dialogs too. -->
   <div class="toast" data-toast role="status" aria-live="polite" popover="manual" hidden>
@@ -579,6 +638,11 @@
   <template id="terminal-tpl">
     <div class="terminal-bar">
       <span class="terminal-title"></span>
+      <!-- Shown while filters work on this table; opens the Filters dialog -->
+      <button type="button" class="bar-filter" data-bar-filter aria-haspopup="dialog" aria-controls="filters" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16l-6 7.5V18l-4 2v-7.5z"/></svg>
+        <span data-bar-filter-count>0</span>
+      </button>
       <div class="terminal-tools">
         <button type="button" class="icon-btn sound-icon" data-sound data-on="false" aria-haspopup="dialog" aria-controls="sound-settings" data-label="Alert sound for {title}" title="Alert sound: off">
           <svg class="icon-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
