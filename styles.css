@@ -360,7 +360,10 @@ button { cursor: pointer; }
 
 /* ---- Grid ---- */
 
-.table-wrap { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; position: relative; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+/* Opaque background: Chrome can then scroll the table on the compositor even
+   at 100% display scaling, so scrolling never waits on the live updates
+   (prices, timers, new rows) running on the main thread. */
+.table-wrap { flex: 1 1 auto; min-height: 0; overflow: auto; background: var(--bg-elevated); overscroll-behavior: contain; position: relative; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
 .table-wrap:focus-visible { outline: 2px solid var(--tone); outline-offset: -2px; }
 .table-wrap::-webkit-scrollbar { width: 8px; height: 8px; }
 .table-wrap::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: var(--radius-pill); border: 2px solid var(--bg-elevated); }
@@ -373,11 +376,13 @@ button { cursor: pointer; }
    and the row lines would drift apart by a pixel while scrolling. */
 .scan-table { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: 13px; font-variant-numeric: tabular-nums; }
 .scan-table th, .scan-table td { box-sizing: border-box; white-space: nowrap; }
-/* The whole header sticks as one block, so every header cell shares a single
-   layer and moves in lockstep with the body when scrolling sideways. (Sticky
-   on each <th> gives every cell its own layer, and those drift apart.) */
-.scan-table thead { position: sticky; top: 0; z-index: 2; will-change: transform; }
-.scan-table th { height: 35px; padding: 0 11px; line-height: 16px; text-align: left; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; color: var(--text-3); background: var(--bg); border-bottom: 1px solid var(--line); user-select: none; }
+/* Header, body and pinned cells all live in ONE scroller (.table-wrap) and
+   stick straight to it: no sticky box sits inside another sticky box, and
+   nothing is promoted with will-change. Nested sticky (a pinned <th> inside
+   a sticky <thead>) and hand-made layers are what made the header, the body
+   and the pinned cells trail each other by a frame or a pixel. Each header
+   cell sticks on its own (top); the pinned ones on both axes. */
+.scan-table th { position: sticky; top: 0; z-index: 2; height: 35px; padding: 0 11px; line-height: 16px; text-align: left; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; color: var(--text-3); background: var(--bg); border-bottom: 1px solid var(--line); user-select: none; }
 .scan-table th[title] { cursor: help; }
 .scan-table td { height: 41px; padding: 0 11px; line-height: 20px; vertical-align: middle; border-bottom: 1px solid var(--line); font-family: var(--font-mono); font-weight: 500; color: var(--text-2); background: var(--row-bg); transition: background var(--t-fast); }
 .scan-table tr:last-child td { border-bottom: 0; }
@@ -402,19 +407,21 @@ button { cursor: pointer; }
 
 /* ---- Pinned columns: Signal · Time · Ticker ---- */
 
-/* Each pinned cell sticks on its own; offsets are whole-pixel sums of the
-   column widths, set by scanner.js as --pin-time / --pin-sym. */
+/* Signal is always pinned. Time scrolls with the rest of the row and slides
+   under Signal; Ticker only sticks once it reaches Signal (left = Signal's
+   width, --pin-sym, set by scanner.js), so it takes no room until then. */
 .scan-table .col-sig,
-.scan-table .col-time,
-.scan-table .col-sym { position: sticky; z-index: 1; will-change: transform; }
+.scan-table .col-sym { position: sticky; z-index: 1; }
+.scan-table th.col-sig,
+.scan-table th.col-sym { z-index: 3; }
 .scan-table .col-sig { left: 0; padding-inline: 0; }
-.scan-table .col-time { left: var(--pin-time); color: var(--text-3); }
+.scan-table .col-time { color: var(--text-3); }
 .scan-table .col-sym { left: var(--pin-sym); }
-/* Edge shadow once the table scrolls sideways; drawn by a pseudo-element so
-   it never covers the cell's own background or row line. It only exists
-   while scrolled: fading it with opacity left stray pixels of the divider
-   behind in some rows once the table was back at the left edge. */
-.table-wrap.is-scrolled .col-sym::after { content: ""; position: absolute; top: 0; bottom: -1px; right: -12px; width: 12px; pointer-events: none; background: linear-gradient(to right, var(--shadow-color), transparent); border-left: 1px solid var(--line); }
+/* Edge shadow while Ticker is stuck; drawn by a pseudo-element so it never
+   covers the cell's own background or row line. It only exists while stuck:
+   fading it with opacity left stray pixels of the divider behind in some
+   rows once the table was back at the left edge. */
+.table-wrap.is-stuck .col-sym::after { content: ""; position: absolute; top: 0; bottom: -1px; right: -12px; width: 12px; pointer-events: none; background: linear-gradient(to right, var(--shadow-color), transparent); border-left: 1px solid var(--line); }
 
 .sym { font-weight: 700; color: var(--text); letter-spacing: 0.02em; display: inline-flex; align-items: center; gap: var(--space-2); }
 

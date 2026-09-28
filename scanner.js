@@ -484,12 +484,11 @@
     const colgroup = table.insertBefore(document.createElement("colgroup"), table.firstChild);
     const FILL = '<td class="col-fill" aria-hidden="true"></td>';
 
-    // Pinned offsets (--pin-time, --pin-sym) are plain sums of whole-pixel
-    // widths: nothing to measure.
-    pins.reduce((left, key) => {
-      table.style.setProperty(`--pin-${key}`, `${left}px`);
-      return left + COL[key].w;
-    }, 0);
+    // Ticker sticks right after Signal (--pin-sym). It gets there once the
+    // columns between them (Time, in the alert tables) have scrolled away:
+    // `stickAt` is that scroll distance. Whole pixels, nothing to measure.
+    table.style.setProperty("--pin-sym", `${COL.sig.w}px`);
+    const stickAt = pins.slice(1, pins.indexOf("sym")).reduce((sum, key) => sum + COL[key].w, 0);
 
     /* Header + rows */
 
@@ -663,11 +662,14 @@
       if (soundOn) beep(tone);
     });
 
-    // Edge shadow on the pinned columns once the table scrolls sideways.
-    // With display scaling scrollLeft can rest a fraction of a pixel off 0 at
-    // the left edge; that still counts as "not scrolled".
+    // Edge shadow on Ticker while it is stuck. With display scaling scrollLeft
+    // can rest a fraction of a pixel off 0; that still counts as "not stuck".
+    // The class only changes when the state flips, so scrolling itself
+    // triggers no style work.
+    let stuck = false;
     wrap.addEventListener("scroll", () => {
-      wrap.classList.toggle("is-scrolled", wrap.scrollLeft >= 1);
+      const now = wrap.scrollLeft >= Math.max(stickAt, 1);
+      if (now !== stuck) wrap.classList.toggle("is-stuck", (stuck = now));
     }, { passive: true });
 
     /* Live prices (toplists): a changed price flashes green when it ticks
