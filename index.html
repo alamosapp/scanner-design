@@ -187,6 +187,15 @@
       </details>
 
       <details class="guide-item">
+        <summary>Table settings</summary>
+        <p>The sliders icon in a table's bar opens its settings. Nothing changes until you press <b>Save changes</b>.</p>
+        <ul>
+          <li><b>Columns</b>: drag to reorder, switch columns on or off, and pick the color of Vol. 1m and Hits. <b>Reset</b> restores the defaults.</li>
+          <li><b>Exclude tickers</b>: search a ticker and exclude it from the table. Tick <b>all tables</b> to exclude it everywhere.</li>
+        </ul>
+      </details>
+
+      <details class="guide-item">
         <summary>Fullscreen</summary>
         <ul>
           <li>The icon in a table's bar opens that table in fullscreen.</li>
@@ -204,6 +213,118 @@
     </div>
   </dialog>
 
+  <!-- Table settings: opened by the settings icon in a panel's bar (scanner.js
+       fills in the panel's title, columns and exclusions). -->
+  <dialog class="settings-modal" id="table-settings" aria-labelledby="ts-title" aria-describedby="ts-eyebrow">
+    <div class="sm-shell">
+      <span class="sm-grabber" aria-hidden="true"></span>
+      <header class="sm-head">
+        <span class="sm-badge" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
+        </span>
+        <div class="sm-heading">
+          <p class="sm-eyebrow" id="ts-eyebrow">Table settings</p>
+          <h2 class="sm-title" id="ts-title" data-ts-title>Table</h2>
+        </div>
+        <button type="button" class="icon-btn sm-close" data-ts-close aria-label="Close table settings" title="Close">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+      </header>
+
+      <div class="sm-tabs" role="tablist" aria-label="Table settings sections" data-active="columns">
+        <i class="sm-tabs__thumb" aria-hidden="true"></i>
+        <button type="button" class="sm-tab" role="tab" id="ts-tab-columns" aria-selected="true" aria-controls="ts-panel-columns" data-ts-tab="columns">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M9.5 4.5v15M14.5 4.5v15"/></svg>
+          <span>Columns</span>
+          <span class="sm-tab__count" data-ts-count="columns">0</span>
+        </button>
+        <button type="button" class="sm-tab" role="tab" id="ts-tab-exclude" aria-selected="false" aria-controls="ts-panel-exclude" data-ts-tab="exclude" tabindex="-1">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="m6 6 12 12"/></svg>
+          <span>Exclude tickers</span>
+          <span class="sm-tab__count" data-ts-count="exclude">0</span>
+        </button>
+      </div>
+
+      <div class="sm-body">
+        <!-- Columns: pinned first, then the movable ones -->
+        <section class="sm-panel" id="ts-panel-columns" role="tabpanel" aria-labelledby="ts-tab-columns" data-ts-panel="columns">
+          <div class="sm-section-head">
+            <h3>Pinned</h3>
+            <span class="sm-meta">Always visible</span>
+          </div>
+          <ul class="col-list col-list--pinned" data-ts-pinned></ul>
+
+          <div class="sm-section-head">
+            <h3>Columns</h3>
+            <span class="sm-meta" data-ts-shown aria-live="polite"></span>
+            <button type="button" class="sm-link" data-ts-show-all>Show all</button>
+          </div>
+          <ul class="col-list" data-ts-columns aria-label="Columns"></ul>
+          <p class="sm-hint" id="ts-cols-hint">Drag the handle to reorder, or focus it and use <kbd>↑</kbd> <kbd>↓</kbd>.</p>
+        </section>
+
+        <!-- Exclude tickers -->
+        <section class="sm-panel" id="ts-panel-exclude" role="tabpanel" aria-labelledby="ts-tab-exclude" data-ts-panel="exclude" hidden>
+          <p class="sm-lead">Excluded tickers never show up in this table: no row, no card, no sound.</p>
+
+          <div class="ex-search">
+            <div class="ex-field">
+              <svg class="ex-field__icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>
+              <label class="sr-only" for="ex-input">Search for a ticker</label>
+              <input id="ex-input" type="text" data-ex-input placeholder="Search ticker…" autocomplete="off" spellcheck="false" maxlength="10"
+                     role="combobox" aria-autocomplete="list" aria-controls="ex-suggest" aria-expanded="false">
+              <button type="button" class="ex-field__clear" data-ex-clear-input aria-label="Clear search" hidden>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17"/></svg>
+              </button>
+              <ul class="ex-suggest" id="ex-suggest" role="listbox" aria-label="Tickers" data-ex-suggest hidden></ul>
+            </div>
+            <button type="button" class="btn btn-primary" data-ex-add disabled>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+              <span>Exclude</span>
+            </button>
+          </div>
+
+          <div class="ex-bag">
+            <div class="sm-section-head">
+              <h3>Excluded</h3>
+              <span class="sm-meta" data-ex-total></span>
+              <span class="ex-legend" data-ex-legend hidden><i aria-hidden="true"></i>All tables</span>
+            </div>
+            <div class="ex-chips" data-ex-chips aria-live="polite"></div>
+          </div>
+
+          <div class="ex-foot">
+            <label class="check">
+              <input type="checkbox" data-ex-all>
+              <span class="check__box" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m5.5 12.5 4 4 9-9"/></svg></span>
+              <span class="check__label">Apply new exclusions to <b>all tables</b></span>
+            </label>
+            <button type="button" class="btn btn-ghost btn-sm" data-ex-clean>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V5h6v2M6.5 7l1 12h9l1-12"/></svg>
+              <span>Clear list</span>
+            </button>
+          </div>
+        </section>
+      </div>
+
+      <footer class="sm-foot">
+        <button type="button" class="btn btn-ghost btn-sm sm-reset" data-ts-reset title="Default order, every column shown, default colors">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4.5V9h4.5"/></svg>
+          <span>Reset</span>
+        </button>
+        <span class="sm-dirty" data-ts-dirty hidden><i aria-hidden="true"></i>Unsaved</span>
+        <button type="button" class="btn btn-secondary" data-ts-cancel>Cancel</button>
+        <button type="button" class="btn btn-primary" data-ts-save disabled>Save changes</button>
+      </footer>
+    </div>
+  </dialog>
+
+  <!-- Short confirmations (e.g. "settings saved") -->
+  <div class="toast" data-toast role="status" aria-live="polite" hidden>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5.5 12.5 4 4 9-9"/></svg>
+    <span data-toast-text></span>
+  </div>
+
   <!-- Shared panel markup; scanner.js fills in the title and labels.
        "{title}" in data-label becomes the panel's title. -->
   <template id="terminal-tpl">
@@ -214,7 +335,7 @@
           <svg class="icon-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
           <svg class="icon-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="m16 9 5 6"/><path d="m21 9-5 6"/></svg>
         </button>
-        <button type="button" class="icon-btn config-icon" data-label="Settings for {title}" title="Settings">
+        <button type="button" class="icon-btn config-icon" data-settings aria-haspopup="dialog" aria-controls="table-settings" data-label="Settings for {title}" title="Settings">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
         </button>
         <button type="button" class="icon-btn fullscreen-icon" data-fullscreen aria-pressed="false" data-label="Fullscreen: {title}" title="Fullscreen">

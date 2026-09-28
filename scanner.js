@@ -245,6 +245,47 @@
     try { localStorage.setItem(storeKey(panel), JSON.stringify(order)); } catch { /* ignore */ }
   };
 
+  // Table settings per panel: hidden columns, heat colors and excluded
+  // tickers. Colors are palette token names (--amber, --pink…), not hex.
+  // Direction-neutral heat columns only: green/red stay bull/bear.
+  const COLORABLE = { vol1m: "amber", hits: "violet" };
+  const SWATCHES = ["amber", "violet", "cyan", "pink", "orange", "teal"];
+
+  const prefsKey = (panel) => `scanner:prefs:v1:${panel}`;
+  const loadPrefs = (panel, movable) => {
+    const prefs = { hidden: new Set(), colors: {}, excluded: new Set() };
+    try {
+      const saved = JSON.parse(localStorage.getItem(prefsKey(panel)) || "null");
+      if (saved) {
+        (saved.hidden || []).filter((k) => movable.includes(k)).forEach((k) => prefs.hidden.add(k));
+        for (const [k, v] of Object.entries(saved.colors || {})) {
+          if (movable.includes(k) && k in COLORABLE && SWATCHES.includes(v)) prefs.colors[k] = v;
+        }
+        (saved.excluded || []).forEach((s) => typeof s === "string" && prefs.excluded.add(s));
+      }
+    } catch { /* ignore */ }
+    return prefs;
+  };
+  const savePrefs = (panel, { hidden, colors, excluded }) => {
+    try {
+      localStorage.setItem(prefsKey(panel), JSON.stringify({ hidden: [...hidden], colors, excluded: [...excluded] }));
+    } catch { /* ignore */ }
+  };
+
+  // Tickers excluded from every table.
+  const GLOBAL_EXCLUDED_KEY = "scanner:excluded:all";
+  const globalExcluded = new Set();
+  try {
+    const saved = JSON.parse(localStorage.getItem(GLOBAL_EXCLUDED_KEY) || "[]");
+    if (Array.isArray(saved)) saved.forEach((s) => typeof s === "string" && globalExcluded.add(s));
+  } catch { /* ignore */ }
+  const saveGlobalExcluded = () => {
+    try { localStorage.setItem(GLOBAL_EXCLUDED_KEY, JSON.stringify([...globalExcluded])); } catch { /* ignore */ }
+  };
+
+  // Every mounted table, by panel id: what the settings dialog reads and writes.
+  const tables = new Map();
+
   /* ---- Mobile card ------------------------------------------------------- */
 
   // Two lines: ticker · price · time / volume · RVol · 1m change (or halt timers).
@@ -478,9 +519,15 @@
     const soundBtn = root.querySelector("[data-sound]");
     const rows = seed.map((r) => ({ ...r }));
     let order = loadOrder(panel, cols);
+    let prefs = loadPrefs(panel, cols);
     let soundOn = false;
 
-    const columns = () => [...pins, ...order];
+    const columns = () => [...pins, ...order.filter((k) => !prefs.hidden.has(k))];
+    const isExcluded = (sym) => prefs.excluded.has(sym) || globalExcluded.has(sym);
+    const applyColors = () => Object.keys(COLORABLE).forEach((k) => {
+      if (prefs.colors[k]) root.style.setProperty(`--hue-${k}`, `var(--${prefs.colors[k]})`);
+      else root.style.removeProperty(`--hue-${k}`);
+    });
     const colgroup = table.insertBefore(document.createElement("colgroup"), table.firstChild);
     const FILL = '<td class="col-fill" aria-hidden="true"></td>';
 
@@ -541,7 +588,7 @@
 
     const renderAll = () => {
       renderHead();
-      const derived = rows.map((r) => [derive(r, tone), r.sym]);
+      const derived = rows.filter((r) => !isExcluded(r.sym)).map((r) => [derive(r, tone), r.sym]);
       body.replaceChildren(...derived.map(([d, sym]) => rowEl(d, sym)));
       cards.replaceChildren(...derived.map(([d, sym]) => cardEl(d, sym)));
       tickTimers();
@@ -604,10 +651,11 @@
       if (!th || !e.altKey || !["ArrowLeft", "ArrowRight"].includes(e.key)) return;
       e.preventDefault();
       const key = th.dataset.key;
-      const i = order.indexOf(key);
+      const shown = order.filter((k) => !prefs.hidden.has(k));
+      const i = shown.indexOf(key);
       const j = e.key === "ArrowLeft" ? i - 1 : i + 1;
-      if (j < 0 || j >= order.length) return;
-      moveColumn(key, order[j], e.key === "ArrowRight");
+      if (j < 0 || j >= shown.length) return;
+      moveColumn(key, shown[j], e.key === "ArrowRight");
       headRow.querySelector(`[data-key="${key}"]`).focus();
     });
 
@@ -621,6 +669,8 @@
       if (i >= 0) rows.splice(i, 1);
       rows.unshift(alert);
       rows.length = Math.min(rows.length, MAX_ROWS);
+      // Excluded tickers are tracked but never shown (nor sounded).
+      if (isExcluded(alert.sym)) return;
 
       const d = derive(alert, tone);
       body.querySelector(`[data-sym="${alert.sym}"]`)?.remove();
@@ -698,7 +748,8 @@
             const td = tr.children[i];
             if (td.innerHTML !== d[key]) td.innerHTML = d[key];
           });
-          flash(tr.children[columns().indexOf("price")], up);
+          const priceAt = columns().indexOf("price");
+          if (priceAt >= 0) flash(tr.children[priceAt], up);
         }
         const cardPrice = cards.querySelector(`[data-sym="${r.sym}"] .card-price`);
         if (cardPrice) { cardPrice.textContent = after; flash(cardPrice, up); }
@@ -710,10 +761,33 @@
       if (/^flash(Up|Down)$/.test(e.animationName)) e.target.classList.remove("flash-up", "flash-down");
     });
 
+    /* Table settings: the dialog drafts a copy of this state and hands it
+       back on Save. */
+    tables.set(panel, {
+      title: root.dataset.title,
+      tone: getComputedStyle(root).getPropertyValue("--tone").trim(),
+      pins,
+      defaults: cols,
+      rows: () => rows,
+      state: () => ({ order: [...order], hidden: new Set(prefs.hidden), colors: { ...prefs.colors }, excluded: new Set(prefs.excluded) }),
+      apply: (s) => {
+        order = [...s.order];
+        prefs = { hidden: new Set(s.hidden), colors: { ...s.colors }, excluded: new Set(s.excluded) };
+        saveOrder(panel, order);
+        savePrefs(panel, prefs);
+        applyColors();
+        renderAll();
+      },
+      refresh: renderAll,
+    });
+    const settingsBtn = root.querySelector("[data-settings]");
+    settingsBtn.addEventListener("click", () => tableSettings.open(panel, settingsBtn));
+
     if (expires) {
       rows.splice(0, rows.length, ...rows.filter((r) => r.resumeAt > Date.now()));
       onTick.push(dropResumed);
     }
+    applyColors();
     renderAll();
     if (next) setInterval(pushAlert, every + Math.random() * 1500);
     if (quotes) setInterval(tickPrices, QUOTE_INTERVAL + Math.random() * 600);
@@ -1171,6 +1245,524 @@
     });
   };
 
+  /* Toast: a short confirmation at the bottom of the screen. */
+  const toastEl = document.querySelector("[data-toast]");
+  let toastTimer = 0;
+  const showToast = (text) => {
+    clearTimeout(toastTimer);
+    toastEl.querySelector("[data-toast-text]").textContent = text;
+    toastEl.classList.remove("is-leaving");
+    toastEl.hidden = false;
+    toastTimer = setTimeout(() => {
+      toastEl.classList.add("is-leaving");
+      toastTimer = setTimeout(() => { toastEl.hidden = true; }, reduceMotion.matches ? 0 : 220);
+    }, 2600);
+  };
+
+  /* ---- Table settings dialog ----------------------------------------------
+     The settings icon in a panel's bar opens it for that panel.
+     - Columns: pinned ones stay put; the others can be reordered (drag the
+       handle, or ↑/↓ on it), switched on/off, and the heat columns
+       (Vol. 1m, Hits) recolored.
+     - Exclude tickers: hide tickers from this table, or from every table.
+     Everything is a draft until Save; Cancel, Esc or a click outside drops it. */
+
+  const SWATCH_LABEL = { amber: "Amber", violet: "Violet", cyan: "Cyan", pink: "Pink", orange: "Orange", teal: "Teal" };
+  const ICON = {
+    grip: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>',
+    lock: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5.5" y="10.5" width="13" height="9" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/></svg>',
+    globe: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.5 2.6 2.5 14.4 0 17M12 3.5c-2.5 2.6-2.5 14.4 0 17"/></svg>',
+    x: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17"/></svg>',
+    empty: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="m6 6 12 12"/></svg>',
+  };
+
+  const mountTableSettings = () => {
+    const dlg = document.getElementById("table-settings");
+    const $ = (sel) => dlg.querySelector(sel);
+    const titleEl = $("[data-ts-title]");
+    const tablist = $("[role='tablist']");
+    const tabs = [...dlg.querySelectorAll("[data-ts-tab]")];
+    const panels = Object.fromEntries([...dlg.querySelectorAll("[data-ts-panel]")].map((p) => [p.dataset.tsPanel, p]));
+    const counts = Object.fromEntries([...dlg.querySelectorAll("[data-ts-count]")].map((c) => [c.dataset.tsCount, c]));
+    const pinnedList = $("[data-ts-pinned]");
+    const colList = $("[data-ts-columns]");
+    const shownEl = $("[data-ts-shown]");
+    const showAllBtn = $("[data-ts-show-all]");
+    const resetBtn = $("[data-ts-reset]");
+    const dirtyEl = $("[data-ts-dirty]");
+    const saveBtn = $("[data-ts-save]");
+    const input = $("[data-ex-input]");
+    const clearInputBtn = $("[data-ex-clear-input]");
+    const suggest = $("[data-ex-suggest]");
+    const addBtn = $("[data-ex-add]");
+    const chips = $("[data-ex-chips]");
+    const totalEl = $("[data-ex-total]");
+    const legendEl = $("[data-ex-legend]");
+    const allBox = $("[data-ex-all]");
+    const cleanBtn = $("[data-ex-clean]");
+
+    let key = null;          // panel being edited
+    let table = null;
+    let draft = null;        // { order, hidden, colors, excluded }
+    let draftGlobal = null;  // tickers excluded from every table
+    let baseline = "";
+    let trigger = null;
+    let tickers = new Map(); // sym → { price, tier } for the search
+    let activeOpt = -1;
+    let popover = null;      // open color picker: { key, btn, pop }
+    let justAdded = "";
+
+    const snapshot = () => JSON.stringify([
+      draft.order,
+      [...draft.hidden].sort(),
+      Object.entries(draft.colors).sort(),
+      [...draft.excluded].sort(),
+      [...draftGlobal].sort(),
+    ]);
+    const update = () => {
+      const dirty = snapshot() !== baseline;
+      saveBtn.disabled = !dirty;
+      dirtyEl.hidden = !dirty;
+    };
+    const setCount = (el, n) => { el.textContent = String(n); el.dataset.count = String(n); };
+
+    /* Columns tab */
+
+    const colorOf = (k) => draft.colors[k] || COLORABLE[k];
+    const desc = (c) => (c.title ? `<span class="col-item__desc">${c.title}</span>` : "");
+
+    const renderColumns = () => {
+      closePopover();
+      pinnedList.innerHTML = table.pins.map((k) => `
+        <li class="col-item">
+          <span class="col-item__lead">${ICON.lock}</span>
+          <span class="col-item__text"><span class="col-item__name">${COL[k].label}</span>${desc(COL[k])}</span>
+          <span class="col-tag">Pinned</span>
+        </li>`).join("");
+      colList.innerHTML = draft.order.map((k) => {
+        const c = COL[k];
+        const on = !draft.hidden.has(k);
+        const color = k in COLORABLE
+          ? `<span class="swatch-wrap"><button type="button" class="swatch" data-swatch="${k}" style="--sw: var(--${colorOf(k)})" aria-haspopup="true" aria-expanded="false" aria-label="${c.label} color: ${SWATCH_LABEL[colorOf(k)]}" title="Change color"></button></span>`
+          : "";
+        return `
+          <li class="col-item${on ? "" : " is-off"}" data-key="${k}">
+            <button type="button" class="col-item__grip" data-grip aria-label="Move ${c.label}" aria-describedby="ts-cols-hint" title="Drag to reorder">${ICON.grip}</button>
+            <span class="col-item__text"><span class="col-item__name">${c.label}</span>${desc(c)}</span>
+            <span class="col-item__actions">${color}<button type="button" class="switch" role="switch" data-toggle aria-checked="${on}" aria-label="Show ${c.label}" title="${on ? "Hide" : "Show"} column"></button></span>
+          </li>`;
+      }).join("");
+      syncShown();
+    };
+
+    const syncShown = () => {
+      const shown = draft.order.filter((k) => !draft.hidden.has(k)).length;
+      shownEl.textContent = `${shown} of ${draft.order.length} shown`;
+      showAllBtn.disabled = shown === draft.order.length;
+      setCount(counts.columns, table.pins.length + shown);
+      update();
+    };
+
+    const moveColumn = (k, to) => {
+      const from = draft.order.indexOf(k);
+      to = Math.max(0, Math.min(draft.order.length - 1, to));
+      if (from === to) return;
+      draft.order.splice(from, 1);
+      draft.order.splice(to, 0, k);
+      renderColumns();
+      colList.querySelector(`[data-key="${k}"] [data-grip]`)?.focus();
+    };
+
+    // Switch in place (no re-render) so the knob animates.
+    colList.addEventListener("click", (e) => {
+      const sw = e.target.closest("[data-toggle]");
+      if (sw) {
+        const item = sw.closest(".col-item");
+        const k = item.dataset.key;
+        const on = draft.hidden.has(k);
+        if (on) draft.hidden.delete(k); else draft.hidden.add(k);
+        sw.setAttribute("aria-checked", String(on));
+        sw.title = `${on ? "Hide" : "Show"} column`;
+        item.classList.toggle("is-off", !on);
+        syncShown();
+        return;
+      }
+      const swatch = e.target.closest("[data-swatch]");
+      if (swatch) {
+        if (popover?.btn === swatch) closePopover();
+        else openPopover(swatch);
+        return;
+      }
+      const pick = e.target.closest("[data-pick]");
+      if (pick) {
+        const k = popover.key;
+        if (pick.dataset.pick === COLORABLE[k]) delete draft.colors[k];
+        else draft.colors[k] = pick.dataset.pick;
+        renderColumns();
+        colList.querySelector(`[data-swatch="${k}"]`)?.focus();
+      }
+    });
+
+    showAllBtn.addEventListener("click", () => {
+      draft.hidden.clear();
+      renderColumns();
+    });
+
+    resetBtn.addEventListener("click", () => {
+      draft.order = [...table.defaults];
+      draft.hidden.clear();
+      draft.colors = {};
+      renderColumns();
+    });
+
+    /* Color picker popover */
+
+    function openPopover(btn) {
+      closePopover();
+      const k = btn.dataset.swatch;
+      const current = colorOf(k);
+      const pop = document.createElement("div");
+      pop.className = "swatch-pop";
+      pop.setAttribute("role", "group");
+      pop.setAttribute("aria-label", `${COL[k].label} color`);
+      pop.innerHTML = SWATCHES.map((s) => `<button type="button" class="swatch" data-pick="${s}" style="--sw: var(--${s})" aria-pressed="${s === current}" aria-label="${SWATCH_LABEL[s]}" title="${SWATCH_LABEL[s]}"></button>`).join("");
+      btn.after(pop);
+      // No room below inside the scrolling list: open upwards.
+      if (pop.getBoundingClientRect().bottom > panels.columns.getBoundingClientRect().bottom) pop.classList.add("is-up");
+      btn.setAttribute("aria-expanded", "true");
+      popover = { key: k, btn, pop };
+      pop.querySelector("[aria-pressed='true']").focus();
+    }
+    function closePopover({ focus = false } = {}) {
+      if (!popover) return;
+      popover.pop.remove();
+      popover.btn.setAttribute("aria-expanded", "false");
+      if (focus) popover.btn.focus();
+      popover = null;
+    }
+
+    // Arrow keys move between swatches.
+    colList.addEventListener("keydown", (e) => {
+      const pick = e.target.closest("[data-pick]");
+      if (pick && ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) {
+        e.preventDefault();
+        const all = [...popover.pop.children];
+        const step = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -3, ArrowDown: 3 }[e.key];
+        all[(all.indexOf(pick) + step + all.length) % all.length].focus();
+        return;
+      }
+      const grip = e.target.closest("[data-grip]");
+      if (grip && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+        e.preventDefault();
+        const k = grip.closest(".col-item").dataset.key;
+        moveColumn(k, draft.order.indexOf(k) + (e.key === "ArrowUp" ? -1 : 1));
+      }
+    });
+
+    /* Drag to reorder: the item follows the pointer and the others slide
+       out of its way; the order is committed on release. */
+
+    const scroller = panels.columns;
+    let drag = null;
+
+    colList.addEventListener("pointerdown", (e) => {
+      const grip = e.target.closest("[data-grip]");
+      if (!grip || e.button !== 0) return;
+      e.preventDefault();
+      closePopover();
+      const item = grip.closest(".col-item");
+      const items = [...colList.children];
+      grip.setPointerCapture(e.pointerId);
+      drag = {
+        id: e.pointerId, item, items,
+        from: items.indexOf(item), to: items.indexOf(item),
+        step: items.length > 1 ? items[1].offsetTop - items[0].offsetTop : item.offsetHeight,
+        y: e.clientY, scroll: scroller.scrollTop, moved: false,
+      };
+    });
+
+    colList.addEventListener("pointermove", (e) => {
+      if (!drag || e.pointerId !== drag.id) return;
+      const box = scroller.getBoundingClientRect();
+      if (e.clientY < box.top + 36) scroller.scrollTop -= 10;
+      else if (e.clientY > box.bottom - 36) scroller.scrollTop += 10;
+      const dy = e.clientY - drag.y + scroller.scrollTop - drag.scroll;
+      if (!drag.moved) {
+        if (Math.abs(dy) < 4) return;
+        drag.moved = true;
+        colList.classList.add("is-sorting");
+        drag.item.classList.add("is-dragging");
+      }
+      const { from, items, step } = drag;
+      const to = Math.max(0, Math.min(items.length - 1, Math.round(from + dy / step)));
+      drag.to = to;
+      drag.item.style.transform = `translateY(${dy}px)`;
+      items.forEach((el, i) => {
+        if (el === drag.item) return;
+        const shift = from < i && i <= to ? -step : to <= i && i < from ? step : 0;
+        el.style.transform = shift ? `translateY(${shift}px)` : "";
+      });
+    });
+
+    const endDrag = (e) => {
+      if (!drag || e.pointerId !== drag.id) return;
+      const { item, from, to, moved } = drag;
+      drag = null;
+      colList.classList.remove("is-sorting");
+      if (!moved || !draft) return;
+      const k = item.dataset.key;
+      draft.order.splice(from, 1);
+      draft.order.splice(to, 0, k);
+      renderColumns();
+      colList.querySelector(`[data-key="${k}"] [data-grip]`)?.focus({ preventScroll: true });
+    };
+    // Release can land outside the list (or capture can be lost): end anyway.
+    window.addEventListener("pointerup", endDrag);
+    window.addEventListener("pointercancel", endDrag);
+    colList.addEventListener("lostpointercapture", endDrag);
+
+    /* Exclude tickers tab */
+
+    const effective = () => new Set([...draft.excluded, ...draftGlobal]);
+    const selected = () => (tickers.has(input.value.trim()) ? input.value.trim() : "");
+    const alreadyExcluded = (sym) => (allBox.checked ? draftGlobal.has(sym) : effective().has(sym));
+
+    const syncAdd = () => {
+      const sym = selected();
+      clearInputBtn.hidden = !input.value;
+      addBtn.disabled = !sym || alreadyExcluded(sym);
+    };
+
+    const renderChips = () => {
+      const list = [...effective()].sort();
+      totalEl.textContent = list.length ? `${list.length} ticker${list.length === 1 ? "" : "s"}` : "";
+      legendEl.hidden = !list.some((s) => draftGlobal.has(s));
+      chips.innerHTML = list.length
+        ? list.map((sym) => {
+            const all = draftGlobal.has(sym);
+            const where = all ? " from all tables" : "";
+            return `<span class="ex-chip${all ? " is-all" : ""}${sym === justAdded ? " is-new" : ""}" data-sym="${sym}" title="${all ? "Excluded from all tables" : "Excluded from this table"}">
+              ${all ? ICON.globe : ""}<span>${sym}</span>
+              <button type="button" class="ex-chip__x" data-remove="${sym}" aria-label="Remove ${sym}${where}" title="Remove${where}">${ICON.x}</button>
+            </span>`;
+          }).join("")
+        : `<div class="ex-empty">${ICON.empty}<b>No tickers excluded</b><span>Search a ticker above to hide it.</span></div>`;
+      justAdded = "";
+      cleanBtn.disabled = list.length === 0;
+      setCount(counts.exclude, list.length);
+      syncAdd();
+      update();
+    };
+
+    const closeSuggest = () => {
+      activeOpt = -1;
+      suggest.hidden = true;
+      input.setAttribute("aria-expanded", "false");
+      input.removeAttribute("aria-activedescendant");
+    };
+
+    const renderSuggest = () => {
+      const q = input.value.trim();
+      const matches = [...tickers.keys()]
+        .filter((s) => s.includes(q))
+        .sort((a, b) => Number(b.startsWith(q)) - Number(a.startsWith(q)) || a.localeCompare(b))
+        .slice(0, 8);
+      const out = effective();
+      activeOpt = -1;
+      input.removeAttribute("aria-activedescendant");
+      suggest.innerHTML = matches.length
+        ? matches.map((s, i) => {
+            const { price, tier } = tickers.get(s);
+            const name = q ? s.replace(q, `<mark>${q}</mark>`) : s;
+            const off = out.has(s) && !(allBox.checked && !draftGlobal.has(s));
+            return `<li class="ex-option" id="ex-opt-${i}" role="option" data-sym="${s}" aria-selected="false"${off ? ' aria-disabled="true"' : ""}>
+              <i class="sig-bar" data-float="${tier}" aria-hidden="true"></i><b>${name}</b>
+              ${off ? '<span class="ex-option__tag">Excluded</span>' : ""}
+              <span class="ex-option__price">$${fmtPrice(price)}</span>
+            </li>`;
+          }).join("")
+        : `<li class="ex-suggest__empty" role="presentation">No ticker matches “${q}”</li>`;
+      suggest.hidden = false;
+      input.setAttribute("aria-expanded", String(matches.length > 0));
+    };
+
+    const choose = (sym) => {
+      input.value = sym;
+      closeSuggest();
+      syncAdd();
+    };
+
+    const exclude = () => {
+      const sym = selected();
+      if (!sym || alreadyExcluded(sym)) return;
+      if (allBox.checked) { draftGlobal.add(sym); draft.excluded.delete(sym); }
+      else draft.excluded.add(sym);
+      justAdded = sym;
+      input.value = "";
+      closeSuggest();
+      renderChips();
+      input.focus();
+    };
+
+    input.addEventListener("input", () => {
+      input.value = input.value.toUpperCase().replace(/[^A-Z0-9.-]/g, "");
+      renderSuggest();
+      syncAdd();
+    });
+    input.addEventListener("focus", renderSuggest);
+    input.addEventListener("blur", () => setTimeout(closeSuggest, 120));
+    input.addEventListener("keydown", (e) => {
+      const opts = [...suggest.querySelectorAll("[role='option']")];
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        if (suggest.hidden) renderSuggest();
+        if (!opts.length) return;
+        activeOpt = (activeOpt + (e.key === "ArrowDown" ? 1 : -1) + opts.length) % opts.length;
+        opts.forEach((o, i) => {
+          o.classList.toggle("is-active", i === activeOpt);
+          o.setAttribute("aria-selected", String(i === activeOpt));
+        });
+        opts[activeOpt].scrollIntoView({ block: "nearest" });
+        input.setAttribute("aria-activedescendant", opts[activeOpt].id);
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        const opt = opts[activeOpt];
+        if (opt && opt.getAttribute("aria-disabled") !== "true") choose(opt.dataset.sym);
+        else if (selected()) exclude();
+      }
+    });
+    suggest.addEventListener("mousedown", (e) => {
+      const opt = e.target.closest("[role='option']");
+      e.preventDefault();
+      if (opt && opt.getAttribute("aria-disabled") !== "true") choose(opt.dataset.sym);
+    });
+    clearInputBtn.addEventListener("click", () => {
+      input.value = "";
+      syncAdd();
+      input.focus();
+    });
+    addBtn.addEventListener("click", exclude);
+    allBox.addEventListener("change", syncAdd);
+
+    chips.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-remove]");
+      if (!btn) return;
+      const sym = btn.dataset.remove;
+      const next = btn.closest(".ex-chip").nextElementSibling?.dataset.sym;
+      draft.excluded.delete(sym);
+      draftGlobal.delete(sym);
+      renderChips();
+      (chips.querySelector(`[data-remove="${next}"]`) || input).focus();
+    });
+
+    cleanBtn.addEventListener("click", () => {
+      draft.excluded.clear();
+      draftGlobal.clear();
+      renderChips();
+      input.focus();
+    });
+
+    /* Tabs */
+
+    const setTab = (name) => {
+      tabs.forEach((t) => {
+        const on = t.dataset.tsTab === name;
+        t.setAttribute("aria-selected", String(on));
+        t.tabIndex = on ? 0 : -1;
+      });
+      Object.entries(panels).forEach(([n, p]) => { p.hidden = n !== name; });
+      tablist.dataset.active = name;
+      resetBtn.hidden = name !== "columns";
+      closePopover();
+      closeSuggest();
+    };
+    tablist.addEventListener("click", (e) => {
+      const t = e.target.closest("[data-ts-tab]");
+      if (t) setTab(t.dataset.tsTab);
+    });
+    tablist.addEventListener("keydown", (e) => {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      e.preventDefault();
+      const i = (tabs.indexOf(e.target.closest("[data-ts-tab]")) + 1) % tabs.length; // two tabs: either key flips
+      setTab(tabs[i].dataset.tsTab);
+      tabs[i].focus();
+    });
+
+    /* Open / close / save */
+
+    const collectTickers = () => {
+      const map = new Map();
+      tables.forEach((t) => t.rows().forEach((r) => {
+        if (!map.has(r.sym)) map.set(r.sym, { price: r.price, tier: floatTier(r.float) });
+      }));
+      return new Map([...map].sort(([a], [b]) => a.localeCompare(b)));
+    };
+
+    const open = (panelId, btn) => {
+      key = panelId;
+      table = tables.get(panelId);
+      trigger = btn;
+      draft = table.state();
+      draftGlobal = new Set(globalExcluded);
+      baseline = snapshot();
+      tickers = collectTickers();
+      dlg.style.setProperty("--tone", table.tone);
+      titleEl.textContent = table.title;
+      input.value = "";
+      allBox.checked = false;
+      closeSuggest();
+      renderColumns();
+      renderChips();
+      setTab("columns");
+      dlg.showModal();
+      Object.values(panels).forEach((p) => { p.scrollTop = 0; });
+    };
+
+    const close = () => dlg.close();
+
+    dlg.addEventListener("close", () => {
+      closePopover();
+      closeSuggest();
+      drag = null;
+      colList.classList.remove("is-sorting");
+      draft = null;
+      trigger?.focus();
+    });
+    // Esc closes the innermost layer first: color picker, suggestions, dialog.
+    // Handled on keydown: Chrome won't always let `cancel` be prevented.
+    dlg.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape") return;
+      if (popover) { e.preventDefault(); closePopover({ focus: true }); }
+      else if (!suggest.hidden) { e.preventDefault(); closeSuggest(); }
+    });
+    dlg.addEventListener("cancel", (e) => {
+      if (popover) { e.preventDefault(); closePopover({ focus: true }); }
+      else if (!suggest.hidden) { e.preventDefault(); closeSuggest(); }
+    });
+    dlg.addEventListener("click", (e) => {
+      if (e.target === dlg) { close(); return; }
+      if (popover && !e.target.closest(".swatch-wrap")) closePopover();
+    });
+    $("[data-ts-close]").addEventListener("click", close);
+    $("[data-ts-cancel]").addEventListener("click", close);
+
+    saveBtn.addEventListener("click", () => {
+      if (saveBtn.disabled) return;
+      const globalChanged = [...draftGlobal].sort().join() !== [...globalExcluded].sort().join();
+      if (globalChanged) {
+        globalExcluded.clear();
+        draftGlobal.forEach((s) => globalExcluded.add(s));
+        saveGlobalExcluded();
+      }
+      table.apply(draft);
+      if (globalChanged) tables.forEach((t, id) => id !== key && t.refresh());
+      showToast(`${table.title} settings saved`);
+      close();
+    });
+
+    return { open };
+  };
+
   /* ---- Mount -------------------------------------------------------------- */
 
   const panel = (id) => document.querySelector(`.terminal[data-panel="${id}"]`);
@@ -1179,6 +1771,7 @@
   mountAppFullscreen();
   mountNavStatus();
   mountGuide();
+  const tableSettings = mountTableSettings();
 
   // Vertical container: toplists
   mountTable(panel("gainers"), GAINERS, { cols: TOPLIST_COLS, pins: TOPLIST_PINS, quotes: true });
