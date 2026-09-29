@@ -279,10 +279,14 @@
   // Tickers excluded from every table.
   const GLOBAL_EXCLUDED_KEY = "scanner:excluded:all";
   const globalExcluded = new Set();
-  try {
-    const saved = JSON.parse(localStorage.getItem(GLOBAL_EXCLUDED_KEY) || "[]");
-    if (Array.isArray(saved)) saved.forEach((s) => typeof s === "string" && globalExcluded.add(s));
-  } catch { /* ignore */ }
+  const loadGlobalExcluded = () => {
+    globalExcluded.clear();
+    try {
+      const saved = JSON.parse(localStorage.getItem(GLOBAL_EXCLUDED_KEY) || "[]");
+      if (Array.isArray(saved)) saved.forEach((s) => typeof s === "string" && globalExcluded.add(s));
+    } catch { /* ignore */ }
+  };
+  loadGlobalExcluded();
   const saveGlobalExcluded = () => {
     try { localStorage.setItem(GLOBAL_EXCLUDED_KEY, JSON.stringify([...globalExcluded])); } catch { /* ignore */ }
   };
@@ -297,16 +301,21 @@
   const applyFloat = () => {
     for (const [tier, c] of Object.entries(floatColors)) document.documentElement.style.setProperty(`--float-${tier}`, swatchVar(c));
   };
-  try {
-    const saved = JSON.parse(localStorage.getItem(FLOAT_KEY) || "null");
-    if (saved) {
-      if (validCuts(saved.low, saved.mid)) Object.assign(FLOAT_TIERS, { low: saved.low, mid: saved.mid });
-      for (const tier of Object.keys(floatColors)) {
-        if (FLOAT_SWATCHES.includes(saved.colors?.[tier])) floatColors[tier] = saved.colors[tier];
+  const loadFloat = () => {
+    Object.assign(FLOAT_TIERS, { low: FLOAT_DEFAULTS.low, mid: FLOAT_DEFAULTS.mid });
+    Object.assign(floatColors, FLOAT_DEFAULTS.colors);
+    try {
+      const saved = JSON.parse(localStorage.getItem(FLOAT_KEY) || "null");
+      if (saved) {
+        if (validCuts(saved.low, saved.mid)) Object.assign(FLOAT_TIERS, { low: saved.low, mid: saved.mid });
+        for (const tier of Object.keys(floatColors)) {
+          if (FLOAT_SWATCHES.includes(saved.colors?.[tier])) floatColors[tier] = saved.colors[tier];
+        }
       }
-    }
-  } catch { /* ignore */ }
-  applyFloat();
+    } catch { /* ignore */ }
+    applyFloat();
+  };
+  loadFloat();
   const saveFloat = () => {
     try { localStorage.setItem(FLOAT_KEY, JSON.stringify({ ...FLOAT_TIERS, colors: floatColors })); } catch { /* ignore */ }
   };
@@ -480,6 +489,7 @@
      Browsers only allow audio after a click, so nothing plays before one. */
 
   const SOUND_KEY = "scanner:sound:v1";
+  const SOUND_FILES_KEY = "scanner:sound-files"; // bumped once custom files are stored
   const SOUND_MODES = ["voice", "chime", "custom"];
   const CHIME_STYLES = ["ping", "chime", "blip"];
   const SOUND_DEFAULT = { on: false, mode: "chime", chime: "ping", voice: "", rate: 1, volume: 70, file: null }; // file: { name, size }; rate: voice speed
@@ -495,10 +505,14 @@
     file: s.file && typeof s.file.name === "string" ? { name: s.file.name, size: Number(s.file.size) || 0 } : null,
   });
   const soundPrefs = {}; // panel → setup
-  try {
-    const saved = JSON.parse(localStorage.getItem(SOUND_KEY) || "{}");
-    for (const [panel, s] of Object.entries(saved || {})) soundPrefs[panel] = cleanSound(s);
-  } catch { /* ignore */ }
+  const loadSoundPrefs = () => {
+    for (const panel of Object.keys(soundPrefs)) delete soundPrefs[panel];
+    try {
+      const saved = JSON.parse(localStorage.getItem(SOUND_KEY) || "{}");
+      for (const [panel, s] of Object.entries(saved || {})) soundPrefs[panel] = cleanSound(s);
+    } catch { /* ignore */ }
+  };
+  loadSoundPrefs();
   const soundOf = (panel) => soundPrefs[panel] || cleanSound();
   const saveSoundPrefs = () => {
     try { localStorage.setItem(SOUND_KEY, JSON.stringify(soundPrefs)); } catch { /* ignore */ }
@@ -527,11 +541,17 @@
     if (blob) soundFiles.set(panel, URL.createObjectURL(blob));
     else soundFiles.delete(panel);
   };
-  if ("indexedDB" in window) {
+  const loadSoundFiles = () => {
+    if (!("indexedDB" in window)) return;
     soundStore("readonly", (s) => s.getAll())
-      .then((records) => records.forEach((r) => setSoundFile(r.panel, r.blob)))
+      .then((records) => {
+        const kept = new Set(records.map((r) => r.panel));
+        [...soundFiles.keys()].filter((p) => !kept.has(p)).forEach((p) => setSoundFile(p, null));
+        records.forEach((r) => setSoundFile(r.panel, r.blob));
+      })
       .catch(() => { /* storage blocked: custom sounds last this session only */ });
-  }
+  };
+  loadSoundFiles();
 
   // Chime: notes of [frequency, start, length] in seconds.
   let audioCtx = null;
@@ -876,16 +896,20 @@
   const saveFilters = () => {
     try { localStorage.setItem(FILTER_KEY, JSON.stringify(filters)); } catch { /* ignore */ }
   };
-  try {
-    const raw = localStorage.getItem(FILTER_KEY);
-    const saved = JSON.parse(raw || "[]");
-    const ids = new Set();
-    (Array.isArray(saved) ? saved : []).forEach((c) => {
-      const f = cleanFilter(c, ids);
-      if (f && !filterConflict(f, filters)) filters.push(f);
-    });
-    if (raw && raw !== JSON.stringify(filters)) saveFilters();
-  } catch { /* ignore */ }
+  const loadFilters = () => {
+    filters.length = 0;
+    try {
+      const raw = localStorage.getItem(FILTER_KEY);
+      const saved = JSON.parse(raw || "[]");
+      const ids = new Set();
+      (Array.isArray(saved) ? saved : []).forEach((c) => {
+        const f = cleanFilter(c, ids);
+        if (f && !filterConflict(f, filters)) filters.push(f);
+      });
+      if (raw && raw !== JSON.stringify(filters)) saveFilters();
+    } catch { /* ignore */ }
+  };
+  loadFilters();
 
   // The session filters follow: the nav status (mountNavStatus) keeps it.
   // Outside trading hours the post-market filters stay in force.
@@ -965,9 +989,16 @@
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape" && root.classList.contains("is-maximized")) setFull(false);
     });
+
+    // Detach: every click opens one more live copy in its own window.
+    const detachBtn = root.querySelector(".detach-icon");
+    if (canDetach) detachBtn.addEventListener("click", () => openCopy(root));
+    else detachBtn.remove();
   };
 
-  const mountTable = (root, seed, { cols, pins = PINNED, next, every = LIVE_INTERVAL, expires = false, quotes = false, onAlert, onRender }) => {
+  // `relay` hands every alert and price tick of the live feed to the
+  // detached copies; the API returned is how a copy is fed.
+  const mountTable = (root, seed, { cols, pins = PINNED, next, every = LIVE_INTERVAL, expires = false, quotes = false, onAlert, onRender, relay }) => {
     const tone = root.dataset.tone;
     const panel = root.dataset.panel;
     const table = root.querySelector(".scan-table");
@@ -1126,9 +1157,7 @@
     /* Live feed: the newest alert goes on top; a ticker already listed
        moves up instead of appearing twice. */
 
-    const pushAlert = () => {
-      const alert = next(rows);
-      if (!alert) return;
+    const pushAlert = (alert) => {
       const i = rows.findIndex((r) => r.sym === alert.sym);
       if (i >= 0) rows.splice(i, 1);
       rows.unshift(alert);
@@ -1149,7 +1178,7 @@
       card.classList.add("is-new");
       feed.insert(card);
       tickTimers();
-      playAlertSound(panel, tone, alert.sym);
+      if (!DETACHED) playAlertSound(panel, tone, alert.sym); // the main window sounds it
     };
 
     const feed = mountCardFeed(root.querySelector(".card-view"));
@@ -1192,31 +1221,36 @@
       el.classList.add(up ? "flash-up" : "flash-down");
     };
 
+    const setPrice = (r, price) => {
+      const before = fmtPrice(r.price);
+      r.price = price;
+      const after = fmtPrice(r.price);
+      if (after === before) return;
+      const up = Number(after) > Number(before);
+      // Refresh every cell that follows the price (%Chg Close, VWAP D., …)
+      const tr = body.querySelector(`[data-sym="${r.sym}"]`);
+      // The new price crossed a filter: the row joins or leaves the table.
+      if (Boolean(tr) !== shownTest()(r)) { renderAll(); return; }
+      if (tr) {
+        const d = derive(r, tone);
+        columns().forEach((key, i) => {
+          const td = tr.children[i];
+          if (td.innerHTML !== d[key]) td.innerHTML = d[key];
+        });
+        const priceAt = columns().indexOf("price");
+        if (priceAt >= 0) flash(tr.children[priceAt], up);
+      }
+      const cardPrice = cards.querySelector(`[data-sym="${r.sym}"] .card-price`);
+      if (cardPrice) { cardPrice.textContent = after; flash(cardPrice, up); }
+    };
+
     const tickPrices = () => {
       const count = 1 + Math.floor(Math.random() * 3);
-      const shown = shownTest();
       for (let n = 0; n < count; n++) {
         const r = pick(rows);
-        const before = fmtPrice(r.price);
-        r.price = jitter(r.price, 0.015);
-        const after = fmtPrice(r.price);
-        if (after === before) continue;
-        const up = Number(after) > Number(before);
-        // Refresh every cell that follows the price (%Chg Close, VWAP D., …)
-        const tr = body.querySelector(`[data-sym="${r.sym}"]`);
-        // The new price crossed a filter: the row joins or leaves the table.
-        if (Boolean(tr) !== shown(r)) { renderAll(); return; }
-        if (tr) {
-          const d = derive(r, tone);
-          columns().forEach((key, i) => {
-            const td = tr.children[i];
-            if (td.innerHTML !== d[key]) td.innerHTML = d[key];
-          });
-          const priceAt = columns().indexOf("price");
-          if (priceAt >= 0) flash(tr.children[priceAt], up);
-        }
-        const cardPrice = cards.querySelector(`[data-sym="${r.sym}"] .card-price`);
-        if (cardPrice) { cardPrice.textContent = after; flash(cardPrice, up); }
+        const price = jitter(r.price, 0.015);
+        relay?.({ type: "quote", sym: r.sym, price });
+        setPrice(r, price);
       }
     };
 
@@ -1245,18 +1279,47 @@
         renderAll();
       },
       refresh: renderAll,
+      // Settings saved in another window (a detached copy, or the main one).
+      reload: () => {
+        order = loadOrder(panel, cols);
+        prefs = loadPrefs(panel, cols);
+        applyColors();
+        renderAll();
+      },
     });
     const settingsBtn = root.querySelector("[data-settings]");
     settingsBtn.addEventListener("click", () => tableSettings.open(panel, settingsBtn));
 
+    const dropExpired = () => rows.splice(0, rows.length, ...rows.filter((r) => r.resumeAt > Date.now()));
     if (expires) {
-      rows.splice(0, rows.length, ...rows.filter((r) => r.resumeAt > Date.now()));
+      dropExpired();
       onTick.push(dropResumed);
     }
     applyColors();
     renderAll();
-    if (next) setInterval(pushAlert, every + Math.random() * 1500);
+    if (next) {
+      setInterval(() => {
+        const alert = next(rows);
+        if (!alert) return;
+        relay?.({ type: "alert", row: alert });
+        pushAlert(alert);
+      }, every + Math.random() * 1500);
+    }
     if (quotes) setInterval(tickPrices, QUOTE_INTERVAL + Math.random() * 600);
+
+    return {
+      push: pushAlert,
+      quote: (sym, price) => {
+        const r = rows.find((row) => row.sym === sym);
+        if (r) setPrice(r, price);
+      },
+      // A fresh snapshot of the feed (a detached copy linking up again).
+      reset: (list) => {
+        rows.splice(0, rows.length, ...list.slice(0, MAX_ROWS));
+        if (expires) dropExpired();
+        renderAll();
+      },
+    };
   };
 
   /* ---- Mobile card feed --------------------------------------------------
@@ -2929,10 +2992,14 @@
       stopPreview();
       panels.forEach((p) => { soundPrefs[p] = drafts[p]; });
       saveSoundPrefs();
-      files.forEach((f, p) => {
+      const stored = [...files].map(([p, f]) => {
         setSoundFile(p, f);
-        if (!("indexedDB" in window)) return;
-        soundStore("readwrite", (s) => (f ? s.put({ panel: p, blob: f }) : s.delete(p))).catch(() => { /* this session only */ });
+        if (!("indexedDB" in window)) return null;
+        return soundStore("readwrite", (s) => (f ? s.put({ panel: p, blob: f }) : s.delete(p))).catch(() => { /* this session only */ });
+      }).filter(Boolean);
+      // Other windows (detached copies) reload the files once they are stored.
+      if (stored.length) Promise.all(stored).then(() => {
+        try { localStorage.setItem(SOUND_FILES_KEY, String(Date.now())); } catch { /* ignore */ }
       });
       if (panels.some((p) => drafts[p].on)) audioNow(); // unlock audio while we have a click
       syncSoundButtons();
@@ -3626,13 +3693,15 @@
       });
     };
 
-    // A new session brings its own filters into force.
-    onSessionChange.push((changed) => {
+    // A new session brings its own filters into force; so do filters saved
+    // in another window (a detached copy, or the main one).
+    const sync = (changed = true) => {
       if (changed) tables.forEach((t) => t.refresh());
       syncBadges();
       if (!dlg.open) return;
       if (editor) { syncStats(); syncEditor(); } else render();
-    });
+    };
+    onSessionChange.push(sync);
 
     /* Open / close */
 
@@ -3698,7 +3767,7 @@
     document.querySelectorAll("[data-bar-filter]").forEach((btn) => btn.addEventListener("click", () => open(btn)));
 
     syncBadges();
-    return { open };
+    return { open, sync };
   };
 
   /* ---- Momentum constellation ---------------------------------------------
@@ -4348,6 +4417,15 @@
         }
       }),
       refresh: invalidate,
+      // Alert and halt history, so a detached copy starts with the same heat.
+      dump: () => ({ log: [...log], halts: [...halts] }),
+      load: (data) => {
+        log.clear();
+        halts.clear();
+        data.log.forEach(([sym, list]) => log.set(sym, list));
+        data.halts.forEach(([sym, list]) => halts.set(sym, list));
+        invalidate();
+      },
     };
   };
 
@@ -4740,35 +4818,172 @@
     build();
   };
 
+  /* ---- Detached copies -----------------------------------------------------
+     The detach button opens a live copy of its panel in a window of its own
+     (one more per click), to place anywhere on this screen or another one.
+     A copy is this same page loaded with ?detach=<panel>: it shows that panel
+     alone and runs no feed of its own. The main window feeds every copy over
+     a BroadcastChannel:
+     - a copy says "hello"; the main window answers it with a snapshot (the
+       rows, plus the constellation's alert history for Momentum);
+     - from then on every alert and price tick is relayed as it happens;
+     - "bye" when the main window closes or reloads: the copy waits for it
+       to come back ("ready") and closes itself if it does not.
+     Settings, filters, float tiers and sounds live in localStorage, so a
+     change saved in any window reaches the others (the `storage` event).
+     Only the main window sounds alerts. */
+
+  const LINK_TIMEOUT = 4000; // ms a copy waits for the main window
+  const HUB_ID = globalThis.crypto?.randomUUID?.() ?? `w-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const hub = "BroadcastChannel" in window ? new BroadcastChannel("scanner:live") : null;
+  const post = (msg) => hub?.postMessage({ ...msg, from: HUB_ID });
+  const canDetach = Boolean(hub);
+  const detachParam = new URLSearchParams(location.search).get("detach");
+  const DETACHED = detachParam && document.querySelector(`.terminal[data-panel="${CSS.escape(detachParam)}"]`) ? detachParam : null;
+
+  // Same size as the panel, cascading down-right from it so that copies
+  // never land exactly on top of each other.
+  let copies = 0;
+  const openCopy = (root) => {
+    const box = root.getBoundingClientRect();
+    const step = 28 * (1 + (copies++ % 8));
+    const chrome = Math.max(0, window.outerHeight - window.innerHeight); // tabs + address bar
+    const features = [
+      "popup",
+      `width=${Math.round(Math.max(480, box.width))}`,
+      `height=${Math.round(Math.max(360, box.height))}`,
+      `left=${Math.round(window.screenX + box.left + step)}`,
+      `top=${Math.round(window.screenY + chrome + box.top + step)}`,
+    ].join(",");
+    const url = new URL(location.href);
+    url.search = `?detach=${encodeURIComponent(root.dataset.panel)}`;
+    url.hash = "";
+    const win = window.open(url, `scanner-${root.dataset.panel}-${Date.now()}`, features);
+    if (!win) showToast("Pop-ups are blocked: allow them for this site to detach panels");
+  };
+
+  // Main window: each copy's hello gets a snapshot of its panel.
+  const serveCopies = (constellation) => {
+    if (!hub) return;
+    hub.addEventListener("message", ({ data: m }) => {
+      if (m.type !== "hello" || !tables.has(m.panel)) return;
+      post({
+        type: "snapshot", to: m.from, panel: m.panel,
+        rows: tables.get(m.panel).rows(),
+        heat: m.panel === "momentum" ? constellation?.dump() : undefined,
+      });
+    });
+    post({ type: "ready" });
+    window.addEventListener("pageshow", (e) => { if (e.persisted) post({ type: "ready" }); });
+    window.addEventListener("pagehide", () => post({ type: "bye" }));
+  };
+
+  // Copy: mounts its panel from the snapshot, then follows the relay.
+  const linkCopy = (root, setup, constellation) => {
+    const id = root.dataset.panel;
+    const status = document.createElement("p");
+    status.className = "detach-status";
+    status.setAttribute("role", "status");
+    root.append(status);
+    const setStatus = (text) => { status.textContent = text; status.hidden = !text; };
+
+    let source = null; // the main window feeding this copy
+    let feed = null;
+    let timer = 0;
+    const hello = () => post({ type: "hello", panel: id });
+
+    hub.addEventListener("message", ({ data: m }) => {
+      if (m.type === "snapshot") {
+        if (m.to !== HUB_ID || (source && m.from !== source)) return;
+        source = m.from;
+        clearTimeout(timer);
+        setStatus("");
+        if (feed) feed.reset(m.rows);
+        else feed = mountTable(root, m.rows, setup);
+        if (m.heat) constellation?.load(m.heat);
+        return;
+      }
+      if (m.type === "ready") { if (!source) hello(); return; }
+      if (m.from !== source) return;
+      if (m.type === "bye") {
+        source = null;
+        setStatus("Scanner closed · waiting for it…");
+        timer = setTimeout(() => window.close(), LINK_TIMEOUT);
+      } else if (m.type === "alert" && m.panel === id) feed.push(m.row);
+      else if (m.type === "alert" && m.panel === "halts") constellation?.halt(m.row);
+      else if (m.type === "quote" && m.panel === id) feed.quote(m.sym, m.price);
+    });
+
+    setStatus("Connecting to the scanner…");
+    timer = setTimeout(() => setStatus("Open the scanner to feed this copy"), LINK_TIMEOUT);
+    hello();
+  };
+
   /* ---- Mount -------------------------------------------------------------- */
 
   const panel = (id) => document.querySelector(`.terminal[data-panel="${id}"]`);
+  // A copy keeps its panel alone on the page.
+  if (DETACHED) {
+    const root = panel(DETACHED);
+    document.documentElement.classList.add("is-detached");
+    document.title = `${root.dataset.title} · Scanner`;
+    document.querySelector(".workspace").replaceChildren(root);
+  }
   document.querySelectorAll(".terminal[data-panel]").forEach(buildPanel);
-  mountLayout();
-  mountAppFullscreen();
-  mountNavStatus();
-  mountGuide();
+  if (!DETACHED) {
+    mountLayout();
+    mountAppFullscreen();
+    mountGuide();
+  }
+  mountNavStatus(); // the filters follow the market session
   const soundSettings = mountSoundSettings();
   const floatSettings = mountFloatSettings();
   const tableSettings = mountTableSettings();
-  mountFilters();
-  mountChartPanel(document.querySelector(".chart-panel"));
-  const constellation = mountConstellation(document.querySelector("[data-constellation]"));
-  constellation.seed(MOMENTUM);
-  HALTS.forEach(constellation.halt);
+  const filterDialog = mountFilters();
+  if (!DETACHED) mountChartPanel(document.querySelector(".chart-panel"));
+  const heatRoot = document.querySelector("[data-constellation]");
+  const constellation = heatRoot && mountConstellation(heatRoot);
 
-  // Vertical container: toplists
-  mountTable(panel("gainers"), GAINERS, { cols: TOPLIST_COLS, pins: TOPLIST_PINS, quotes: true });
-  mountTable(panel("gainers-open"), GAINERS_OPEN, { cols: TOPLIST_COLS, pins: TOPLIST_PINS, quotes: true });
-  mountTable(panel("volume-leaders"), VOLUME_LEADERS, { cols: TOPLIST_COLS, pins: TOPLIST_PINS, quotes: true });
-  // Top row: alerts
-  mountTable(panel("new-hod"), BULL, { cols: HOD_COLS, next: nextAlert(BULL) });
-  mountTable(panel("buying"), BUYING, { cols: PRESSURE_COLS, next: nextAlert(BUYING) });
-  mountTable(panel("selling"), BEAR, { cols: PRESSURE_COLS, next: nextAlert(BEAR) });
-  // Bottom row: momentum + halts
-  mountTable(panel("momentum"), MOMENTUM, { cols: MOMENTUM_COLS, next: nextAlert(MOMENTUM), onAlert: constellation.alert, onRender: constellation.refresh });
-  mountTable(panel("halts"), HALTS, { cols: HALT_COLS, next: nextHalt, every: 18000, expires: true, onAlert: constellation.halt });
+  const TABLE_SETUP = {
+    // Vertical container: toplists
+    gainers: { seed: GAINERS, cols: TOPLIST_COLS, pins: TOPLIST_PINS, quotes: true },
+    "gainers-open": { seed: GAINERS_OPEN, cols: TOPLIST_COLS, pins: TOPLIST_PINS, quotes: true },
+    "volume-leaders": { seed: VOLUME_LEADERS, cols: TOPLIST_COLS, pins: TOPLIST_PINS, quotes: true },
+    // Top row: alerts
+    "new-hod": { seed: BULL, cols: HOD_COLS, next: nextAlert(BULL) },
+    buying: { seed: BUYING, cols: PRESSURE_COLS, next: nextAlert(BUYING) },
+    selling: { seed: BEAR, cols: PRESSURE_COLS, next: nextAlert(BEAR) },
+    // Bottom row: momentum + halts
+    momentum: { seed: MOMENTUM, cols: MOMENTUM_COLS, next: nextAlert(MOMENTUM), onAlert: constellation?.alert, onRender: constellation?.refresh },
+    halts: { seed: HALTS, cols: HALT_COLS, next: nextHalt, every: 18000, expires: true, onAlert: constellation?.halt },
+  };
+
+  if (DETACHED) {
+    // No feed of its own: the rows come from the main window.
+    const { seed, next, every, quotes, ...setup } = TABLE_SETUP[DETACHED];
+    linkCopy(panel(DETACHED), setup, constellation);
+  } else {
+    constellation.seed(MOMENTUM);
+    HALTS.forEach(constellation.halt);
+    for (const [id, { seed, ...setup }] of Object.entries(TABLE_SETUP)) {
+      mountTable(panel(id), seed, { ...setup, relay: hub ? (msg) => post({ ...msg, panel: id }) : undefined });
+    }
+    serveCopies(constellation);
+  }
   syncSoundButtons();
+
+  // Saved in another window (a detached copy, or the main one): follow it.
+  const PANEL_KEY = /^scanner:(?:columns:v2|prefs:v1):(.+)$/;
+  window.addEventListener("storage", ({ key }) => {
+    if (!key) return;
+    const own = key.match(PANEL_KEY);
+    if (own) tables.get(own[1])?.reload();
+    else if (key === GLOBAL_EXCLUDED_KEY) { loadGlobalExcluded(); tables.forEach((t) => t.refresh()); }
+    else if (key === FILTER_KEY) { loadFilters(); filterDialog.sync(); }
+    else if (key === FLOAT_KEY) { loadFloat(); tables.forEach((t) => t.refresh()); }
+    else if (key === SOUND_KEY) { loadSoundPrefs(); syncSoundButtons(); }
+    else if (key === SOUND_FILES_KEY) loadSoundFiles();
+  });
 
   setInterval(() => {
     tickTimers();

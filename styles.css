@@ -1211,6 +1211,20 @@ html:has(.settings-modal[open]) { overflow: hidden; }
 .terminal.is-maximized { position: fixed; inset: 0; z-index: 100; }
 .has-maximized, .has-maximized body { overflow: hidden; }
 
+/* Detached copy (?detach=<panel>): the panel alone fills its own window.
+   Always the desktop table, however narrow the window gets. */
+.is-detached .app { grid-template-rows: minmax(0, 1fr); grid-template-columns: minmax(0, 1fr); }
+.is-detached .app-nav, .is-detached .faq-button { display: none; }
+.is-detached .workspace { display: flex; padding: 0; }
+.is-detached .workspace > .terminal { position: relative; flex: 1 1 auto; border: 0; border-radius: 0; }
+.detach-status {
+  position: absolute; left: 50%; bottom: var(--space-4); z-index: 3; transform: translateX(-50%);
+  margin: 0; padding: 6px 14px; border: 1px solid var(--line-strong); border-radius: var(--radius-pill);
+  background: var(--surface); color: var(--text-2); font-size: var(--fs-xs); font-weight: 600; white-space: nowrap;
+  box-shadow: 0 8px 20px -8px var(--shadow-color);
+}
+.detach-status[hidden] { display: none; }
+
 .terminal-bar { flex: none; display: flex; align-items: center; gap: var(--space-3); min-width: 0; padding: 4px 6px 4px var(--space-3); background: var(--surface); border-bottom: 1px solid var(--line); }
 .terminal-title { display: inline-flex; align-items: center; gap: var(--space-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 700; color: var(--text); font-family: var(--font-mono); }
 .terminal-title::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 2px; background: var(--tone); box-shadow: 0 0 10px color-mix(in srgb, var(--tone) 60%, transparent); }
@@ -1398,6 +1412,17 @@ tr.is-new td, .alert-card.is-new { animation: rowIn 1.6s var(--ease); }
   .icon-btn { width: 34px; height: 34px; }
   .icon-btn svg { width: 18px; height: 18px; }
   .detach-icon, .terminal .fullscreen-icon { display: none; }
+  /* A detached copy stays a desktop table in a narrow window */
+  .is-detached .app { display: grid; height: 100vh; height: 100dvh; }
+  .is-detached .workspace { display: flex; flex-direction: row; }
+  .is-detached .table-wrap { display: block; }
+  .is-detached .card-view { display: none; }
+  .is-detached .terminal > .constellation { flex: 1 1 0px; height: auto; }
+  .is-detached .terminal-bar { padding: 4px 6px 4px var(--space-3); }
+  .is-detached .terminal-title { font-size: 13px; }
+  .is-detached .icon-btn { width: 28px; height: 28px; }
+  .is-detached .icon-btn svg { width: 16px; height: 16px; }
+  .is-detached .detach-icon, .is-detached .terminal .fullscreen-icon { display: inline-grid; }
 
   .card-view { display: block; position: relative; }
   .card-list {
