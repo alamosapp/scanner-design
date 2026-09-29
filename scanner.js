@@ -4136,9 +4136,15 @@
           <span class="constellation__tip-hint">${st.sym === selected ? "Click to deselect" : "Click to select"}</span>`;
         tip.hidden = false;
       }
+      // Fixed to the viewport: it may overflow the panel, never the screen.
       const { offsetWidth: tw, offsetHeight: th } = tip;
-      const left = b.x + b.hw + 12 + tw <= W ? b.x + b.hw + 12 : Math.max(4, b.x - b.hw - 12 - tw);
-      const top = Math.min(H - th - 4, Math.max(4, b.y - th / 2));
+      const box = canvas.getBoundingClientRect();
+      const vw = document.documentElement.clientWidth;
+      const vh = document.documentElement.clientHeight;
+      const x = box.left + b.x;
+      const right = x + b.hw + 12;
+      const left = right + tw <= vw - 8 ? right : Math.min(vw - tw - 8, Math.max(8, x - b.hw - 12 - tw));
+      const top = Math.min(vh - th - 8, Math.max(8, box.top + b.y - th / 2));
       tip.style.left = `${Math.round(left)}px`;
       tip.style.top = `${Math.round(top)}px`;
     };

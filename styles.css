@@ -815,7 +815,7 @@ html:has(.settings-modal[open]) { overflow: hidden; }
 .terminal > .constellation ~ .table-wrap { flex: 1 1 0px; }
 .constellation__canvas { position: absolute; inset: 0; display: block; touch-action: manipulation; }
 .constellation__tip {
-  position: absolute; z-index: 2; min-width: 168px; padding: var(--space-2) var(--space-3);
+  position: fixed; z-index: calc(var(--z-modal) - 1); min-width: 168px; padding: var(--space-2) var(--space-3);
   border: 1px solid var(--line-strong); border-radius: var(--radius-sm);
   background: var(--glass); backdrop-filter: blur(8px); box-shadow: var(--shadow-pop);
   color: var(--text-3); font-size: 11px; pointer-events: none;
