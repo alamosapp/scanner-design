@@ -4351,6 +4351,43 @@
     };
   };
 
+  /* ---- Chart panel: view tabs ---------------------------------------------
+     One view on the stage at a time. Arrow keys / Home / End move between
+     tabs (roving tabindex); the last view is remembered. */
+
+  const CHART_VIEW_KEY = "scanner:chart-view";
+
+  const mountChartTabs = (root) => {
+    const tabs = [...root.querySelectorAll("[role='tab']")];
+    const views = tabs.map((t) => document.getElementById(t.getAttribute("aria-controls")));
+    const select = (i, focus = false) => {
+      tabs.forEach((t, j) => {
+        const on = j === i;
+        t.setAttribute("aria-selected", String(on));
+        t.tabIndex = on ? 0 : -1;
+        views[j].hidden = !on;
+      });
+      if (focus) tabs[i].focus();
+      try { localStorage.setItem(CHART_VIEW_KEY, tabs[i].id); } catch { /* ignore */ }
+    };
+    root.addEventListener("click", (e) => {
+      const i = tabs.indexOf(e.target.closest("[role='tab']"));
+      if (i >= 0 && tabs[i].getAttribute("aria-selected") !== "true") select(i);
+    });
+    root.addEventListener("keydown", (e) => {
+      const i = tabs.indexOf(e.target.closest("[role='tab']"));
+      if (i < 0) return;
+      const n = tabs.length;
+      const next = { ArrowRight: (i + 1) % n, ArrowLeft: (i - 1 + n) % n, Home: 0, End: n - 1 }[e.key];
+      if (next === undefined) return;
+      e.preventDefault();
+      select(next, true);
+    });
+    let saved = -1;
+    try { saved = tabs.findIndex((t) => t.id === localStorage.getItem(CHART_VIEW_KEY)); } catch { /* ignore */ }
+    if (saved > 0) select(saved);
+  };
+
   /* ---- Mount -------------------------------------------------------------- */
 
   const panel = (id) => document.querySelector(`.terminal[data-panel="${id}"]`);
@@ -4363,6 +4400,7 @@
   const floatSettings = mountFloatSettings();
   const tableSettings = mountTableSettings();
   mountFilters();
+  mountChartTabs(document.querySelector(".chart-tabs"));
   const constellation = mountConstellation(document.querySelector("[data-constellation]"));
   constellation.seed(MOMENTUM);
   HALTS.forEach(constellation.halt);

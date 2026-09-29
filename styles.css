@@ -171,6 +171,12 @@
   --chart-sub-h: 0.36fr;             /* sub pane (volume · speed) vs 1fr main */
   --chart-ribbon-h: 16px;            /* state ribbon under the plot */
   --chart-grid-cell: 56px 40px;      /* grid spacing (x y) */
+
+  /* ---- Country flags (the ticker's country in the chart bar) ---- */
+  --flag-red: #b22234;
+  --flag-blue: #3c3b6e;
+  --flag-white: var(--white);
+  --flag-edge: var(--white-a12);     /* hairline: dark flags keep their shape */
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -870,7 +876,7 @@ html:has(.settings-modal[open]) { overflow: hidden; }
 }
 
 /* ---- Bar: same height as the panel bars around it ---- */
-.chart-bar { flex: none; display: flex; align-items: center; gap: var(--space-3); min-width: 0; padding: 4px 6px; background: var(--surface); border-bottom: 1px solid var(--line); line-height: 1.2; }
+.chart-bar { flex: none; display: flex; align-items: center; gap: var(--space-3); min-width: 0; padding: 4px 6px 4px var(--space-3); background: var(--surface); border-bottom: 1px solid var(--line); line-height: 1.2; }
 .chart-symbol {
   flex: none; display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px;
   border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg); color: var(--text-3); cursor: text;
@@ -885,7 +891,12 @@ html:has(.settings-modal[open]) { overflow: hidden; }
 .chart-quote__change { display: inline-flex; gap: 6px; padding: 2px 7px; border-radius: var(--radius-pill); background: var(--dir-bg); color: var(--dir); font-size: 11.5px; font-weight: 700; }
 .chart-quote__change[data-dir="up"] { --dir: var(--green); --dir-bg: var(--green-a08); }
 .chart-quote__change[data-dir="down"] { --dir: var(--red); --dir-bg: var(--red-a08); }
-.chart-company { display: flex; align-items: center; gap: var(--space-2); min-width: 0; color: var(--text-2); font-size: 12px; font-weight: 600; }
+/* Company on the left edge: it gives way first (the name ellipsizes) */
+.chart-company { flex: 0 1 auto; display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding-right: var(--space-3); border-right: 1px solid var(--line); color: var(--text-2); font-size: 12px; font-weight: 600; }
+.chart-company__flag { flex: none; width: 17px; height: 11px; border-radius: 2px; box-shadow: 0 0 0 1px var(--flag-edge); }
+.chart-company__flag .flag-red { fill: var(--flag-red); }
+.chart-company__flag .flag-blue { fill: var(--flag-blue); }
+.chart-company__flag .flag-white { fill: var(--flag-white); }
 .chart-company__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chart-company__exchange { flex: none; padding: 1px 5px; border: 1px solid var(--line-strong); border-radius: 4px; color: var(--text-3); font-family: var(--font-mono); font-size: 9.5px; font-weight: 700; letter-spacing: 0.06em; }
 .chart-tools { flex: none; display: flex; align-items: center; gap: 2px; margin-left: auto; }
@@ -1057,7 +1068,7 @@ html:has(.settings-modal[open]) { overflow: hidden; }
   .chart-tab span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 }
 @container chart (max-width: 260px) { .chart-metrics { display: none; } }
-@container chart (max-width: 196px) { .chart-quote { display: none; } }
+@container chart (max-width: 236px) { .chart-quote { display: none; } }
 
 /* Short or narrow stage: the plot keeps priority */
 @container chart-stage (max-height: 300px) { .chart-stats { display: none; } }

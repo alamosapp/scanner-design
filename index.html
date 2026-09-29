@@ -84,9 +84,20 @@
           </div>
           <div class="splitter splitter--col" data-split="col" role="separator" aria-orientation="vertical" aria-label="Resize Momentum and chart" aria-valuemin="0" aria-valuemax="100" tabindex="0"></div>
           <!-- Charts of the selected ticker: one bar, three views on one stage.
-               Design only: scanner.js does not drive it yet. -->
+               scanner.js only switches the views (mountChartTabs) for now. -->
           <section class="chart-panel" aria-label="Charts of the selected ticker">
             <div class="chart-bar">
+              <div class="chart-company">
+                <span class="chart-company__name">Gaxos.ai Inc.</span>
+                <!-- Country of the ticker (US). Colors: --flag-* in :root -->
+                <svg class="chart-company__flag" data-country="US" viewBox="0 0 19 10" role="img" aria-label="United States">
+                  <rect class="flag-red" width="19" height="10"/>
+                  <path class="flag-white" d="M0 .77h19v.77H0zM0 2.31h19v.77H0zM0 3.85h19v.77H0zM0 5.38h19v.77H0zM0 6.92h19v.77H0zM0 8.46h19v.77H0z"/>
+                  <rect class="flag-blue" width="7.6" height="5.38"/>
+                  <path class="flag-white" d="M1.3 1.2h.5v.5h-.5zM3.55 1.2h.5v.5h-.5zM5.8 1.2h.5v.5h-.5zM2.4 2.45h.5v.5h-.5zM4.65 2.45h.5v.5h-.5zM1.3 3.7h.5v.5h-.5zM3.55 3.7h.5v.5h-.5zM5.8 3.7h.5v.5h-.5z"/>
+                </svg>
+                <span class="chart-company__exchange">NASDAQ</span>
+              </div>
               <label class="chart-symbol">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>
                 <span class="sr-only">Ticker symbol</span>
@@ -96,11 +107,10 @@
                 <strong class="chart-quote__price">2.96</strong>
                 <span class="chart-quote__change" data-dir="up">+1.30 <span>+7.77%</span></span>
               </div>
-              <div class="chart-company">
-                <span class="chart-company__name">Gaxos.ai Inc.</span>
-                <span class="chart-company__exchange">NASDAQ</span>
-              </div>
               <div class="chart-tools">
+                <button type="button" class="icon-btn detach-icon" aria-label="Detach Charts into its own window" title="Detach">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6"/><path d="m20 4-8 8"/><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></svg>
+                </button>
                 <button type="button" class="icon-btn fullscreen-icon" aria-pressed="false" aria-label="Fullscreen: Charts" title="Fullscreen">
                   <svg class="icon-expand" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg>
                   <svg class="icon-collapse" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5"/></svg>
