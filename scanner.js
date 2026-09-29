@@ -4017,7 +4017,14 @@
        overlaps, starting from the previous one so it stays coherent, and
        each label glides toward its spot on a critically damped spring with
        capped speed and acceleration. However tight the space gets, nothing
-       jumps or bursts; size and distance follow the heat just as smoothly. */
+       jumps or bursts; size and distance follow the heat just as smoothly.
+     - One element: the pause icon, the ticker, the rising arrow and the
+       "Halt / Resumed" line share one transform. Each part eases in and out
+       (its slot and its box too), the pulse swells and settles, and the text
+       is drawn at a fixed size and scaled, so every part keeps its place.
+     - No kicks: every eased value (size, heat, parts) runs through two lags
+       in a row, and each label aims at a softly trailing copy of its spot,
+       so speeds build up and die down instead of starting at full. */
 
   const HEAT_WINDOW = 15 * 60e3;
   const HEAT_HALF_LIFE = 4 * 60e3;
@@ -4052,7 +4059,10 @@
   const REPEL = 45;         // px/s² per px of overlap between drawn labels
   const SUB_FONT = 8;       // px: the "Halt mm:ss" / "Resumed mm:ss" line
   const SUB_H = 5;          // px the sub line adds above and below the label's center
-  const PULSE_GROW = 0.2;   // a new alert's label grows up to 20 %, within its box
+  const PULSE_GROW = 0.15;  // a new alert's label swells up to 15 % (its box too)
+  const PART_TAU = 0.25;    // s: an icon or the sub line eases in / out
+  const TEXT_REF = 100;     // px: tickers are drawn at this size and scaled
+  const AIM_TAU = 0.12;     // s: the spot a label springs toward trails the layout's
 
   // One alert's intensity: 1 = right at the scanner's minimum.
   const alertHeat = (r) => {
@@ -4219,16 +4229,43 @@
     // The size eases too, whatever changes it (heat, room, panel size):
     // shrinking is quick, growing slow, so a label never outgrows the spot
     // it is still gliding toward.
+    // Two first-order lags in a row (k = ease(tau / 2)): same settling time as
+    // one, but the value starts moving gently instead of at full speed.
+    const lag2 = (o, key, target, k) => {
+      const mid = `${key}Lag`;
+      o[mid] = (o[mid] ?? o[key]) + (target - (o[mid] ?? o[key])) * k;
+      o[key] += (o[mid] - o[key]) * k;
+    };
+    // Parts ease their presence (0–1): pauseK (halted: the icon and the
+    // halt color), riseK (the arrow), subK (the sub line, whose width eases
+    // too). Their slots grow and shrink with them, so the text slides over
+    // instead of jumping, and the box always holds what is drawn.
     const measure = (b, g, now, ease) => {
       const st = b.state;
       const font = Math.max(8, naturalFont(b, g) * fit);
-      b.font = b.font ? b.font + (font - b.font) * ease(font < b.font ? FIT_SHRINK_TAU : FIT_GROW_TAU) : font;
+      if (!b.font) b.font = font;
+      else lag2(b, "font", font, ease((font < b.font ? FIT_SHRINK_TAU : FIT_GROW_TAU) / 2));
+      const k = ease(PART_TAU / 2);
+      lag2(b, "pauseK", st.halted ? 1 : 0, k);
+      lag2(b, "riseK", st.status === "rising" ? 1 : 0, k);
+      const sub = sublabelOf(st, now);
+      if (sub) b.sub = sub; // the last text stays while the line eases out
+      lag2(b, "subK", sub ? 1 : 0, k);
+      if (b.sub) lag2(b, "subW", subWidth(b.sub), k);
       b.textW = textWidth(st.sym, b.font);
-      b.iconW = st.halted ? pauseWidth(b.font) : st.status === "rising" ? b.font * 0.42 : 0;
-      b.sub = sublabelOf(st, now);
-      // The box holds the label and its sub line, whichever is wider.
-      b.hw = Math.max((b.textW + b.iconW) / 2 + 3 + b.font * 0.1, b.sub ? subWidth(b.sub) / 2 + 2 : 0);
-      b.hh = b.font * 0.5 + (b.sub ? SUB_H : 0) + 1;
+      b.pauseW = pauseWidth(b.font) * b.pauseK;
+      b.riseW = b.font * 0.42 * b.riseK;
+      b.labelW = b.pauseW + b.textW + b.riseW;
+      b.grow = 1 + PULSE_GROW * b.pulse;
+      // The box holds the label and its sub line, whichever is wider, pulse included.
+      b.hw = b.grow * Math.max(b.labelW / 2 + 3 + b.font * 0.1, (b.subW * b.subK) / 2 + 2);
+      b.hh = b.grow * (b.font * 0.5 + SUB_H * b.subK + 1);
+    };
+    // A new alert: a quick swell (a quarter of PULSE_MS) and a slow settle,
+    // both eased, so the label never pops.
+    const pulseOf = (b, t) => {
+      const u = (t - b.pulseAt) / PULSE_MS;
+      return u <= 0 || u >= 1 ? 0 : u < 0.25 ? smooth(u / 0.25) : 1 - smooth((u - 0.25) / 0.75);
     };
 
     // Separates overlapping boxes along the axis they overlap least on. The
@@ -4292,13 +4329,18 @@
 
     // Critically damped spring toward the layout spot. Acceleration and speed
     // are capped as vectors, so the path stays straight and never spikes.
+    // It aims at a trailing copy of the spot (tx, ty): when the layout moves
+    // the spot at once, the pull still builds up over a few frames.
     const glide = (b, dt, snap) => {
       if (snap || !Number.isFinite(b.x)) {
-        b.x = b.lx; b.y = b.ly; b.vx = 0; b.vy = 0;
+        b.x = b.tx = b.lx; b.y = b.ty = b.ly; b.vx = 0; b.vy = 0;
         return;
       }
-      let ax = SPRING * SPRING * (b.lx - b.x) - 2 * SPRING * b.vx + b.px;
-      let ay = SPRING * SPRING * (b.ly - b.y) - 2 * SPRING * b.vy + b.py;
+      const aim = 1 - Math.exp(-dt / AIM_TAU);
+      b.tx += (b.lx - b.tx) * aim;
+      b.ty += (b.ly - b.ty) * aim;
+      let ax = SPRING * SPRING * (b.tx - b.x) - 2 * SPRING * b.vx + b.px;
+      let ay = SPRING * SPRING * (b.ty - b.y) - 2 * SPRING * b.vy + b.py;
       const a = Math.hypot(ax, ay);
       if (a > MAX_ACCEL) { ax *= MAX_ACCEL / a; ay *= MAX_ACCEL / a; }
       b.vx += ax * dt;
@@ -4359,24 +4401,25 @@
       return w * 2.9 + size * 0.18;
     };
 
-    const drawBubble = (b, now, still) => {
+    // t: the frame's clock (performance.now), so sway and pulse step evenly.
+    const drawBubble = (b, t, still) => {
       const st = b.state;
       const sway = still ? 0 : SWAY;
-      const wave = (now / b.period) * Math.PI * 2 + b.phase;
+      const wave = (t / b.period) * Math.PI * 2 + b.phase;
       const x = b.x + Math.sin(wave) * sway;
       const y = b.y + Math.cos(wave * 1.3) * sway;
       // Fades out over the last 40 % of the window unless new alerts arrive.
       const life = st.halted ? 1 : smooth((HEAT_WINDOW - st.lastAge) / (HEAT_WINDOW * 0.4));
       const a = smooth(b.vis) * Math.max(0.3, (0.45 + 0.55 * b.s) * life);
-      const pulse = still ? 0 : Math.max(0, 1 - (now - b.pulseAt) / PULSE_MS);
-      const color = st.halted ? C.halt : heatColor(b.s);
+      const heat = heatColor(b.s);
+      const color = b.pauseK > 0.005 ? mix(heat, C.halt, b.pauseK) : heat;
       const isHover = st.sym === hover;
       const isSelected = st.sym === selected;
-      const labelY = y - (b.sub ? SUB_H - 0.5 : 0);
+      const shown = isHover ? Math.max(a, 0.92) : a;
 
-      ctx.save();
-      ctx.globalAlpha = isHover ? Math.max(a, 0.92) : a;
       if (isHover || isSelected) {
+        ctx.save();
+        ctx.globalAlpha = shown;
         ctx.fillStyle = alpha(isSelected ? color : C.text, isSelected ? 0.1 : 0.06);
         ctx.strokeStyle = alpha(isSelected ? color : C.text, isSelected ? 0.55 : 0.22);
         ctx.lineWidth = 1;
@@ -4384,45 +4427,73 @@
         ctx.roundRect(x - b.hw - 3, y - b.hh - 2, b.hw * 2 + 6, b.hh * 2 + 4, 8);
         ctx.fill();
         ctx.stroke();
+        ctx.restore();
       }
-      ctx.translate(x, labelY);
-      // The pulse never grows the label past its box (the layout's spacing).
-      const room = 2 * (b.hw - 1) / (b.textW + b.iconW) - 1;
-      const grow = 1 + Math.max(0, Math.min(PULSE_GROW, room)) * pulse;
-      ctx.scale(grow, grow);
+
+      // One transform for every part: they move, sway and pulse together.
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.scale(b.grow, b.grow);
+
+      ctx.save();
+      ctx.globalAlpha = shown;
+      ctx.translate(0, -(SUB_H - 0.5) * b.subK);
       ctx.shadowColor = alpha(color, 0.55);
-      ctx.shadowBlur = st.halted ? 8 : 4 + 12 * b.s + 16 * pulse;
-      ctx.font = `800 ${b.font.toFixed(1)}px ${SANS}`;
+      ctx.shadowBlur = 8 * b.pauseK + (4 + 12 * b.s) * (1 - b.pauseK) + 16 * b.pulse;
+      ctx.fillStyle = color;
+      let cursor = -b.labelW / 2;
+      if (b.pauseK > 0.01) {
+        // Scaled within its slot while it eases in or out.
+        const full = pauseWidth(b.font);
+        ctx.save();
+        ctx.globalAlpha *= b.pauseK;
+        ctx.translate(cursor + b.pauseW / 2, 0);
+        ctx.scale(b.pauseK, b.pauseK);
+        drawPause(-full / 2, b.font, color);
+        ctx.restore();
+      }
+      cursor += b.pauseW;
+      // Drawn at TEXT_REF and scaled: the glyphs grow exactly as textW
+      // does (no font-size steps or hinting), so the icons stay in place.
+      ctx.save();
+      ctx.translate(cursor, b.font * 0.04);
+      ctx.scale(b.font / TEXT_REF, b.font / TEXT_REF);
+      ctx.font = `800 ${TEXT_REF}px ${SANS}`;
       ctx.textBaseline = "middle";
       ctx.textAlign = "left";
-      let cursor = -(b.textW + b.iconW) / 2;
-      if (st.halted) cursor += drawPause(cursor, b.font, color);
-      ctx.fillStyle = color;
-      ctx.fillText(st.sym, cursor, b.font * 0.04);
-      if (st.status === "rising") {
+      ctx.fillText(st.sym, 0, 0);
+      ctx.restore();
+      if (b.riseK > 0.01) {
         // "Rising now": an alert in the last minute.
         const size = b.font * 0.26;
-        const left = cursor + b.textW + b.font * 0.12;
-        const top = -b.font * 0.34;
+        ctx.save();
+        ctx.globalAlpha *= b.riseK;
+        ctx.translate(cursor + b.textW + b.font * 0.25 * b.riseK, -b.font * 0.21);
+        ctx.scale(b.riseK, b.riseK);
         ctx.beginPath();
-        ctx.moveTo(left, top + size);
-        ctx.lineTo(left + size, top + size);
-        ctx.lineTo(left + size / 2, top);
+        ctx.moveTo(-size / 2, size / 2);
+        ctx.lineTo(size / 2, size / 2);
+        ctx.lineTo(0, -size / 2);
         ctx.closePath();
         ctx.fill();
+        ctx.restore();
       }
       ctx.restore();
 
-      if (b.sub) {
+      if (b.subK > 0.01) {
+        // Slides out from under the label as it eases in.
         ctx.save();
-        ctx.globalAlpha = smooth(b.vis);
+        ctx.globalAlpha = smooth(b.vis) * b.subK;
+        ctx.translate(0, b.font * 0.5 + 1 - SUB_H * (1 - b.subK));
+        ctx.scale(b.subK, b.subK);
         ctx.font = `600 ${SUB_FONT}px ${MONO}`;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.fillStyle = st.halted ? C.halt : C.resume;
-        ctx.fillText(b.sub, x, y + b.hh - SUB_H);
+        ctx.fillStyle = mix(C.resume, C.halt, b.pauseK);
+        ctx.fillText(b.sub, 0, 0);
         ctx.restore();
       }
+      ctx.restore();
     };
 
     const updateTip = (b, total, now) => {
@@ -4472,13 +4543,14 @@
       tip.style.top = `${Math.round(top)}px`;
     };
 
-    const frame = () => {
+    const frame = (ts) => {
       raf = 0;
       if (!W || !H) return;
       if (dirty) rebuild();
       const now = Date.now();
-      // Motion runs on the monotonic clock; only the first frame snaps.
-      const tick = performance.now();
+      // Motion runs on the frame's own clock (vsync-aligned when it comes
+      // from requestAnimationFrame); only the first frame snaps.
+      const tick = ts ?? performance.now();
       const dt = last ? Math.min(0.1, (tick - last) / 1000) : 0;
       const snap = reduceMotion.matches || !last;
       const still = reduceMotion.matches;
@@ -4505,6 +4577,7 @@
         let b = bubbles.get(st.sym);
         if (!b) {
           const seed = seeded(st.sym)();
+          const sub = sublabelOf(st, now);
           b = {
             sym: st.sym,
             // Golden angle by arrival: tickers spread around the center.
@@ -4514,16 +4587,24 @@
             s: strength,
             vis: 0,
             lastAlertAt: st.latest.t,
-            pulseAt: now - st.latest.t < PULSE_MS ? now : -Infinity,
-            lx: NaN, ly: NaN, x: NaN, y: NaN, vx: 0, vy: 0, px: 0, py: 0,
+            pulseAt: now - st.latest.t < PULSE_MS ? tick : -Infinity,
+            pulse: 0,
+            // Parts start as they are: the label fades in whole.
+            pauseK: st.halted ? 1 : 0,
+            riseK: st.status === "rising" ? 1 : 0,
+            subK: sub ? 1 : 0,
+            sub,
+            subW: sub ? subWidth(sub) : 0,
+            lx: NaN, ly: NaN, tx: NaN, ty: NaN, x: NaN, y: NaN, vx: 0, vy: 0, px: 0, py: 0,
           };
           bubbles.set(st.sym, b);
         } else if (st.latest.t > b.lastAlertAt) {
           b.lastAlertAt = st.latest.t;
-          b.pulseAt = now;
+          b.pulseAt = tick;
         }
         b.state = st;
-        b.s += (strength - b.s) * ease(GROW_TAU);
+        lag2(b, "s", strength, ease(GROW_TAU / 2));
+        b.pulse = still ? 0 : pulseOf(b, tick);
         live.add(st.sym);
       });
 
@@ -4578,7 +4659,7 @@
       ctx.clearRect(0, 0, W, H);
       drawBackdrop(g);
       // Weakest first: the leader is drawn on top.
-      items.sort((a, b) => a.s - b.s).forEach((b) => drawBubble(b, now, still));
+      items.sort((a, b) => a.s - b.s).forEach((b) => drawBubble(b, tick, still));
 
       ctx.font = `600 10px ${MONO}`;
       ctx.textBaseline = "middle";

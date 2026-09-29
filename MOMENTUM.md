@@ -47,7 +47,10 @@ Color: rampa `--heat-cool` → `--heat-warm` → `--heat-hot`; `--heat-halt` y `
 - **Sin superposiciones**: cada cuadro se resuelve un layout sin choques partiendo del anterior (empuja por el eje de menor solapamiento, con histéresis para no oscilar; el más grande cede menos). La caja de cada ticker incluye su línea `Halt`/`Resumed`, y los que se están desvaneciendo son obstáculos fijos.
 - **Densidad**: si no caben a su tamaño natural, todos se achican a la vez (hasta 40 %), rápido al achicar y lento al crecer.
 - Las etiquetas se deslizan hacia su sitio con un resorte críticamente amortiguado (velocidad y aceleración limitadas) y se apartan entre sí en el camino. Nunca saltan.
-- Alerta nueva: pulso de brillo y leve crecimiento (sin salir de su caja). Balanceo decorativo de ±2,5 px.
+- **Sin tirones**: el resorte apunta a una copia del sitio que lo sigue con 120 ms de retraso (`AIM_TAU`), y todo valor suavizado (fuerza, tamaño, partes) pasa por dos filtros seguidos (`lag2`). Así la velocidad crece y decrece gradualmente en vez de arrancar de golpe.
+- **Un solo elemento**: icono de pausa, ticker, flecha de *Rising* y línea `Halt`/`Resumed` comparten una misma transformación (posición, balanceo y pulso). Cada parte entra y sale suavemente en 250 ms (`PART_TAU`): su hueco crece o se encoge con ella, así el texto se desliza en lugar de saltar, la línea inferior asoma desde debajo del ticker y el color pasa gradualmente a cian al entrar en halt.
+- El ticker se dibuja a 100 px y se escala (`TEXT_REF`): el texto crece exactamente como su ancho medido, sin escalones de tamaño de fuente, así iconos y texto nunca se desalinean.
+- Alerta nueva: pulso de brillo y crecimiento de hasta 15 % que sube rápido y baja lento, ambos suavizados (`pulseOf`). La caja crece con el pulso, así que tampoco se superpone. Balanceo decorativo de ±2,5 px, con el reloj del cuadro.
 - Entrada y salida con fundido de 450 ms.
 - `prefers-reduced-motion`: sin animación; se repinta una vez por segundo.
 
@@ -67,6 +70,6 @@ La copia de Momentum recibe el historial de alertas y halts de la principal (`du
 - `scanner.js`, sección **"Momentum constellation"**:
   - Constantes `HEAT_*` (calor y estados) y de movimiento (`SPRING`, `MAX_SPEED`, `GAP`, `SUB_FONT`…).
   - `alertHeat` (intensidad de una alerta), `mountConstellation(root)` → `{ alert, halt, dump, load, … }`.
-  - Dentro: `stateOf` (calor y estado), `measure` (caja), `solve` (layout sin choques), `glide`/`repel` (movimiento), `drawBubble`, `updateTip`, `frame`.
+  - Dentro: `stateOf` (calor y estado), `measure` (caja y partes), `lag2`, `pulseOf`, `solve` (layout sin choques), `glide`/`repel` (movimiento), `drawBubble`, `updateTip`, `frame`.
   - Montaje: `TABLE_SETUP` conecta las alertas de Momentum (`alert`) y de Halts (`halt`).
 - `styles.css`: tokens `--heat-*` y reglas `.constellation*`.
