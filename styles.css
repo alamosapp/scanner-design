@@ -1216,7 +1216,7 @@ html:has(.settings-modal[open]) { overflow: hidden; }
 .is-detached .app { grid-template-rows: minmax(0, 1fr); grid-template-columns: minmax(0, 1fr); }
 .is-detached .app-nav, .is-detached .faq-button { display: none; }
 .is-detached .workspace { display: flex; padding: 0; }
-.is-detached .workspace > .terminal { position: relative; flex: 1 1 auto; border: 0; border-radius: 0; }
+.is-detached .workspace > :not(.is-maximized) { position: relative; flex: 1 1 auto; border: 0; border-radius: 0; }
 .detach-status {
   position: absolute; left: 50%; bottom: var(--space-4); z-index: 3; transform: translateX(-50%);
   margin: 0; padding: 6px 14px; border: 1px solid var(--line-strong); border-radius: var(--radius-pill);
@@ -1422,7 +1422,8 @@ tr.is-new td, .alert-card.is-new { animation: rowIn 1.6s var(--ease); }
   .is-detached .terminal-title { font-size: 13px; }
   .is-detached .icon-btn { width: 28px; height: 28px; }
   .is-detached .icon-btn svg { width: 16px; height: 16px; }
-  .is-detached .detach-icon, .is-detached .terminal .fullscreen-icon { display: inline-grid; }
+  .is-detached .terminal .fullscreen-icon { display: inline-grid; }
+  .is-detached .chart-panel { flex: 1 1 auto; height: auto; }
 
   .card-view { display: block; position: relative; }
   .card-list {

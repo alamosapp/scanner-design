@@ -4475,8 +4475,11 @@
     return `<svg viewBox="0 0 28 20" aria-hidden="true">${shapes.join("")}</svg>`;
   };
 
-  const mountChartPanel = (root) => {
+  // `persist: false` (a detached copy): it starts from the saved views and
+  // layout but never saves over them, so each window keeps its own.
+  const mountChartPanel = (root, { persist = true } = {}) => {
     const stage = root.querySelector(".chart-stage");
+    const symbol = root.querySelector(".chart-symbol__input");
     const tablist = root.querySelector(".chart-tabs");
     const tabs = [...tablist.querySelectorAll("[role='tab']")];
     const ids = tabs.map((t) => t.getAttribute("aria-controls"));
@@ -4502,6 +4505,7 @@
       if (saved.sizes && typeof saved.sizes === "object") state.sizes = saved.sizes;
     } catch { /* ignore */ }
     const save = () => {
+      if (!persist) return;
       try { localStorage.setItem(CHART_LAYOUT_KEY, JSON.stringify(state)); } catch { /* ignore */ }
     };
     const sizesOf = (key, n) => {
@@ -4815,7 +4819,16 @@
       if (e.key === "Escape" && root.classList.contains("is-maximized")) setFull(false);
     });
 
+    // Detach: every click opens one more copy in its own window.
+    const detachBtn = root.querySelector(".detach-icon");
+    if (canDetach) detachBtn.addEventListener("click", () => openCopy(root));
+    else detachBtn.remove();
+
     build();
+    return {
+      symbol: () => symbol.value,
+      setSymbol: (sym) => { symbol.value = sym; },
+    };
   };
 
   /* ---- Detached copies -----------------------------------------------------
@@ -4824,22 +4837,26 @@
      A copy is this same page loaded with ?detach=<panel>: it shows that panel
      alone and runs no feed of its own. The main window feeds every copy over
      a BroadcastChannel:
-     - a copy says "hello"; the main window answers it with a snapshot (the
-       rows, plus the constellation's alert history for Momentum);
+     - a copy says "hello"; the main window answers it with a snapshot (a
+       table's rows, plus the constellation's alert history for Momentum;
+       the Charts panel's ticker);
      - from then on every alert and price tick is relayed as it happens;
      - "bye" when the main window closes or reloads: the copy waits for it
        to come back ("ready") and closes itself if it does not.
      Settings, filters, float tiers and sounds live in localStorage, so a
      change saved in any window reaches the others (the `storage` event).
-     Only the main window sounds alerts. */
+     A Charts copy starts on the main window's ticker and views, then goes
+     its own way. Only the main window sounds alerts, and only it detaches:
+     a copy has no detach button, so copies never nest. */
 
   const LINK_TIMEOUT = 4000; // ms a copy waits for the main window
   const HUB_ID = globalThis.crypto?.randomUUID?.() ?? `w-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const hub = "BroadcastChannel" in window ? new BroadcastChannel("scanner:live") : null;
   const post = (msg) => hub?.postMessage({ ...msg, from: HUB_ID });
-  const canDetach = Boolean(hub);
+  const detachable = (id) => document.querySelector(`:is(.terminal, .chart-panel)[data-panel="${CSS.escape(id)}"]`);
   const detachParam = new URLSearchParams(location.search).get("detach");
-  const DETACHED = detachParam && document.querySelector(`.terminal[data-panel="${CSS.escape(detachParam)}"]`) ? detachParam : null;
+  const DETACHED = detachParam && detachable(detachParam) ? detachParam : null;
+  const canDetach = Boolean(hub) && !DETACHED;
 
   // Same size as the panel, cascading down-right from it so that copies
   // never land exactly on top of each other.
@@ -4863,23 +4880,25 @@
   };
 
   // Main window: each copy's hello gets a snapshot of its panel.
-  const serveCopies = (constellation) => {
+  const serveCopies = (constellation, chart) => {
     if (!hub) return;
+    const snapshotOf = (id) => {
+      if (id === "chart") return { sym: chart.symbol() };
+      if (!tables.has(id)) return null;
+      return { rows: tables.get(id).rows(), heat: id === "momentum" ? constellation?.dump() : undefined };
+    };
     hub.addEventListener("message", ({ data: m }) => {
-      if (m.type !== "hello" || !tables.has(m.panel)) return;
-      post({
-        type: "snapshot", to: m.from, panel: m.panel,
-        rows: tables.get(m.panel).rows(),
-        heat: m.panel === "momentum" ? constellation?.dump() : undefined,
-      });
+      const snap = m.type === "hello" && snapshotOf(m.panel);
+      if (snap) post({ type: "snapshot", to: m.from, panel: m.panel, ...snap });
     });
     post({ type: "ready" });
     window.addEventListener("pageshow", (e) => { if (e.persisted) post({ type: "ready" }); });
     window.addEventListener("pagehide", () => post({ type: "bye" }));
   };
 
-  // Copy: mounts its panel from the snapshot, then follows the relay.
-  const linkCopy = (root, setup, constellation) => {
+  // Copy: `link.snapshot(m, first)` mounts (first) or refreshes the panel;
+  // `link.relay(m)` applies each live message from the main window.
+  const linkCopy = (root, link) => {
     const id = root.dataset.panel;
     const status = document.createElement("p");
     status.className = "detach-status";
@@ -4888,7 +4907,7 @@
     const setStatus = (text) => { status.textContent = text; status.hidden = !text; };
 
     let source = null; // the main window feeding this copy
-    let feed = null;
+    let linked = false;
     let timer = 0;
     const hello = () => post({ type: "hello", panel: id });
 
@@ -4898,9 +4917,8 @@
         source = m.from;
         clearTimeout(timer);
         setStatus("");
-        if (feed) feed.reset(m.rows);
-        else feed = mountTable(root, m.rows, setup);
-        if (m.heat) constellation?.load(m.heat);
+        link.snapshot(m, !linked);
+        linked = true;
         return;
       }
       if (m.type === "ready") { if (!source) hello(); return; }
@@ -4909,9 +4927,7 @@
         source = null;
         setStatus("Scanner closed · waiting for it…");
         timer = setTimeout(() => window.close(), LINK_TIMEOUT);
-      } else if (m.type === "alert" && m.panel === id) feed.push(m.row);
-      else if (m.type === "alert" && m.panel === "halts") constellation?.halt(m.row);
-      else if (m.type === "quote" && m.panel === id) feed.quote(m.sym, m.price);
+      } else link.relay?.(m);
     });
 
     setStatus("Connecting to the scanner…");
@@ -4924,7 +4940,7 @@
   const panel = (id) => document.querySelector(`.terminal[data-panel="${id}"]`);
   // A copy keeps its panel alone on the page.
   if (DETACHED) {
-    const root = panel(DETACHED);
+    const root = detachable(DETACHED);
     document.documentElement.classList.add("is-detached");
     document.title = `${root.dataset.title} · Scanner`;
     document.querySelector(".workspace").replaceChildren(root);
@@ -4940,7 +4956,8 @@
   const floatSettings = mountFloatSettings();
   const tableSettings = mountTableSettings();
   const filterDialog = mountFilters();
-  if (!DETACHED) mountChartPanel(document.querySelector(".chart-panel"));
+  const chartRoot = document.querySelector(".chart-panel");
+  const chart = chartRoot && mountChartPanel(chartRoot, { persist: !DETACHED });
   const heatRoot = document.querySelector("[data-constellation]");
   const constellation = heatRoot && mountConstellation(heatRoot);
 
@@ -4958,17 +4975,32 @@
     halts: { seed: HALTS, cols: HALT_COLS, next: nextHalt, every: 18000, expires: true, onAlert: constellation?.halt },
   };
 
-  if (DETACHED) {
+  if (DETACHED === "chart") {
+    // The main window's ticker to start with; later tickers are this copy's own.
+    linkCopy(chartRoot, { snapshot: (m, first) => { if (first) chart.setSymbol(m.sym); } });
+  } else if (DETACHED) {
     // No feed of its own: the rows come from the main window.
     const { seed, next, every, quotes, ...setup } = TABLE_SETUP[DETACHED];
-    linkCopy(panel(DETACHED), setup, constellation);
+    let feed = null;
+    linkCopy(panel(DETACHED), {
+      snapshot: (m, first) => {
+        if (first) feed = mountTable(panel(DETACHED), m.rows, setup);
+        else feed.reset(m.rows);
+        if (m.heat) constellation?.load(m.heat);
+      },
+      relay: (m) => {
+        if (m.type === "alert" && m.panel === DETACHED) feed.push(m.row);
+        else if (m.type === "alert" && m.panel === "halts") constellation?.halt(m.row);
+        else if (m.type === "quote" && m.panel === DETACHED) feed.quote(m.sym, m.price);
+      },
+    });
   } else {
     constellation.seed(MOMENTUM);
     HALTS.forEach(constellation.halt);
     for (const [id, { seed, ...setup }] of Object.entries(TABLE_SETUP)) {
       mountTable(panel(id), seed, { ...setup, relay: hub ? (msg) => post({ ...msg, panel: id }) : undefined });
     }
-    serveCopies(constellation);
+    serveCopies(constellation, chart);
   }
   syncSoundButtons();
 
