@@ -171,6 +171,9 @@
   --chart-sub-h: 0.36fr;             /* sub pane (volume · speed) vs 1fr main */
   --chart-ribbon-h: 16px;            /* state ribbon under the plot */
   --chart-grid-cell: 56px 40px;      /* grid spacing (x y) */
+  /* Fullscreen layouts: panes, their gaps (= drag handles), active pane */
+  --chart-pane-gap: 6px;
+  --chart-pane-active: color-mix(in srgb, var(--green) 45%, transparent);
 
   /* ---- Country flags (the ticker's country in the chart bar) ---- */
   --flag-red: #b22234;
@@ -891,15 +894,16 @@ html:has(.settings-modal[open]) { overflow: hidden; }
 .chart-quote__change { display: inline-flex; gap: 6px; padding: 2px 7px; border-radius: var(--radius-pill); background: var(--dir-bg); color: var(--dir); font-size: 11.5px; font-weight: 700; }
 .chart-quote__change[data-dir="up"] { --dir: var(--green); --dir-bg: var(--green-a08); }
 .chart-quote__change[data-dir="down"] { --dir: var(--red); --dir-bg: var(--red-a08); }
-/* Company on the left edge: it gives way first (the name ellipsizes) */
-.chart-company { flex: 0 1 auto; display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding-right: var(--space-3); border-right: 1px solid var(--line); color: var(--text-2); font-size: 12px; font-weight: 600; }
+/* Company on the right edge, next to the tools: it gives way first (the
+   name ellipsizes) */
+.chart-company { flex: 0 1 auto; display: flex; align-items: center; gap: var(--space-2); min-width: 0; margin-left: auto; padding-right: var(--space-3); border-right: 1px solid var(--line); color: var(--text-2); font-size: 12px; font-weight: 600; }
 .chart-company__flag { flex: none; width: 17px; height: 11px; border-radius: 2px; box-shadow: 0 0 0 1px var(--flag-edge); }
 .chart-company__flag .flag-red { fill: var(--flag-red); }
 .chart-company__flag .flag-blue { fill: var(--flag-blue); }
 .chart-company__flag .flag-white { fill: var(--flag-white); }
 .chart-company__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chart-company__exchange { flex: none; padding: 1px 5px; border: 1px solid var(--line-strong); border-radius: 4px; color: var(--text-3); font-family: var(--font-mono); font-size: 9.5px; font-weight: 700; letter-spacing: 0.06em; }
-.chart-tools { flex: none; display: flex; align-items: center; gap: 2px; margin-left: auto; }
+.chart-tools { position: relative; flex: none; display: flex; align-items: center; gap: 2px; }
 
 /* ---- Toolbar: view tabs · session metrics ---- */
 .chart-toolbar { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px var(--space-3); min-width: 0; padding: 6px 8px; border-bottom: 1px solid var(--line); line-height: 1.2; }
@@ -922,8 +926,69 @@ html:has(.settings-modal[open]) { overflow: hidden; }
 .chart-metrics dd { margin: 0; color: var(--text); font-weight: 700; font-variant-numeric: tabular-nums; }
 
 /* ---- Stage: one view at a time, all with the same parts ---- */
-.chart-stage { position: relative; flex: 1 1 0px; min-height: 0; container: chart-stage / size; background: var(--chart-bg); line-height: 1.2; }
+.chart-stage { position: relative; flex: 1 1 0px; min-height: 0; display: flex; container: chart-stage / size; background: var(--chart-bg); line-height: 1.2; }
 .chart-view { position: absolute; inset: 0; display: flex; flex-direction: column; }
+
+/* ---- Fullscreen (Fullscreen API, or maximized over the page) ---- */
+.chart-panel.is-full { border: 0; border-radius: 0; }
+.chart-panel:fullscreen { width: 100%; height: 100%; }
+.chart-panel.is-maximized { position: fixed; inset: 0; z-index: 100; }
+
+/* ---- Layout: panes in nested splits (built by scanner.js). Outside
+   fullscreen there is one pane; each pane body is a size container, so
+   every view adapts to its own pane. ---- */
+.chart-stage > .chart-pane, .chart-stage > .chart-split { flex: 1 1 0px; }
+.chart-split { display: flex; min-width: 0; min-height: 0; }
+.chart-split[data-dir="col"] { flex-direction: column; }
+.chart-split > :not(.chart-divider) { flex: var(--grow, 1) 1 0px; }
+.chart-pane { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+.chart-pane__body { position: relative; flex: 1 1 0px; min-height: 0; container: chart-stage / size; }
+.chart-pane__head { flex: none; display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-bottom: 1px solid var(--line); background: var(--surface); color: var(--text-3); font-size: 11.5px; font-weight: 700; white-space: nowrap; transition: color var(--t-fast); }
+.chart-pane__head svg { flex: none; width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+
+/* Several panes: cards on the panel background; the active one (the tabs
+   act on it) wears the accent */
+.chart-stage[data-multi] { padding: var(--chart-pane-gap); background: var(--bg-elevated); }
+.chart-stage[data-multi] .chart-pane { border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--chart-bg); transition: border-color var(--t-fast), box-shadow var(--t-fast); }
+.chart-stage[data-multi] .chart-pane.is-active { border-color: var(--chart-pane-active); box-shadow: 0 0 18px -8px var(--chart-pane-active); }
+.chart-pane.is-active .chart-pane__head { color: var(--text); }
+.chart-pane.is-active .chart-pane__head svg { color: var(--green); }
+
+/* Dividers: the gap between panes is the drag handle (like .splitter) */
+.chart-divider { position: relative; flex: none; touch-action: none; outline: none; }
+.chart-split:not([data-dir="col"]) > .chart-divider { width: var(--chart-pane-gap); cursor: col-resize; }
+.chart-split[data-dir="col"] > .chart-divider { height: var(--chart-pane-gap); cursor: row-resize; }
+.chart-divider::before { content: ""; position: absolute; border-radius: var(--radius-pill); background: transparent; transition: background var(--t-fast), box-shadow var(--t-fast); }
+.chart-split:not([data-dir="col"]) > .chart-divider::before { top: 0; bottom: 0; left: 50%; width: 2px; transform: translateX(-50%); }
+.chart-split[data-dir="col"] > .chart-divider::before { left: 0; right: 0; top: 50%; height: 2px; transform: translateY(-50%); }
+.chart-divider:hover::before { background: var(--line-strong); }
+.chart-divider.is-active::before, .chart-divider:focus-visible::before { background: var(--green); box-shadow: 0 0 10px var(--green-a32); }
+
+/* Views on the toolbar tabs: shown in another pane → small dot */
+.chart-tab[data-shown] { color: var(--text-2); }
+.chart-tab[data-shown]::after { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--text-3); }
+
+/* ---- Layout setup menu: one tile per layout, grouped by chart count ---- */
+.layout-icon[aria-expanded="true"] { color: var(--text); background: var(--white-a04); border-color: var(--line); }
+.chart-layouts {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 20; width: max-content; padding: 10px 12px 12px;
+  border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--glass); backdrop-filter: blur(10px);
+  box-shadow: var(--shadow-pop); animation: popIn 180ms var(--ease);
+}
+.chart-layouts[hidden] { display: none; }
+.chart-layouts__group + .chart-layouts__group { margin-top: 10px; }
+.chart-layouts__title { margin: 0 0 6px 2px; color: var(--text-3); font-family: var(--font-mono); font-size: 9.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.chart-layouts__row { display: flex; gap: 6px; }
+.chart-layout-opt {
+  display: grid; place-items: center; width: 46px; height: 36px; padding: 0;
+  border: 1px solid var(--line); border-radius: var(--radius-xs); background: var(--bg); color: var(--text-3);
+  transition: color var(--t-fast), border-color var(--t-fast), background var(--t-fast), transform var(--t-fast);
+}
+.chart-layout-opt svg { width: 28px; height: 20px; }
+.chart-layout-opt rect { fill: currentColor; fill-opacity: 0.16; stroke: currentColor; stroke-width: 1; }
+.chart-layout-opt:hover { color: var(--text); border-color: var(--line-strong); transform: translateY(-1px); }
+.chart-layout-opt[aria-checked="true"] { color: var(--green); border-color: var(--green-a32); background: var(--green-a08); }
+.chart-layout-opt:focus-visible { outline: none; box-shadow: var(--ring); }
 .chart-view[hidden] { display: none; }
 .chart-view:not([hidden]) { animation: panelIn 260ms var(--ease); }
 
@@ -1061,7 +1126,10 @@ html:has(.settings-modal[open]) { overflow: hidden; }
   .chart-tab:not([aria-selected="true"]) { padding: 0 8px; }
   .chart-tab:not([aria-selected="true"]) span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 }
-@container chart (max-width: 400px) { .chart-company { display: none; } }
+@container chart (max-width: 400px) {
+  .chart-company { display: none; }
+  .chart-tools { margin-left: auto; }
+}
 @container chart (max-width: 320px) {
   .chart-quote__change { display: none; }
   .chart-tab { padding: 0 8px; }
@@ -1084,7 +1152,10 @@ html:has(.settings-modal[open]) { overflow: hidden; }
   .chart-slots { --chart-axis-w: 42px; }
   .plot-slot--axis { padding: 0 2px; letter-spacing: 0.04em; }
 }
-@media (prefers-reduced-motion: reduce) { .chart-view:not([hidden]) { animation: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .chart-view:not([hidden]), .chart-layouts { animation: none; }
+  .chart-layout-opt:hover { transform: none; }
+}
 
 /* ---- Splitters: the gap between panes is the drag handle ---- */
 

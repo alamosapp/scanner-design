@@ -84,9 +84,19 @@
           </div>
           <div class="splitter splitter--col" data-split="col" role="separator" aria-orientation="vertical" aria-label="Resize Momentum and chart" aria-valuemin="0" aria-valuemax="100" tabindex="0"></div>
           <!-- Charts of the selected ticker: one bar, three views on one stage.
-               scanner.js only switches the views (mountChartTabs) for now. -->
+               scanner.js (mountChartPanel) drives the tabs, fullscreen and layouts;
+               the charts themselves are not drawn yet. -->
           <section class="chart-panel" aria-label="Charts of the selected ticker">
             <div class="chart-bar">
+              <label class="chart-symbol">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>
+                <span class="sr-only">Ticker symbol</span>
+                <input class="chart-symbol__input" type="text" value="GXAI" maxlength="6" autocomplete="off" spellcheck="false">
+              </label>
+              <div class="chart-quote">
+                <strong class="chart-quote__price">2.96</strong>
+                <span class="chart-quote__change" data-dir="up">+1.30 <span>+7.77%</span></span>
+              </div>
               <div class="chart-company">
                 <span class="chart-company__name">Gaxos.ai Inc.</span>
                 <!-- Country of the ticker (US). Colors: --flag-* in :root -->
@@ -98,22 +108,18 @@
                 </svg>
                 <span class="chart-company__exchange">NASDAQ</span>
               </div>
-              <label class="chart-symbol">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>
-                <span class="sr-only">Ticker symbol</span>
-                <input class="chart-symbol__input" type="text" value="GXAI" maxlength="6" autocomplete="off" spellcheck="false">
-              </label>
-              <div class="chart-quote">
-                <strong class="chart-quote__price">2.96</strong>
-                <span class="chart-quote__change" data-dir="up">+1.30 <span>+7.77%</span></span>
-              </div>
               <div class="chart-tools">
-                <button type="button" class="icon-btn detach-icon" aria-label="Detach Charts into its own window" title="Detach">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6"/><path d="m20 4-8 8"/><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></svg>
+                <!-- Layout setup: fullscreen only. Tiles are built by scanner.js -->
+                <button type="button" class="icon-btn layout-icon" data-chart-layout aria-haspopup="menu" aria-expanded="false" aria-controls="chart-layouts" aria-label="Chart layout" title="Chart layout" hidden>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4" width="17" height="16" rx="2"/><path d="M11 4v16M11 12h9.5"/></svg>
                 </button>
-                <button type="button" class="icon-btn fullscreen-icon" aria-pressed="false" aria-label="Fullscreen: Charts" title="Fullscreen">
+                <div class="chart-layouts" id="chart-layouts" role="menu" aria-label="Chart layout" hidden></div>
+                <button type="button" class="icon-btn fullscreen-icon" data-chart-fullscreen aria-pressed="false" aria-label="Fullscreen: Charts" title="Fullscreen">
                   <svg class="icon-expand" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg>
                   <svg class="icon-collapse" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5"/></svg>
+                </button>
+                <button type="button" class="icon-btn detach-icon" aria-label="Detach Charts into its own window" title="Detach">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6"/><path d="m20 4-8 8"/><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></svg>
                 </button>
               </div>
             </div>
@@ -141,7 +147,8 @@
             </div>
 
             <!-- Stage: every view has the same anatomy, top to bottom:
-                 head (state + meter) · stats · legend/controls · plot slots -->
+                 head (state + meter) · stats · legend/controls · plot slots.
+                 scanner.js wraps the views in panes (one, or 1–3 in fullscreen). -->
             <div class="chart-stage">
 
               <!-- Bull vs. Bear: who controls the ticker, −100 to +100 -->
@@ -379,6 +386,16 @@
       </details>
 
       <details class="guide-item">
+        <summary>Charts panel</summary>
+        <p>Three views of one ticker: <b>Bull vs. Bear</b>, <b>Key levels</b> and <b>Rally tracker</b>. The tabs switch the view; the arrow keys move between them.</p>
+        <ul>
+          <li>The fullscreen icon opens the panel in fullscreen. There, the <b>layout</b> icon shows one, two or three charts at once, side by side (vertical), stacked (horizontal) or mixed.</li>
+          <li>With several charts, click one to make it active (green edge): the tabs change the active chart. Picking a view already on screen swaps the two.</li>
+          <li>Drag the gap between two charts to resize them; double-click it to split evenly again. The layout and sizes are remembered.</li>
+        </ul>
+      </details>
+
+      <details class="guide-item">
         <summary>Halts</summary>
         <p>Trading pauses (for example LULD halts). <b>Duration</b> counts the time since the halt and <b>Resume Est.</b> counts down to the expected reopening. A halt leaves the table once trading resumes.</p>
       </details>
@@ -438,7 +455,7 @@
       <details class="guide-item">
         <summary>Fullscreen</summary>
         <ul>
-          <li>The icon in a table's bar opens that table in fullscreen.</li>
+          <li>The icon in a table's bar (or in the Charts panel) opens it in fullscreen.</li>
           <li>The icon in the top bar opens the whole dashboard in fullscreen.</li>
           <li>Press Esc or the same icon to exit.</li>
         </ul>

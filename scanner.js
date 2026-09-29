@@ -4351,41 +4351,393 @@
     };
   };
 
-  /* ---- Chart panel: view tabs ---------------------------------------------
-     One view on the stage at a time. Arrow keys / Home / End move between
-     tabs (roving tabindex); the last view is remembered. */
+  /* ---- Chart panel: views, fullscreen and layouts --------------------------
+     Outside fullscreen the stage holds one pane. In fullscreen the layout
+     menu splits it into 1–3 panes (nested splits; the gaps between panes
+     are drag handles). The toolbar tabs act on the active pane: picking a
+     view shown in another pane swaps the two. */
 
-  const CHART_VIEW_KEY = "scanner:chart-view";
+  const CHART_LAYOUT_KEY = "scanner:chart-layout:v1";
+  const PANE_MIN = { x: 200, y: 140 }; // smallest pane while resizing (px)
 
-  const mountChartTabs = (root) => {
-    const tabs = [...root.querySelectorAll("[role='tab']")];
-    const views = tabs.map((t) => document.getElementById(t.getAttribute("aria-controls")));
-    const select = (i, focus = false) => {
-      tabs.forEach((t, j) => {
-        const on = j === i;
+  // Leaves are pane indexes. "row" puts its kids side by side (vertical
+  // charts), "col" stacks them (horizontal charts).
+  const CHART_LAYOUTS = [
+    { id: "1", label: "One chart", tree: 0 },
+    { id: "2v", label: "Two vertical charts", tree: { dir: "row", kids: [0, 1] } },
+    { id: "2h", label: "Two horizontal charts", tree: { dir: "col", kids: [0, 1] } },
+    { id: "3v", label: "Three vertical charts", tree: { dir: "row", kids: [0, 1, 2] } },
+    { id: "3h", label: "Three horizontal charts", tree: { dir: "col", kids: [0, 1, 2] } },
+    { id: "3l", label: "One vertical chart on the left, two horizontal on the right", tree: { dir: "row", kids: [0, { dir: "col", kids: [1, 2] }] } },
+    { id: "3r", label: "Two horizontal charts on the left, one vertical on the right", tree: { dir: "row", kids: [{ dir: "col", kids: [0, 1] }, 2] } },
+    { id: "3t", label: "One horizontal chart on top, two vertical below", tree: { dir: "col", kids: [0, { dir: "row", kids: [1, 2] }] } },
+    { id: "3b", label: "Two vertical charts on top, one horizontal below", tree: { dir: "col", kids: [{ dir: "row", kids: [0, 1] }, 2] } },
+  ];
+  const paneCount = (node) => (typeof node === "number" ? 1 : node.kids.reduce((n, k) => n + paneCount(k), 0));
+
+  // Menu tile: the layout drawn as rectangles in a 28 × 20 box.
+  const layoutIcon = (tree) => {
+    const rects = [];
+    const walk = (node, x, y, w, h) => {
+      if (typeof node === "number") {
+        rects.push([x, y, w, h]);
+        return;
+      }
+      const gap = 2;
+      const along = ((node.dir === "row" ? w : h) - gap * (node.kids.length - 1)) / node.kids.length;
+      node.kids.forEach((kid, i) => {
+        const at = i * (along + gap);
+        if (node.dir === "row") walk(kid, x + at, y, along, h);
+        else walk(kid, x, y + at, w, along);
+      });
+    };
+    walk(tree, 1, 1, 26, 18);
+    const r = (v) => +v.toFixed(2);
+    const shapes = rects.map(([x, y, w, h]) => `<rect x="${r(x)}" y="${r(y)}" width="${r(w)}" height="${r(h)}" rx="1.5"/>`);
+    return `<svg viewBox="0 0 28 20" aria-hidden="true">${shapes.join("")}</svg>`;
+  };
+
+  const mountChartPanel = (root) => {
+    const stage = root.querySelector(".chart-stage");
+    const tablist = root.querySelector(".chart-tabs");
+    const tabs = [...tablist.querySelectorAll("[role='tab']")];
+    const ids = tabs.map((t) => t.getAttribute("aria-controls"));
+    const views = Object.fromEntries(ids.map((id) => [id, document.getElementById(id)]));
+    const tabOf = Object.fromEntries(ids.map((id, i) => [id, tabs[i]]));
+    const fsBtn = root.querySelector("[data-chart-fullscreen]");
+    const layoutBtn = root.querySelector("[data-chart-layout]");
+    const menu = root.querySelector(".chart-layouts");
+    const byId = Object.fromEntries(CHART_LAYOUTS.map((l) => [l.id, l]));
+    const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), Math.max(lo, hi));
+    // Views off screen wait here, still in the document
+    const stash = document.createElement("div");
+    stash.hidden = true;
+
+    // order: pane i shows order[i]; active: the pane the tabs act on.
+    // Outside fullscreen the one pane shows order[active].
+    const state = { layout: "1", order: [...ids], active: 0, sizes: {} };
+    try {
+      const saved = JSON.parse(localStorage.getItem(CHART_LAYOUT_KEY) || "{}");
+      if (byId[saved.layout]) state.layout = saved.layout;
+      if (Array.isArray(saved.order) && saved.order.length === ids.length && ids.every((id) => saved.order.includes(id))) state.order = saved.order;
+      if (Number.isInteger(saved.active) && saved.active >= 0 && saved.active < paneCount(byId[state.layout].tree)) state.active = saved.active;
+      if (saved.sizes && typeof saved.sizes === "object") state.sizes = saved.sizes;
+    } catch { /* ignore */ }
+    const save = () => {
+      try { localStorage.setItem(CHART_LAYOUT_KEY, JSON.stringify(state)); } catch { /* ignore */ }
+    };
+    const sizesOf = (key, n) => {
+      const s = state.sizes[key];
+      return Array.isArray(s) && s.length === n && s.every((v) => v > 0) ? s : Array(n).fill(1 / n);
+    };
+
+    let full = false;
+    let panes = [];
+    const layout = () => byId[full ? state.layout : "1"];
+    const shown = () => (full ? state.order.slice(0, paneCount(layout().tree)) : [state.order[state.active]]);
+    const activePane = () => (full ? state.active : 0);
+
+    /* Panes ← views, active pane, tabs */
+    const fill = () => {
+      const list = shown();
+      const active = activePane();
+      Object.entries(views).forEach(([id, v]) => {
+        if (list.includes(id)) return;
+        v.hidden = true;
+        if (v.parentElement !== stash) stash.append(v);
+      });
+      panes.forEach((pane, i) => {
+        const v = views[list[i]];
+        const body = pane.querySelector(".chart-pane__body");
+        if (v.parentElement !== body) body.replaceChildren(v);
+        v.hidden = false;
+        pane.classList.toggle("is-active", i === active);
+        const head = pane.querySelector(".chart-pane__head");
+        if (head) {
+          const tab = tabOf[list[i]];
+          head.replaceChildren(tab.querySelector("svg").cloneNode(true), tab.querySelector("span").cloneNode(true));
+          pane.setAttribute("aria-label", tab.textContent.trim());
+        }
+      });
+      tabs.forEach((t, i) => {
+        const on = ids[i] === list[active];
         t.setAttribute("aria-selected", String(on));
         t.tabIndex = on ? 0 : -1;
-        views[j].hidden = !on;
+        t.toggleAttribute("data-shown", !on && list.includes(ids[i]));
       });
-      if (focus) tabs[i].focus();
-      try { localStorage.setItem(CHART_VIEW_KEY, tabs[i].id); } catch { /* ignore */ }
     };
-    root.addEventListener("click", (e) => {
-      const i = tabs.indexOf(e.target.closest("[role='tab']"));
-      if (i >= 0 && tabs[i].getAttribute("aria-selected") !== "true") select(i);
+
+    /* Divider between two siblings of a split. Resizing keeps the pair's
+       sum, so every other pane stays where it was. */
+    const divider = (split, key, axis) => {
+      const d = document.createElement("div");
+      d.className = "chart-divider";
+      d.tabIndex = 0;
+      d.setAttribute("role", "separator");
+      d.setAttribute("aria-orientation", axis === "x" ? "vertical" : "horizontal");
+      d.setAttribute("aria-label", "Resize charts");
+      d.setAttribute("aria-valuemin", "0");
+      d.setAttribute("aria-valuemax", "100");
+      const kids = () => [...split.children].filter((el) => !el.classList.contains("chart-divider"));
+      const index = () => [...split.querySelectorAll(":scope > .chart-divider")].indexOf(d);
+      const size = (el) => el.getBoundingClientRect()[axis === "x" ? "width" : "height"];
+      const grows = (list) => list.map((el) => Number(el.style.getPropertyValue("--grow")) || 1);
+      const resize = (px) => {
+        const i = index();
+        const list = kids();
+        const g = grows(list);
+        const total = size(list[i]) + size(list[i + 1]);
+        const lo = Math.min(PANE_MIN[axis], total / 2);
+        const pair = g[i] + g[i + 1];
+        g[i] = (pair * clamp(px, lo, total - lo)) / (total || 1);
+        g[i + 1] = pair - g[i];
+        list.forEach((el, j) => el.style.setProperty("--grow", String(g[j])));
+        d.setAttribute("aria-valuenow", String(Math.round((100 * g[i]) / pair)));
+      };
+      const store = () => {
+        const g = grows(kids());
+        const sum = g.reduce((s, v) => s + v, 0);
+        state.sizes[key] = g.map((v) => +(v / sum).toFixed(4));
+        save();
+      };
+      const pos = (e) => (axis === "x" ? e.clientX : e.clientY);
+
+      d.addEventListener("pointerdown", (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        d.setPointerCapture(e.pointerId);
+        const start = pos(e);
+        const from = size(kids()[index()]);
+        let frame = 0;
+        let last = e;
+        d.classList.add("is-active");
+        document.documentElement.dataset.resizing = axis;
+        const move = (ev) => {
+          last = ev;
+          frame ||= requestAnimationFrame(() => { frame = 0; resize(from + pos(last) - start); });
+        };
+        const up = () => {
+          cancelAnimationFrame(frame);
+          resize(from + pos(last) - start);
+          d.classList.remove("is-active");
+          delete document.documentElement.dataset.resizing;
+          d.removeEventListener("pointermove", move);
+          d.removeEventListener("pointerup", up);
+          d.removeEventListener("pointercancel", up);
+          store();
+        };
+        d.addEventListener("pointermove", move);
+        d.addEventListener("pointerup", up);
+        d.addEventListener("pointercancel", up);
+      });
+      d.addEventListener("keydown", (e) => {
+        const step = e.shiftKey ? 64 : 16;
+        const keys = axis === "x" ? { ArrowLeft: -step, ArrowRight: step } : { ArrowUp: -step, ArrowDown: step };
+        if (!(e.key in keys)) return;
+        e.preventDefault();
+        resize(size(kids()[index()]) + keys[e.key]);
+        store();
+      });
+      // Double-click: this split back to equal parts
+      d.addEventListener("dblclick", () => {
+        kids().forEach((el) => el.style.setProperty("--grow", "1"));
+        d.setAttribute("aria-valuenow", "50");
+        store();
+      });
+      return d;
+    };
+
+    /* Stage ← the current layout */
+    const build = () => {
+      const { id, tree } = layout();
+      const multi = paneCount(tree) > 1;
+      panes = [];
+      const node = (n, path) => {
+        if (typeof n === "number") {
+          const pane = document.createElement("div");
+          pane.className = "chart-pane";
+          pane.dataset.pane = String(n);
+          if (multi) {
+            pane.setAttribute("role", "group");
+            const head = document.createElement("div");
+            head.className = "chart-pane__head";
+            head.setAttribute("aria-hidden", "true");
+            pane.append(head);
+          }
+          const body = document.createElement("div");
+          body.className = "chart-pane__body";
+          pane.append(body);
+          panes[n] = pane;
+          return pane;
+        }
+        const split = document.createElement("div");
+        split.className = "chart-split";
+        split.dataset.dir = n.dir;
+        const key = `${id}:${path}`;
+        const sizes = sizesOf(key, n.kids.length);
+        n.kids.forEach((kid, i) => {
+          if (i) {
+            const d = divider(split, key, n.dir === "row" ? "x" : "y");
+            d.setAttribute("aria-valuenow", String(Math.round((100 * sizes[i - 1]) / (sizes[i - 1] + sizes[i]))));
+            split.append(d);
+          }
+          const el = node(kid, `${path}${i}`);
+          el.style.setProperty("--grow", String(sizes[i]));
+          split.append(el);
+        });
+        return split;
+      };
+      Object.values(views).forEach((v) => stash.append(v));
+      stage.replaceChildren(node(tree, ""), stash);
+      stage.toggleAttribute("data-multi", multi);
+      fill();
+    };
+
+    /* Tabs: set the active pane's view */
+    const select = (id, focus = false) => {
+      const a = state.active;
+      const j = state.order.indexOf(id);
+      [state.order[a], state.order[j]] = [state.order[j], state.order[a]];
+      fill();
+      save();
+      if (focus) tabOf[id].focus();
+    };
+    tablist.addEventListener("click", (e) => {
+      const t = e.target.closest("[role='tab']");
+      if (t && t.getAttribute("aria-selected") !== "true") select(t.getAttribute("aria-controls"));
     });
-    root.addEventListener("keydown", (e) => {
+    tablist.addEventListener("keydown", (e) => {
       const i = tabs.indexOf(e.target.closest("[role='tab']"));
       if (i < 0) return;
       const n = tabs.length;
       const next = { ArrowRight: (i + 1) % n, ArrowLeft: (i - 1 + n) % n, Home: 0, End: n - 1 }[e.key];
       if (next === undefined) return;
       e.preventDefault();
-      select(next, true);
+      select(ids[next], true);
     });
-    let saved = -1;
-    try { saved = tabs.findIndex((t) => t.id === localStorage.getItem(CHART_VIEW_KEY)); } catch { /* ignore */ }
-    if (saved > 0) select(saved);
+
+    // A click or focus inside a pane makes it the active one
+    const activate = (e) => {
+      if (!full) return;
+      const pane = e.target.closest(".chart-pane");
+      if (!pane) return;
+      const i = Number(pane.dataset.pane);
+      if (i === state.active) return;
+      state.active = i;
+      fill();
+      save();
+    };
+    stage.addEventListener("pointerdown", activate);
+    stage.addEventListener("focusin", activate);
+
+    /* Layout menu: tiles grouped by chart count */
+    const tiles = [];
+    menu.replaceChildren(...[1, 2, 3].map((n) => {
+      const group = document.createElement("div");
+      const title = `${n} chart${n > 1 ? "s" : ""}`;
+      group.className = "chart-layouts__group";
+      group.setAttribute("role", "group");
+      group.setAttribute("aria-label", title);
+      group.innerHTML = `<p class="chart-layouts__title" aria-hidden="true">${title}</p><div class="chart-layouts__row"></div>`;
+      CHART_LAYOUTS.filter((l) => paneCount(l.tree) === n).forEach((l) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "chart-layout-opt";
+        b.tabIndex = -1;
+        b.dataset.layout = l.id;
+        b.title = l.label;
+        b.setAttribute("role", "menuitemradio");
+        b.setAttribute("aria-label", l.label);
+        b.innerHTML = layoutIcon(l.tree);
+        group.lastElementChild.append(b);
+        tiles.push(b);
+      });
+      return group;
+    }));
+    const markMenu = () => tiles.forEach((b) => b.setAttribute("aria-checked", String(b.dataset.layout === state.layout)));
+    const openMenu = () => {
+      markMenu();
+      menu.hidden = false;
+      layoutBtn.setAttribute("aria-expanded", "true");
+      (tiles.find((b) => b.getAttribute("aria-checked") === "true") || tiles[0]).focus();
+    };
+    const closeMenu = (refocus = false) => {
+      if (menu.hidden) return;
+      menu.hidden = true;
+      layoutBtn.setAttribute("aria-expanded", "false");
+      if (refocus) layoutBtn.focus();
+    };
+    // Fewer panes: the active view moves into the last pane that remains
+    const setLayout = (id) => {
+      const n = paneCount(byId[id].tree);
+      if (state.active >= n) {
+        const a = state.active;
+        [state.order[a], state.order[n - 1]] = [state.order[n - 1], state.order[a]];
+        state.active = n - 1;
+      }
+      state.layout = id;
+      save();
+      build();
+    };
+    layoutBtn.addEventListener("click", () => (menu.hidden ? openMenu() : closeMenu()));
+    menu.addEventListener("click", (e) => {
+      const b = e.target.closest(".chart-layout-opt");
+      if (!b) return;
+      closeMenu(true);
+      if (b.dataset.layout !== state.layout) setLayout(b.dataset.layout);
+    });
+    menu.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        closeMenu(true);
+        return;
+      }
+      if (e.key === "Tab") {
+        closeMenu();
+        return;
+      }
+      const i = tiles.indexOf(document.activeElement);
+      const n = tiles.length;
+      const next = { ArrowRight: i + 1, ArrowDown: i + 1, ArrowLeft: i - 1, ArrowUp: i - 1, Home: 0, End: n - 1 }[e.key];
+      if (next === undefined) return;
+      e.preventDefault();
+      tiles[(next + n) % n].focus();
+    });
+    document.addEventListener("pointerdown", (e) => {
+      if (!menu.hidden && !menu.contains(e.target) && !layoutBtn.contains(e.target)) closeMenu();
+    });
+
+    /* Fullscreen: the panel takes the whole screen (Fullscreen API; Esc
+       leaves), or is maximized over the page where the API is missing or
+       refused. Layouts only apply here. */
+    const setFull = (on, fallback = false) => {
+      full = on;
+      root.classList.toggle("is-full", on);
+      root.classList.toggle("is-maximized", on && fallback);
+      document.documentElement.classList.toggle("has-maximized", on && fallback);
+      fsBtn.setAttribute("aria-pressed", String(on));
+      fsBtn.title = on ? "Exit fullscreen" : "Fullscreen";
+      fsBtn.setAttribute("aria-label", on ? "Exit fullscreen: Charts" : "Fullscreen: Charts");
+      layoutBtn.hidden = !on;
+      closeMenu();
+      build();
+    };
+    fsBtn.addEventListener("click", () => {
+      if (document.fullscreenElement === root) document.exitFullscreen();
+      else if (root.classList.contains("is-maximized")) setFull(false);
+      else if (root.requestFullscreen) root.requestFullscreen().catch(() => setFull(true, true));
+      else setFull(true, true);
+    });
+    document.addEventListener("fullscreenchange", () => {
+      const on = document.fullscreenElement === root;
+      if (!root.classList.contains("is-maximized") && on !== full) setFull(on);
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && root.classList.contains("is-maximized")) setFull(false);
+    });
+
+    build();
   };
 
   /* ---- Mount -------------------------------------------------------------- */
@@ -4400,7 +4752,7 @@
   const floatSettings = mountFloatSettings();
   const tableSettings = mountTableSettings();
   mountFilters();
-  mountChartTabs(document.querySelector(".chart-tabs"));
+  mountChartPanel(document.querySelector(".chart-panel"));
   const constellation = mountConstellation(document.querySelector("[data-constellation]"));
   constellation.seed(MOMENTUM);
   HALTS.forEach(constellation.halt);
