@@ -3162,7 +3162,7 @@
     const editorHTML = (f) => {
       const v = validateFilter(f, filters);
       return `
-        <li class="flt-card is-editing${f.enabled ? "" : " is-off"}" data-id="${f.id}" aria-label="${editor.isNew ? "New filter" : `Editing the ${escHTML(f.variable)} filter`}">
+        <li class="flt-card is-editing${editor.shown ? "" : " is-entering"}${f.enabled ? "" : " is-off"}" data-id="${f.id}" aria-label="${editor.isNew ? "New filter" : `Editing the ${escHTML(f.variable)} filter`}">
           <div class="flt-ed__head">
             <span class="flt-ed__title">${editor.isNew ? "New filter" : "Edit filter"}</span>
             <span class="flt-ed__switch"><span id="${f.id}-on">Active</span><button type="button" class="switch" role="switch" data-flt-toggle aria-checked="${f.enabled}" aria-labelledby="${f.id}-on"></button></span>
@@ -3219,16 +3219,24 @@
       else if (notice.dataset.kind === "conflict") setNotice(null);
     };
 
+    // Focus without the browser's scroll jump; only scroll if it's out of view.
+    const calmFocus = (el) => {
+      if (!el) return;
+      el.focus({ preventScroll: true });
+      el.scrollIntoView({ block: "nearest", behavior: reduceMotion.matches ? "auto" : "smooth" });
+    };
+
     const render = (focus) => {
       const all = items();
       list.innerHTML = all.map((f) => (editor?.data.id === f.id ? editorHTML(f) : confirming === f.id ? confirmHTML(f) : cardHTML(f))).join("");
       list.hidden = !all.length;
       empty.hidden = all.length > 0;
       dlg.classList.toggle("is-editing", Boolean(editor));
+      // The editor animates in once; later rebuilds (each pick) stay still.
+      if (editor) editor.shown = true;
       syncStats();
       syncNotice();
-      const el = typeof focus === "string" ? list.querySelector(focus) : focus;
-      el?.focus();
+      calmFocus(typeof focus === "string" ? list.querySelector(focus) : focus);
     };
 
     // Typing a value re-checks the filter without rebuilding the card, so
@@ -3283,7 +3291,7 @@
         : v?.invalid.length ? q(`[data-flt-value="${v.invalid[0]}"]`)
         : v ? q("[data-flt-table-all], [data-flt-table]:not(:disabled)")
         : q("[data-flt-save]:not(:disabled)") || q("[data-flt-toggle]");
-      el?.focus();
+      calmFocus(el);
     };
 
     /* Only one filter is edited at a time. One without changes gives way;
@@ -3348,8 +3356,7 @@
     const reRender = (sel, fallback) => {
       render();
       const card = cardOf(editor.data.id);
-      const el = card.querySelector(`${sel}:not(:disabled)`) || card.querySelector(fallback);
-      el?.focus();
+      calmFocus(card.querySelector(`${sel}:not(:disabled)`) || card.querySelector(fallback));
     };
 
     const toggleSession = (session) => {
@@ -3383,7 +3390,7 @@
       f.values = Array.from({ length: valueCount(op) }, (_, i) => f.values[i] ?? "");
       render();
       const next = f.values.findIndex((v) => !String(v).trim());
-      cardOf(f.id).querySelector(`[data-flt-value="${Math.max(0, next)}"]`)?.focus();
+      calmFocus(cardOf(f.id).querySelector(`[data-flt-value="${Math.max(0, next)}"]`));
     };
 
     const setValue = (input, formatted = false) => {

@@ -1455,8 +1455,9 @@ tr.is-new td, .alert-card.is-new { animation: rowIn 1.6s var(--ease); }
   display: block; padding: 14px 16px;
   border-style: solid; border-color: color-mix(in srgb, var(--tone) 40%, var(--line)); background: var(--surface);
   box-shadow: 0 18px 40px -24px var(--shadow-color), 0 0 0 3px color-mix(in srgb, var(--tone) 6%, transparent);
-  animation: panelIn 260ms var(--ease);
 }
+/* Only when the editor opens: it is rebuilt on every pick and must not replay */
+.flt-card.is-editing.is-entering { animation: panelIn 260ms var(--ease); }
 .flt-ed__head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
 .flt-ed__title { display: inline-flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-2); }
 .flt-ed__title::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--tone); box-shadow: 0 0 8px color-mix(in srgb, var(--tone) 50%, transparent); }
@@ -1573,6 +1574,10 @@ tr.is-new td, .alert-card.is-new { animation: rowIn 1.6s var(--ease); }
 @media (max-width: 720px) {
   .settings-modal.settings-modal--filters { width: 100%; height: fit-content; margin: auto 0 0; }
   .settings-modal--filters .sm-shell { max-height: 92dvh; }
+  /* The sheet grows from the bottom: while editing it takes its full height,
+     so opening steps doesn't push the editor up with every pick. */
+  .settings-modal.settings-modal--filters.is-editing { height: 92dvh; }
+  .settings-modal--filters.is-editing .sm-shell { height: 100%; }
   .settings-modal--filters .sm-foot .btn { flex: none; }
   .flt-bar { flex-wrap: wrap; row-gap: 8px; margin-inline: var(--space-4); }
   .flt-notice { margin-inline: var(--space-4); }
@@ -1592,7 +1597,7 @@ tr.is-new td, .alert-card.is-new { animation: rowIn 1.6s var(--ease); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .flt-notice, .flt-card.is-editing, .flt-card.is-confirm { animation: none; }
+  .flt-notice, .flt-card.is-entering, .flt-card.is-confirm { animation: none; }
   .flt-chip, .flt-chip__check, .flt-step__n, .flt-list.is-sorting .flt-card:not(.is-dragging) { transition: none; }
   .flt-now.is-live i, .flt-tag.is-live i { animation: none; }
 }
