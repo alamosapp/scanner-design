@@ -3674,7 +3674,16 @@
       if (escHandled || stepBack()) e.preventDefault();
       escHandled = false;
     });
-    dlg.addEventListener("click", (e) => { if (e.target === dlg) close(); });
+    // A click outside closes the dialog, but not while a value is being typed,
+    // nor when a press started inside (e.g. selecting text in a field and
+    // releasing past the edge).
+    let pressedOutside = false;
+    dlg.addEventListener("pointerdown", (e) => { pressedOutside = e.target === dlg; });
+    dlg.addEventListener("click", (e) => {
+      const typing = document.activeElement?.matches("[data-flt-value]");
+      if (e.target === dlg && pressedOutside && !typing) close();
+      pressedOutside = false;
+    });
     $("[data-flt-close]").addEventListener("click", close);
     $("[data-flt-done]").addEventListener("click", close);
     addBtn.addEventListener("click", () => add());
