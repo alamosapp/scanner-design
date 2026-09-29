@@ -3818,6 +3818,9 @@
   const SWAY = 2.5;         // px, drawn only: the layout never sees it
   const GAP = 6;            // px between labels: covers two opposite sways
   const REPEL = 45;         // px/s² per px of overlap between drawn labels
+  const SUB_FONT = 8;       // px: the "Halt mm:ss" / "Resumed mm:ss" line
+  const SUB_H = 5;          // px the sub line adds above and below the label's center
+  const PULSE_GROW = 0.2;   // a new alert's label grows up to 20 %, within its box
 
   // One alert's intensity: 1 = right at the scanner's minimum.
   const alertHeat = (r) => {
@@ -3954,8 +3957,8 @@
       maxFont: Math.max(18, Math.min(44, H * 0.2, W * 0.12)),
     });
 
-    const sublabelOf = (st, now) => (st.halted ? `HALT ${fmtClock(now - st.haltStart)}`
-      : st.resumedAt != null ? `RESUMED ${fmtClock(now - st.resumedAt)}` : "");
+    const sublabelOf = (st, now) => (st.halted ? `Halt ${fmtClock(now - st.haltStart)}`
+      : st.resumedAt != null ? `Resumed ${fmtClock(now - st.resumedAt)}` : "");
 
     // Text width scales with the font size: measure each ticker once, at
     // 100px (measureText is the costly part of a frame).
@@ -3967,6 +3970,17 @@
       }
       return widths.get(sym) * size;
     };
+    // The sub line is monospaced: one measure per character count.
+    const subWidth = (text) => {
+      const key = `\u0000sub${text.length}`;
+      if (!widths.has(key)) {
+        ctx.font = `600 ${SUB_FONT}px ${MONO}`;
+        widths.set(key, ctx.measureText("0".repeat(text.length)).width);
+      }
+      return widths.get(key);
+    };
+    // Pause icon (halted), as drawn by drawPause.
+    const pauseWidth = (size) => Math.max(2, size * 0.14) * 2.9 + size * 0.18;
 
     // Box of a label at its current (eased) size.
     const naturalFont = (b, g) => g.minFont + (g.maxFont - g.minFont) * b.s;
@@ -3978,16 +3992,19 @@
       const font = Math.max(8, naturalFont(b, g) * fit);
       b.font = b.font ? b.font + (font - b.font) * ease(font < b.font ? FIT_SHRINK_TAU : FIT_GROW_TAU) : font;
       b.textW = textWidth(st.sym, b.font);
-      b.iconW = st.halted ? b.font * 0.58 : st.status === "rising" ? b.font * 0.42 : 0;
+      b.iconW = st.halted ? pauseWidth(b.font) : st.status === "rising" ? b.font * 0.42 : 0;
       b.sub = sublabelOf(st, now);
-      b.hw = (b.textW + b.iconW) / 2 + 3 + b.font * 0.1;
-      b.hh = b.font * 0.5 + (b.sub ? 6 : 0) + 1;
+      // The box holds the label and its sub line, whichever is wider.
+      b.hw = Math.max((b.textW + b.iconW) / 2 + 3 + b.font * 0.1, b.sub ? subWidth(b.sub) / 2 + 2 : 0);
+      b.hh = b.font * 0.5 + (b.sub ? SUB_H : 0) + 1;
     };
 
     // Separates overlapping boxes along the axis they overlap least on. The
     // axis only switches when the other one is clearly shorter, or when a
     // wall blocks it (at most every 0.6 s), so a pair never flip-flops; the
-    // bigger label gives way less.
+    // bigger label gives way less, and a label fading out not at all (it is
+    // still drawn where it was, so the others go around it).
+    const share = (a, b) => (a.leaving ? 0 : b.leaving ? 1 : (b.hw * b.hh) / (a.hw * a.hh + b.hw * b.hh));
     const solve = (items, clock) => {
       const top = LEGEND_H;
       for (let pass = 0; pass < 24; pass++) {
@@ -3996,6 +4013,7 @@
           for (let j = i + 1; j < items.length; j++) {
             const a = items[i];
             const b = items[j];
+            if (a.leaving && b.leaving) continue;
             const key = a.sym < b.sym ? `${a.sym}|${b.sym}` : `${b.sym}|${a.sym}`;
             const dx = b.lx - a.lx;
             const dy = b.ly - a.ly;
@@ -4011,7 +4029,7 @@
             else if (held.axis === "y" && fx < fy * 0.7) Object.assign(held, { axis: "x", at: clock });
             axes.set(key, held);
             const { axis } = held;
-            const wa = (b.hw * b.hh) / (a.hw * a.hh + b.hw * b.hh);
+            const wa = share(a, b);
             // Side: where they are, or where they are headed when stacked.
             const d = axis === "x" ? dx : dy;
             const side = Math.sign(Math.abs(d) > 0.5 ? d : (axis === "x" ? b.ax - a.ax : b.ay - a.ay) || (a.angle > b.angle ? 1 : -1));
@@ -4021,6 +4039,7 @@
           }
         }
         for (const b of items) {
+          if (b.leaving) continue;
           b.lx = Math.min(W - b.hw - 2, Math.max(b.hw + 2, b.lx));
           b.ly = Math.min(H - b.hh - 2, Math.max(top + b.hh, b.ly));
         }
@@ -4031,6 +4050,7 @@
         for (let j = i + 1; j < items.length; j++) {
           const a = items[i];
           const b = items[j];
+          if (a.leaving && b.leaving) continue;
           if (a.hw + b.hw - Math.abs(b.lx - a.lx) <= 0.5 || a.hh + b.hh - Math.abs(b.ly - a.ly) <= 0.5) continue;
           const held = axes.get(a.sym < b.sym ? `${a.sym}|${b.sym}` : `${b.sym}|${a.sym}`);
           if (held && clock - held.at > 600) Object.assign(held, { axis: held.axis === "x" ? "y" : "x", at: clock, lock: clock + 600 });
@@ -4068,8 +4088,8 @@
           const dy = b.y - a.y;
           const ox = a.hw + b.hw + GAP / 2 - Math.abs(dx);
           const oy = a.hh + b.hh + GAP / 2 - Math.abs(dy);
-          if (ox <= 0 || oy <= 0) continue;
-          const wa = (b.hw * b.hh) / (a.hw * a.hh + b.hw * b.hh);
+          if (ox <= 0 || oy <= 0 || (a.leaving && b.leaving)) continue;
+          const wa = share(a, b);
           if (ox / (a.hw + b.hw) < oy / (a.hh + b.hh)) {
             const push = Math.sign(dx || b.lx - a.lx || 1) * ox * REPEL;
             a.px -= push * wa;
@@ -4120,7 +4140,7 @@
       const color = st.halted ? C.halt : heatColor(b.s);
       const isHover = st.sym === hover;
       const isSelected = st.sym === selected;
-      const labelY = y - (b.sub ? 5.5 : 0);
+      const labelY = y - (b.sub ? SUB_H - 0.5 : 0);
 
       ctx.save();
       ctx.globalAlpha = isHover ? Math.max(a, 0.92) : a;
@@ -4134,7 +4154,9 @@
         ctx.stroke();
       }
       ctx.translate(x, labelY);
-      const grow = 1 + 0.2 * pulse;
+      // The pulse never grows the label past its box (the layout's spacing).
+      const room = 2 * (b.hw - 1) / (b.textW + b.iconW) - 1;
+      const grow = 1 + Math.max(0, Math.min(PULSE_GROW, room)) * pulse;
       ctx.scale(grow, grow);
       ctx.shadowColor = alpha(color, 0.55);
       ctx.shadowBlur = st.halted ? 8 : 4 + 12 * b.s + 16 * pulse;
@@ -4162,11 +4184,11 @@
       if (b.sub) {
         ctx.save();
         ctx.globalAlpha = smooth(b.vis);
-        ctx.font = `700 9px ${MONO}`;
+        ctx.font = `600 ${SUB_FONT}px ${MONO}`;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillStyle = st.halted ? C.halt : C.resume;
-        ctx.fillText(b.sub, x, y + b.hh - 6);
+        ctx.fillText(b.sub, x, y + b.hh - SUB_H);
         ctx.restore();
       }
     };
@@ -4283,14 +4305,17 @@
 
       // Layout: anchors from the eased strength, drifted toward from the
       // previous spots, then pulled apart. The drawn labels glide after it.
-      const active = [...bubbles.values()].filter((b) => live.has(b.sym));
+      bubbles.forEach((b) => { b.leaving = !live.has(b.sym); });
+      const active = [...bubbles.values()].filter((b) => !b.leaving);
       // Density: when the labels at their natural size would not fit (a
       // narrow panel, many hot tickers), they all shrink together, smoothly,
       // instead of shoving each other around.
       const room = W * (H - LEGEND_H) * FIT_FILL;
       const need = active.reduce((sum, b) => {
         const font = naturalFont(b, g);
-        return sum + (textWidth(b.sym, font) + font * 0.8 + GAP) * (font + GAP + (b.state.halted || b.state.resumedAt != null ? 12 : 0));
+        const sub = sublabelOf(b.state, now);
+        const w = Math.max(textWidth(b.sym, font) + font * 0.8, sub ? subWidth(sub) + 4 : 0);
+        return sum + (w + GAP) * (font + GAP + (sub ? SUB_H * 2 : 0));
       }, 0);
       fit = need ? Math.max(FIT_MIN, Math.min(1, Math.sqrt(room / need))) : 1;
       const pull = ease(PULL_TAU);
@@ -4302,9 +4327,11 @@
         if (!Number.isFinite(b.lx)) { b.lx = b.ax; b.ly = b.ay; }
         else { b.lx += (b.ax - b.lx) * pull; b.ly += (b.ay - b.ly) * pull; }
       });
-      solve(active, tick);
+      // Labels fading out stay in as fixed obstacles until they are gone.
+      const placed = [...bubbles.values()].filter((b) => !b.leaving || Number.isFinite(b.lx));
+      solve(placed, tick);
       bubbles.forEach((b) => { b.px = 0; b.py = 0; });
-      repel(active.filter((b) => Number.isFinite(b.x)));
+      repel(placed.filter((b) => Number.isFinite(b.x)));
       bubbles.forEach((b) => glide(b, dt, snap));
 
       const items = [...bubbles.values()];
