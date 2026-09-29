@@ -181,42 +181,50 @@
       float: fmtAbbr(r.float),
       mcap: fmtAbbr(r.mcap),
       press: `<div class="pressure" title="Buying vs selling pressure"><i class="buy" style="width:${r.buy}%"></i><i class="sell" style="width:${100 - r.buy}%"></i></div>`,
-      trend: `<svg class="spark ${bear ? "down" : "up"}" viewBox="0 0 88 28" aria-hidden="true"><polyline points="${sparkPoints(r.sym + r.hits, !bear)}"></polyline></svg>`,
+      trend: `<svg class="spark ${bear ? "down" : "up"}" viewBox="0 0 88 28" preserveAspectRatio="none" aria-hidden="true"><polyline points="${sparkPoints(r.sym + r.hits, !bear)}"></polyline></svg>`,
     };
   };
 
   /* ---- Columns ------------------------------------------------------------
      Pinned columns stay first; the rest can be dragged into any order.
-     Every column has a fixed whole-pixel width (`w`), so pinned offsets and
-     row lines land on exact pixels and the header never drifts off the body. */
+     Every column has a whole-pixel width (`w`, the default), so pinned
+     offsets and row lines land on exact pixels and the header never drifts
+     off the body. The user can resize any column but Signal (`fixed`)
+     between its `min` (what its content needs: a heat chip, a clock, a
+     ticker) and its `max`. */
+
+  const COL_MIN = 56;
+  const COL_MAX = 360;
+  const HEAT_MIN = 84; // a heat chip (4.75em) plus the cell's padding
 
   const COLUMNS = [
-    { key: "sig",      label: "Signal",      w: 24,  pinned: true, cls: "col-sig", title: "Float size", srOnly: true },
-    { key: "time",     label: "Time",        w: 88,  pinned: true, cls: "col-time" },
-    { key: "sym",      label: "Ticker",      w: 68, pinned: true, cls: "col-sym" },
+    { key: "sig",      label: "Signal",      w: 24,  pinned: true, fixed: true, cls: "col-sig", title: "Float size", srOnly: true },
+    { key: "time",     label: "Time",        w: 88,  min: 84, max: 140, pinned: true, cls: "col-time" },
+    { key: "sym",      label: "Ticker",      w: 68,  min: 60, max: 140, pinned: true, cls: "col-sym" },
     { key: "price",    label: "Price",       w: 80,  num: true },
-    { key: "chg1",     label: "%Chg 1m",     w: 96,  num: true, title: "% change, last minute" },
-    { key: "vol1m",    label: "Vol. 1m",     w: 100, num: true, title: "Volume spike vs. normal 1m volume" },
-    { key: "chgClose",    label: "%Chg Close", w: 108, num: true, title: "% change vs. previous close" },
+    { key: "chg1",     label: "%Chg 1m",     w: 96,  min: HEAT_MIN, num: true, title: "% change, last minute" },
+    { key: "vol1m",    label: "Vol. 1m",     w: 100, min: HEAT_MIN, num: true, title: "Volume spike vs. normal 1m volume" },
+    { key: "chgClose",    label: "%Chg Close", w: 108, min: HEAT_MIN, num: true, title: "% change vs. previous close" },
     { key: "chgCloseAbs", label: "Chg Close",  w: 96,  num: true, title: "Change vs. previous close" },
-    { key: "chgOpen",     label: "%Chg Open",  w: 104, num: true, title: "% change vs. today's open" },
+    { key: "chgOpen",     label: "%Chg Open",  w: 104, min: HEAT_MIN, num: true, title: "% change vs. today's open" },
     { key: "chgOpenAbs",  label: "Chg Open",   w: 92,  num: true, title: "Change vs. today's open" },
     { key: "rvol",     label: "RVol",        w: 72,  num: true, title: "Relative volume" },
-    { key: "hits",     label: "Hits",        w: 88,  num: true, title: "Alerts fired today" },
+    { key: "hits",     label: "Hits",        w: 88,  min: HEAT_MIN, num: true, title: "Alerts fired today" },
     { key: "vwapD",    label: "VWAP D.",     w: 92,  num: true, title: "Distance to VWAP" },
     { key: "vwap",     label: "VWAP",        w: 80,  num: true },
-    { key: "chg5",     label: "%Chg 5m",     w: 96,  num: true },
-    { key: "chg15",    label: "%Chg 15m",    w: 104, num: true },
-    { key: "chg30",    label: "%Chg 30m",    w: 104, num: true },
-    { key: "duration", label: "Duration",    w: 92,  num: true, title: "Time halted" },
-    { key: "resume",   label: "Resume Est.", w: 116, num: true, title: "Countdown to the estimated resumption" },
+    { key: "chg5",     label: "%Chg 5m",     w: 96,  min: HEAT_MIN, num: true },
+    { key: "chg15",    label: "%Chg 15m",    w: 104, min: HEAT_MIN, num: true },
+    { key: "chg30",    label: "%Chg 30m",    w: 104, min: HEAT_MIN, num: true },
+    { key: "duration", label: "Duration",    w: 92,  min: 64, num: true, title: "Time halted" },
+    { key: "resume",   label: "Resume Est.", w: 116, min: 80, num: true, title: "Countdown to the estimated resumption" },
     { key: "volume",   label: "Volume",      w: 84,  num: true, muted: true },
     { key: "float",    label: "Float",       w: 76,  num: true, muted: true },
     { key: "mcap",     label: "MCap",        w: 76,  num: true, muted: true },
-    { key: "press",    label: "Bull/Sell Press", w: 128 },
-    { key: "trend",    label: "Trend",       w: 116 },
+    { key: "press",    label: "Bull/Sell Press", w: 128, min: 64 },
+    { key: "trend",    label: "Trend",       w: 116, min: 64 },
   ];
   const COL = Object.fromEntries(COLUMNS.map((c) => [c.key, c]));
+  const clampWidth = (key, w) => Math.round(Math.min(COL[key].max ?? COL_MAX, Math.max(COL[key].min ?? COL_MIN, w)));
   const PINNED = COLUMNS.filter((c) => c.pinned).map((c) => c.key);
   // Toplists rank tickers rather than log alerts, so they pin no Time column.
   const TOPLIST_PINS = ["sig", "sym"];
@@ -273,6 +281,29 @@
   const savePrefs = (panel, { hidden, colors, excluded }) => {
     try {
       localStorage.setItem(prefsKey(panel), JSON.stringify({ hidden: [...hidden], colors, excluded: [...excluded] }));
+    } catch { /* ignore */ }
+  };
+
+  // Column widths per table: only the ones changed from the default. A
+  // detached copy keeps its own set (its window may sit on another, larger
+  // screen), so widths are never synced between windows.
+  const widthsKey = (panel) => `scanner:widths:v1:${DETACHED ? "copy:" : ""}${panel}`;
+  const loadWidths = (panel) => {
+    const widths = {};
+    try {
+      const saved = JSON.parse(localStorage.getItem(widthsKey(panel)) || "null");
+      for (const [k, v] of Object.entries(saved && typeof saved === "object" ? saved : {})) {
+        if (!COL[k] || COL[k].fixed || !Number.isFinite(v)) continue;
+        const w = clampWidth(k, v);
+        if (w !== COL[k].w) widths[k] = w;
+      }
+    } catch { /* ignore */ }
+    return widths;
+  };
+  const saveWidths = (panel, widths) => {
+    try {
+      if (Object.keys(widths).length) localStorage.setItem(widthsKey(panel), JSON.stringify(widths));
+      else localStorage.removeItem(widthsKey(panel));
     } catch { /* ignore */ }
   };
 
@@ -1010,8 +1041,10 @@
     const rows = seed.map((r) => ({ ...r }));
     let order = loadOrder(panel, cols);
     let prefs = loadPrefs(panel, cols);
+    let widths = loadWidths(panel);
 
     const columns = () => [...pins, ...order.filter((k) => !prefs.hidden.has(k))];
+    const widthOf = (key) => widths[key] ?? COL[key].w;
     const isExcluded = (sym) => prefs.excluded.has(sym) || globalExcluded.has(sym);
     // Rows on screen: not excluded, and passing every filter on this table.
     const shownTest = () => {
@@ -1025,11 +1058,22 @@
     const colgroup = table.insertBefore(document.createElement("colgroup"), table.firstChild);
     const FILL = '<td class="col-fill" aria-hidden="true"></td>';
 
-    // Ticker sticks right after Signal (--pin-sym). It gets there once the
-    // columns between them (Time, in the alert tables) have scrolled away:
-    // `stickAt` is that scroll distance. Whole pixels, nothing to measure.
+    // Ticker sticks right after Signal (--pin-sym; Signal is never resized).
+    // It gets there once the columns between them (Time, in the alert
+    // tables) have scrolled away: `stickAt` is that scroll distance. Whole
+    // pixels, nothing to measure.
     table.style.setProperty("--pin-sym", `${COL.sig.w}px`);
-    const stickAt = pins.slice(1, pins.indexOf("sym")).reduce((sum, key) => sum + COL[key].w, 0);
+    const stickAt = () => pins.slice(1, pins.indexOf("sym")).reduce((sum, key) => sum + widthOf(key), 0);
+    const totalWidth = () => columns().reduce((sum, key) => sum + widthOf(key), 0);
+    // Edge shadow on Ticker while it is stuck. With display scaling scrollLeft
+    // can rest a fraction of a pixel off 0; that still counts as "not stuck".
+    // The class only changes when the state flips, so scrolling itself
+    // triggers no style work. Resizing Time moves the point: re-checked then.
+    let stuck = false;
+    const syncStuck = () => {
+      const now = wrap.scrollLeft >= Math.max(stickAt(), 1);
+      if (now !== stuck) wrap.classList.toggle("is-stuck", (stuck = now));
+    };
 
     /* Header + rows */
 
@@ -1039,10 +1083,10 @@
       // column soaks up any spare room so the others never stretch.
       colgroup.replaceChildren(...keys.map((key) => {
         const col = document.createElement("col");
-        col.style.width = `${COL[key].w}px`;
+        col.style.width = `${widthOf(key)}px`;
         return col;
       }), document.createElement("col"));
-      table.style.minWidth = `${keys.reduce((sum, key) => sum + COL[key].w, 0)}px`;
+      table.style.minWidth = `${totalWidth()}px`;
 
       const fill = document.createElement("th");
       fill.className = "col-fill";
@@ -1058,10 +1102,12 @@
         if (!c.pinned) {
           th.draggable = true;
           th.tabIndex = 0;
-          th.setAttribute("aria-description", "Drag, or Alt + arrow keys, to move this column");
+          th.setAttribute("aria-description", "Drag, or Alt + arrow keys, to move this column. Alt + Shift + arrow keys to resize it");
         }
+        if (!c.fixed) th.insertAdjacentHTML("beforeend", '<span class="col-resize" data-resize aria-hidden="true" title="Drag to resize · double-click to fit"></span>');
         return th;
       }), fill);
+      syncStuck();
     };
 
     const rowEl = (d, sym) => {
@@ -1108,6 +1154,8 @@
 
     headRow.addEventListener("dragstart", (e) => {
       const th = e.target.closest("th[draggable]");
+      // A drag that starts on the resize edge resizes, never moves.
+      if (resize) { e.preventDefault(); return; }
       if (!th) return;
       dragKey = th.dataset.key;
       e.dataTransfer.effectAllowed = "move";
@@ -1143,7 +1191,7 @@
     // Keyboard alternative: Alt + ←/→ on a focused header.
     headRow.addEventListener("keydown", (e) => {
       const th = e.target.closest("th[draggable]");
-      if (!th || !e.altKey || !["ArrowLeft", "ArrowRight"].includes(e.key)) return;
+      if (!th || !e.altKey || e.shiftKey || !["ArrowLeft", "ArrowRight"].includes(e.key)) return;
       e.preventDefault();
       const key = th.dataset.key;
       const shown = order.filter((k) => !prefs.hidden.has(k));
@@ -1152,6 +1200,112 @@
       if (j < 0 || j >= shown.length) return;
       moveColumn(key, shown[j], e.key === "ArrowRight");
       headRow.querySelector(`[data-key="${key}"]`).focus();
+    });
+
+    /* Column resize: drag the right edge of a header; double-click it to fit
+       the content; Alt + Shift + ←/→ on a focused header. Widths stay whole
+       pixels within each column's min–max and are saved on release. Only
+       the <col> and the table's min-width change: the rows never re-render,
+       so live alerts keep flowing in at the new width. The header row holds
+       the pointer capture, so a re-render mid-drag (a filter, a new header)
+       never drops the gesture. */
+
+    const setWidth = (key, w) => {
+      const next = clampWidth(key, w);
+      if (next === widthOf(key)) return false;
+      if (next === COL[key].w) delete widths[key];
+      else widths[key] = next;
+      const col = colgroup.children[columns().indexOf(key)];
+      if (col) col.style.width = `${next}px`;
+      table.style.minWidth = `${totalWidth()}px`;
+      syncStuck();
+      return true;
+    };
+
+    // Guide line down the whole table while dragging.
+    const guide = document.createElement("div");
+    guide.className = "col-guide";
+    guide.hidden = true;
+    wrap.append(guide);
+    const showGuide = (key) => {
+      const th = headRow.querySelector(`th[data-key="${key}"]`);
+      if (!th) return;
+      const box = wrap.getBoundingClientRect();
+      const x = th.getBoundingClientRect().right - box.left + wrap.scrollLeft;
+      guide.style.transform = `translate(${Math.round(x) - 1}px, ${wrap.scrollTop}px)`;
+      guide.style.height = `${wrap.clientHeight}px`;
+      guide.hidden = false;
+    };
+
+    let resize = null; // { id, key, x, from }
+    headRow.addEventListener("pointerdown", (e) => {
+      const handle = e.target.closest("[data-resize]");
+      if (!handle || e.button !== 0) return;
+      e.preventDefault();
+      const key = handle.closest("th").dataset.key;
+      resize = { id: e.pointerId, key, x: e.clientX, from: widthOf(key) };
+      try { headRow.setPointerCapture(e.pointerId); } catch { /* pointer already gone */ }
+      document.documentElement.classList.add("is-col-resizing");
+      table.dataset.resizing = key;
+      showGuide(key);
+    });
+    headRow.addEventListener("pointermove", (e) => {
+      if (!resize || e.pointerId !== resize.id) return;
+      setWidth(resize.key, resize.from + e.clientX - resize.x);
+      showGuide(resize.key);
+    });
+    const endResize = (e) => {
+      if (!resize || e.pointerId !== resize.id) return;
+      const { key, from } = resize;
+      resize = null;
+      document.documentElement.classList.remove("is-col-resizing");
+      delete table.dataset.resizing;
+      guide.hidden = true;
+      if (widthOf(key) !== from) saveWidths(panel, widths);
+    };
+    headRow.addEventListener("pointerup", endResize);
+    headRow.addEventListener("pointercancel", endResize);
+    headRow.addEventListener("lostpointercapture", endResize);
+
+    // Fit: the widest of the header and the rows on screen. A Range measures
+    // the laid-out content even when the cell clips it with an ellipsis.
+    const GRIP_W = 14; // the ⠿ shown on a movable header
+    const fitWidth = (key) => {
+      const i = columns().indexOf(key);
+      const th = headRow.children[i];
+      const range = document.createRange();
+      const extent = (cell, before) => {
+        range.selectNodeContents(cell);
+        if (before) range.setEndBefore(before);
+        return range.getBoundingClientRect().width;
+      };
+      const pad = (cell) => {
+        const s = getComputedStyle(cell);
+        return parseFloat(s.paddingLeft) + parseFloat(s.paddingRight);
+      };
+      let need = extent(th, th.querySelector("[data-resize]")) + pad(th) + (th.draggable ? GRIP_W : 0);
+      const first = body.rows[0]?.children[i];
+      const tdPad = first ? pad(first) : 0;
+      for (const tr of body.rows) {
+        const td = tr.children[i];
+        if (td) need = Math.max(need, extent(td) + tdPad);
+      }
+      return Math.ceil(need) + 2;
+    };
+    headRow.addEventListener("dblclick", (e) => {
+      const handle = e.target.closest("[data-resize]");
+      if (!handle) return;
+      const key = handle.closest("th").dataset.key;
+      if (setWidth(key, fitWidth(key))) saveWidths(panel, widths);
+    });
+
+    headRow.addEventListener("keydown", (e) => {
+      const th = e.target.closest("th[data-key]");
+      if (!th || !e.altKey || !e.shiftKey || !["ArrowLeft", "ArrowRight"].includes(e.key)) return;
+      e.preventDefault();
+      const key = th.dataset.key;
+      if (COL[key].fixed) return;
+      if (setWidth(key, widthOf(key) + (e.key === "ArrowLeft" ? -8 : 8))) saveWidths(panel, widths);
     });
 
     /* Live feed: the newest alert goes on top; a ticker already listed
@@ -1202,15 +1356,7 @@
 
     soundBtn?.addEventListener("click", () => soundSettings.open(panel, soundBtn));
 
-    // Edge shadow on Ticker while it is stuck. With display scaling scrollLeft
-    // can rest a fraction of a pixel off 0; that still counts as "not stuck".
-    // The class only changes when the state flips, so scrolling itself
-    // triggers no style work.
-    let stuck = false;
-    wrap.addEventListener("scroll", () => {
-      const now = wrap.scrollLeft >= Math.max(stickAt, 1);
-      if (now !== stuck) wrap.classList.toggle("is-stuck", (stuck = now));
-    }, { passive: true });
+    wrap.addEventListener("scroll", syncStuck, { passive: true });
 
     /* Live prices (toplists): a changed price flashes green when it ticks
        up, red when it ticks down — in the table cell and on the card. */
@@ -1269,12 +1415,14 @@
       rows: () => rows,
       excluded: isExcluded,
       shows: shownTest,
-      state: () => ({ order: [...order], hidden: new Set(prefs.hidden), colors: { ...prefs.colors }, excluded: new Set(prefs.excluded) }),
+      state: () => ({ order: [...order], hidden: new Set(prefs.hidden), colors: { ...prefs.colors }, excluded: new Set(prefs.excluded), widths: { ...widths } }),
       apply: (s) => {
         order = [...s.order];
         prefs = { hidden: new Set(s.hidden), colors: { ...s.colors }, excluded: new Set(s.excluded) };
+        widths = { ...s.widths };
         saveOrder(panel, order);
         savePrefs(panel, prefs);
+        saveWidths(panel, widths);
         applyColors();
         renderAll();
       },
@@ -1892,6 +2040,7 @@
     const colList = $("[data-ts-columns]");
     const shownEl = $("[data-ts-shown]");
     const showAllBtn = $("[data-ts-show-all]");
+    const resetWidthsBtn = $("[data-ts-reset-widths]");
     const resetBtn = $("[data-ts-reset]");
     const dirtyEl = $("[data-ts-dirty]");
     const saveBtn = $("[data-ts-save]");
@@ -1907,7 +2056,7 @@
 
     let key = null;          // panel being edited
     let table = null;
-    let draft = null;        // { order, hidden, colors, excluded }
+    let draft = null;        // { order, hidden, colors, excluded, widths }
     let draftGlobal = null;  // tickers excluded from every table
     let baseline = "";
     let trigger = null;
@@ -1922,6 +2071,7 @@
       Object.entries(draft.colors).sort(),
       [...draft.excluded].sort(),
       [...draftGlobal].sort(),
+      Object.entries(draft.widths).sort(),
     ]);
     const update = () => {
       const dirty = snapshot() !== baseline;
@@ -1968,6 +2118,7 @@
       const shown = draft.order.filter((k) => !draft.hidden.has(k)).length;
       shownEl.textContent = `${shown} of ${draft.order.length} shown`;
       showAllBtn.disabled = shown === draft.order.length;
+      resetWidthsBtn.disabled = !Object.keys(draft.widths).length;
       setCount(counts.columns, table.pins.length + shown);
       update();
     };
@@ -2022,10 +2173,18 @@
       renderColumns();
     });
 
+    // Widths are set in the table itself; here they can only go back to
+    // their defaults (a draft too, applied on Save).
+    resetWidthsBtn.addEventListener("click", () => {
+      draft.widths = {};
+      syncShown();
+    });
+
     resetBtn.addEventListener("click", () => {
       draft.order = [...table.defaults];
       draft.hidden.clear();
       draft.colors = {};
+      draft.widths = {};
       renderColumns();
     });
 

@@ -19,6 +19,7 @@ Paneles con detach: las 8 tablas (`.terminal[data-panel]`), incluida *Fast-Growi
 | Datos | Idénticos a la ventana principal: foto inicial + cada alerta y tick de precio en tiempo real. La copia no genera datos propios. |
 | Constelación (Momentum) | Recibe el historial de calor y los halts, así que arranca igual que la principal. |
 | Ajustes | Columnas, colores, exclusiones, filtros, tiers de float y sonidos se sincronizan entre todas las ventanas, se cambien donde se cambien. |
+| Anchos de columna | **No** se sincronizan: las copias de un panel tienen sus propios anchos (`scanner:widths:v1:copy:<panel>`), porque suelen estar en otro monitor con otro espacio. |
 | Sonido | Solo suena la ventana principal (sin duplicados). |
 | Detach | La copia **no** tiene botón detach: solo la principal crea copias (sin anidado). |
 | Vista | Siempre tabla de escritorio, aunque la ventana sea estrecha. Fullscreen disponible. |

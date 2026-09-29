@@ -175,6 +175,10 @@
   --chart-pane-gap: 6px;
   --chart-pane-active: color-mix(in srgb, var(--green) 45%, transparent);
 
+  /* ---- Table columns: resize edge on each header ---- */
+  --col-handle-w: 8px;               /* grab area at a header's right edge */
+  --col-handle-line: 2px;            /* the line drawn in it */
+
   /* ---- Account: avatar, plan badge, profile menu, confirm dialogs ---- */
   --grad-pro: linear-gradient(135deg, var(--green) 0%, var(--teal) 55%, var(--cyan) 100%);
   --grad-avatar: linear-gradient(140deg, var(--violet) 0%, var(--cyan) 100%);
@@ -610,6 +614,7 @@ html:has(.settings-modal[open]) { overflow: hidden; }
 .sm-section-head { display: flex; align-items: center; gap: var(--space-2); margin: 14px 2px 8px; }
 .sm-section-head h3 { margin: 0; font-family: var(--font-mono); font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-2); }
 .sm-meta { font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.sm-link + .sm-link { margin-left: 0; }
 .sm-link { margin-left: auto; padding: 2px 6px; border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--tone); font-size: 12px; font-weight: 700; }
 .sm-link:hover:not(:disabled) { background: color-mix(in srgb, var(--tone) 10%, transparent); }
 .sm-link:disabled { color: var(--text-3); opacity: 0.5; cursor: default; }
@@ -1398,6 +1403,37 @@ html:has(.settings-modal[open]) { overflow: hidden; }
 /* Hover paints every cell of the row, pinned ones included */
 .scan-table tbody tr:hover > td { background: var(--row-hover); }
 .scan-table .col-fill { padding: 0; }
+/* A column narrower than its content clips it with an ellipsis instead of
+   spilling into the next one. Not Signal (a bar) nor Ticker: its stuck
+   edge shadow is drawn outside the cell, and its minimum fits any symbol. */
+.scan-table th:not(.col-sig, .col-sym, .col-fill),
+.scan-table td:not(.col-sig, .col-sym, .col-fill) { overflow: hidden; text-overflow: ellipsis; }
+
+/* ---- Column resize ---- */
+
+/* Grab area on the header's right edge; its line shows on hover, in the
+   table's tone while dragging (plus a guide down the whole table). */
+.col-resize {
+  position: absolute; top: 0; right: 0; bottom: 0; z-index: 1; width: var(--col-handle-w);
+  cursor: col-resize; touch-action: none;
+}
+.col-resize::after {
+  content: ""; position: absolute; top: 8px; bottom: 8px; right: 0; width: var(--col-handle-line);
+  border-radius: var(--radius-pill); background: var(--line-strong); opacity: 0; transition: opacity var(--t-fast), background var(--t-fast);
+}
+.scan-table th:hover .col-resize::after { opacity: 1; }
+.col-resize:hover::after { background: var(--tone); opacity: 1; }
+.scan-table[data-resizing] th .col-resize::after { opacity: 0; }
+.col-guide {
+  position: absolute; top: 0; left: 0; z-index: 4; width: var(--col-handle-line); pointer-events: none;
+  background: var(--tone); box-shadow: 0 0 10px color-mix(in srgb, var(--tone) 60%, transparent);
+}
+.col-guide[hidden] { display: none; }
+/* While resizing: the col-resize cursor everywhere, no text selection, no
+   header hover (the drag-to-move grip stays hidden). */
+html.is-col-resizing, html.is-col-resizing * { cursor: col-resize !important; user-select: none; }
+.scan-table[data-resizing] th[draggable="true"] { background: var(--bg); color: var(--text-3); }
+.scan-table[data-resizing] th[draggable="true"]::before { opacity: 0; }
 .scan-table .num { text-align: right; }
 .scan-table .muted { color: var(--text-3); }
 
@@ -1493,13 +1529,14 @@ tr.is-new td, .alert-card.is-new { animation: rowIn 1.6s var(--ease); }
 @keyframes rowIn { 0% { background: color-mix(in srgb, var(--tone) 16%, var(--row-bg)); } 100% { background: var(--row-bg); } }
 
 /* Bull/Sell pressure: muted so it supports, not competes with, the heat chips */
-.pressure { display: flex; width: 100px; height: 6px; border-radius: var(--radius-pill); overflow: hidden; background: var(--surface-3); gap: 2px; }
+.pressure { display: flex; width: min(100px, 100%); height: 6px; border-radius: var(--radius-pill); overflow: hidden; background: var(--surface-3); gap: 2px; }
 .pressure i { display: block; height: 100%; transition: width var(--t-slow); }
 .pressure .buy { background: var(--press-buy); }
 .pressure .sell { background: var(--press-sell); }
 
-.spark { width: 88px; height: 24px; display: block; }
-.spark polyline { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+/* Shrinks with a narrow Trend column; the stroke keeps its weight */
+.spark { width: min(88px, 100%); height: 24px; display: block; }
+.spark polyline { vector-effect: non-scaling-stroke; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 
 /* ==========================================================================
    Phones: alert cards

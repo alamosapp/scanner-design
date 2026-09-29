@@ -464,6 +464,7 @@
       <details class="guide-item">
         <summary>Columns order</summary>
         <p>Drag a column header to move it. The first columns (Signal, Time, Ticker) can't be moved. When you scroll sideways, Signal stays put, Time scrolls away and Ticker sticks next to Signal. Each table remembers its own order.</p>
+        <p>Drag the right edge of a header to resize its column, or double-click the edge to fit the content. Each table remembers its own widths (a detached copy keeps its own); <b>Reset widths</b> in Table settings brings back the defaults.</p>
       </details>
 
       <details class="guide-item">
@@ -548,9 +549,11 @@
             <h3>Columns</h3>
             <span class="sm-meta" data-ts-shown aria-live="polite"></span>
             <button type="button" class="sm-link" data-ts-show-all>Show all</button>
+            <button type="button" class="sm-link" data-ts-reset-widths title="Every column back to its default width">Reset widths</button>
           </div>
           <ul class="col-list" data-ts-columns aria-label="Columns"></ul>
           <p class="sm-hint" id="ts-cols-hint">Drag the handle to reorder, or focus it and use <kbd>↑</kbd> <kbd>↓</kbd>.</p>
+          <p class="sm-hint">To resize a column, drag the right edge of its header in the table; double-click the edge to fit its content.</p>
         </section>
 
         <!-- Exclude tickers -->
@@ -598,7 +601,7 @@
       </div>
 
       <footer class="sm-foot">
-        <button type="button" class="btn btn-ghost btn-sm sm-reset" data-ts-reset title="Default order, every column shown, default colors">
+        <button type="button" class="btn btn-ghost btn-sm sm-reset" data-ts-reset title="Default order and widths, every column shown, default colors">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4.5V9h4.5"/></svg>
           <span>Reset</span>
         </button>
