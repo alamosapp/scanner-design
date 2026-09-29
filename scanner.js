@@ -4433,10 +4433,16 @@
      Outside fullscreen the stage holds one pane. In fullscreen the layout
      menu splits it into 1–3 panes (nested splits; the gaps between panes
      are drag handles). The toolbar tabs act on the active pane: picking a
-     view shown in another pane swaps the two. */
+     view shown in another pane swaps the two.
+     A detached copy gets the layouts without fullscreen too, once its
+     window is big enough (CHART_ROOMY); shrunk back, it shows one pane. */
 
   const CHART_LAYOUT_KEY = "scanner:chart-layout:v1";
   const PANE_MIN = { x: 200, y: 140 }; // smallest pane while resizing (px)
+  // Panel size (px) from which a detached copy offers layouts. It drops
+  // them only below the size minus SLACK, so a resize near the edge never
+  // flickers between the two.
+  const CHART_ROOMY = { w: 960, h: 600, slack: 40 };
 
   // Leaves are pane indexes. "row" puts its kids side by side (vertical
   // charts), "col" stacks them (horizontal charts).
@@ -4477,7 +4483,8 @@
 
   // `persist: false` (a detached copy): it starts from the saved views and
   // layout but never saves over them, so each window keeps its own.
-  const mountChartPanel = (root, { persist = true } = {}) => {
+  // `adaptive`: layouts once the panel is roomy, not only in fullscreen.
+  const mountChartPanel = (root, { persist = true, adaptive = false } = {}) => {
     const stage = root.querySelector(".chart-stage");
     const symbol = root.querySelector(".chart-symbol__input");
     const tablist = root.querySelector(".chart-tabs");
@@ -4514,10 +4521,12 @@
     };
 
     let full = false;
+    let roomy = false; // a detached copy in a big enough window
     let panes = [];
-    const layout = () => byId[full ? state.layout : "1"];
-    const shown = () => (full ? state.order.slice(0, paneCount(layout().tree)) : [state.order[state.active]]);
-    const activePane = () => (full ? state.active : 0);
+    const multi = () => full || roomy; // layouts apply
+    const layout = () => byId[multi() ? state.layout : "1"];
+    const shown = () => (multi() ? state.order.slice(0, paneCount(layout().tree)) : [state.order[state.active]]);
+    const activePane = () => (multi() ? state.active : 0);
 
     /* Panes ← views, active pane, tabs */
     const fill = () => {
@@ -4700,7 +4709,7 @@
 
     // A click or focus inside a pane makes it the active one
     const activate = (e) => {
-      if (!full) return;
+      if (!multi()) return;
       const pane = e.target.closest(".chart-pane");
       if (!pane) return;
       const i = Number(pane.dataset.pane);
@@ -4792,18 +4801,23 @@
 
     /* Fullscreen: the panel takes the whole screen (Fullscreen API; Esc
        leaves), or is maximized over the page where the API is missing or
-       refused. Layouts only apply here. */
+       refused. Layouts apply here (and in a roomy detached copy). */
+    const setMulti = (update) => {
+      const before = multi();
+      update();
+      if (multi() === before) return;
+      layoutBtn.hidden = !multi();
+      closeMenu();
+      build();
+    };
     const setFull = (on, fallback = false) => {
-      full = on;
       root.classList.toggle("is-full", on);
       root.classList.toggle("is-maximized", on && fallback);
       document.documentElement.classList.toggle("has-maximized", on && fallback);
       fsBtn.setAttribute("aria-pressed", String(on));
       fsBtn.title = on ? "Exit fullscreen" : "Fullscreen";
       fsBtn.setAttribute("aria-label", on ? "Exit fullscreen: Charts" : "Fullscreen: Charts");
-      layoutBtn.hidden = !on;
-      closeMenu();
-      build();
+      setMulti(() => { full = on; });
     };
     fsBtn.addEventListener("click", () => {
       if (document.fullscreenElement === root) document.exitFullscreen();
@@ -4823,6 +4837,17 @@
     const detachBtn = root.querySelector(".detach-icon");
     if (canDetach) detachBtn.addEventListener("click", () => openCopy(root));
     else detachBtn.remove();
+
+    // A detached copy: growing its window past CHART_ROOMY brings the
+    // layouts in, no fullscreen needed.
+    if (adaptive) {
+      new ResizeObserver(() => {
+        const { width, height } = root.getBoundingClientRect();
+        const slack = roomy ? CHART_ROOMY.slack : 0;
+        const fits = width >= CHART_ROOMY.w - slack && height >= CHART_ROOMY.h - slack;
+        setMulti(() => { roomy = fits; });
+      }).observe(root);
+    }
 
     build();
     return {
@@ -4858,19 +4883,39 @@
   const DETACHED = detachParam && detachable(detachParam) ? detachParam : null;
   const canDetach = Boolean(hub) && !DETACHED;
 
-  // Same size as the panel, cascading down-right from it so that copies
-  // never land exactly on top of each other.
-  let copies = 0;
+  // Where a panel's copy was last left (size and screen position), saved by
+  // the copy itself. Without one: the panel's size, next to the panel.
+  const geomKey = (id) => `scanner:detach-geom:v1:${id}`;
+  const loadGeom = (id) => {
+    try {
+      const g = JSON.parse(localStorage.getItem(geomKey(id)) || "null");
+      if (g && ["w", "h", "x", "y"].every((k) => Number.isFinite(g[k]))) return g;
+    } catch { /* ignore */ }
+    return null;
+  };
+  // Copies of the same panel opened in this session cascade down-right, so
+  // they never land exactly on top of each other.
+  const opened = new Map(); // panel → copies opened
   const openCopy = (root) => {
+    const id = root.dataset.panel;
+    const n = opened.get(id) || 0;
+    opened.set(id, n + 1);
     const box = root.getBoundingClientRect();
-    const step = 28 * (1 + (copies++ % 8));
     const chrome = Math.max(0, window.outerHeight - window.innerHeight); // tabs + address bar
+    const saved = loadGeom(id);
+    const step = 28 * ((saved ? 0 : 1) + (n % 8));
+    const g = saved ?? {
+      w: Math.max(480, box.width),
+      h: Math.max(360, box.height),
+      x: window.screenX + box.left,
+      y: window.screenY + chrome + box.top,
+    };
     const features = [
       "popup",
-      `width=${Math.round(Math.max(480, box.width))}`,
-      `height=${Math.round(Math.max(360, box.height))}`,
-      `left=${Math.round(window.screenX + box.left + step)}`,
-      `top=${Math.round(window.screenY + chrome + box.top + step)}`,
+      `width=${Math.round(g.w)}`,
+      `height=${Math.round(g.h)}`,
+      `left=${Math.round(g.x + step)}`,
+      `top=${Math.round(g.y + step)}`,
     ].join(",");
     const url = new URL(location.href);
     url.search = `?detach=${encodeURIComponent(root.dataset.panel)}`;
@@ -4930,6 +4975,19 @@
       } else link.relay?.(m);
     });
 
+    // Remember this window's size and place for the panel's next copy.
+    // Browsers fire no event when a window moves: check once a second.
+    let geom = "";
+    const keepGeom = () => {
+      const g = JSON.stringify({ w: window.innerWidth, h: window.innerHeight, x: window.screenX, y: window.screenY });
+      if (g === geom) return;
+      geom = g;
+      try { localStorage.setItem(geomKey(id), g); } catch { /* ignore */ }
+    };
+    setInterval(keepGeom, 1000);
+    window.addEventListener("resize", keepGeom);
+    window.addEventListener("pagehide", keepGeom);
+
     setStatus("Connecting to the scanner…");
     timer = setTimeout(() => setStatus("Open the scanner to feed this copy"), LINK_TIMEOUT);
     hello();
@@ -4957,7 +5015,7 @@
   const tableSettings = mountTableSettings();
   const filterDialog = mountFilters();
   const chartRoot = document.querySelector(".chart-panel");
-  const chart = chartRoot && mountChartPanel(chartRoot, { persist: !DETACHED });
+  const chart = chartRoot && mountChartPanel(chartRoot, { persist: !DETACHED, adaptive: Boolean(DETACHED) });
   const heatRoot = document.querySelector("[data-constellation]");
   const constellation = heatRoot && mountConstellation(heatRoot);
 
