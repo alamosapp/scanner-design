@@ -76,7 +76,11 @@
         <section class="pane-row pane-row--bottom" data-row="bottom" aria-label="Charts, momentum and halts">
           <!-- One panel: bar · chart · table (the chart is moved under the bar) -->
           <div class="terminal" data-panel="momentum" data-title="Fast-Growing Momentum" data-tone="bull">
-            <div class="chart-slot" role="img" aria-label="Chart (coming soon)"><span>Chart</span></div>
+            <!-- Momentum constellation: closer to the center = more momentum -->
+            <div class="constellation" data-constellation>
+              <canvas class="constellation__canvas" role="img" aria-label="Momentum constellation"></canvas>
+              <div class="constellation__tip" hidden></div>
+            </div>
           </div>
           <div class="splitter splitter--col" data-split="col" role="separator" aria-orientation="vertical" aria-label="Resize Momentum and chart" aria-valuemin="0" aria-valuemax="100" tabindex="0"></div>
           <div class="chart-slot" role="img" aria-label="Chart (coming soon)"><span>Chart</span></div>
@@ -146,6 +150,17 @@
           <li><b>Fast-Growing Momentum</b>: fast gains over 1, 5, 15 and 30 minutes.</li>
         </ul>
         <p>New alerts appear at the top. The speaker icon in a table's bar sets its alert sound.</p>
+      </details>
+
+      <details class="guide-item">
+        <summary>Momentum constellation</summary>
+        <p>The chart above the Fast-Growing Momentum table answers "who has momentum right now?". Each ticker in the table is a label: the <b>bigger, brighter, warmer and closer to the center</b>, the more momentum.</p>
+        <ul>
+          <li>Every alert adds heat, which fades with a 4-minute half-life. A ticker leaves 15 minutes after its last alert.</li>
+          <li><b>▲</b>: an alert in the last minute. A halted ticker shows a pause icon and <b>HALT</b> with its duration; its heat stays frozen until it resumes.</li>
+          <li>It follows the table: excluded tickers and active filters apply here too.</li>
+          <li>Hover a ticker for its details; click it to select it.</li>
+        </ul>
       </details>
 
       <details class="guide-item">

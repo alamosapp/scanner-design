@@ -136,6 +136,16 @@
   --field-h: 38px;
   --amber-a08: color-mix(in srgb, var(--amber) 8%, transparent);
   --amber-a32: color-mix(in srgb, var(--amber) 32%, transparent);
+
+  /* ---- Momentum constellation (canvas): heat ramp cool → warm → hot,
+     plus Halt / Resume. Hex or var() to hex only: the canvas mixes them. ---- */
+  --heat-cool: #6a86ad;        /* cooling off: muted steel blue */
+  --heat-warm: var(--amber);
+  --heat-hot: #ff6a3d;         /* leader: ember, never the bearish red */
+  --heat-halt: var(--cyan);    /* frozen clock */
+  --heat-resume: var(--green);
+  --heat-ring: var(--surface-3);
+  --heat-glow: color-mix(in srgb, var(--amber) 5%, transparent);
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -796,6 +806,36 @@ html:has(.settings-modal[open]) { overflow: hidden; }
 .terminal > .chart-slot { flex: 1 1 0px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; }
 .terminal > .chart-slot ~ .table-wrap { flex: 1 1 0px; }
 
+/* ---- Momentum constellation: the chart inside the Momentum panel ---- */
+.constellation {
+  position: relative; min-width: 0; min-height: 0; overflow: hidden;
+  background: radial-gradient(60% 70% at 50% 55%, var(--heat-glow), transparent 70%), var(--bg);
+}
+.terminal > .constellation { flex: 1 1 0px; border-bottom: 1px solid var(--line); }
+.terminal > .constellation ~ .table-wrap { flex: 1 1 0px; }
+.constellation__canvas { position: absolute; inset: 0; display: block; touch-action: manipulation; }
+.constellation__tip {
+  position: absolute; z-index: 2; min-width: 168px; padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line-strong); border-radius: var(--radius-sm);
+  background: var(--glass); backdrop-filter: blur(8px); box-shadow: var(--shadow-pop);
+  color: var(--text-3); font-size: 11px; pointer-events: none;
+}
+.constellation__tip[hidden] { display: none; }
+.constellation__tip-title { display: flex; align-items: baseline; gap: var(--space-2); }
+.constellation__tip-title strong { color: var(--text); font-family: var(--font-mono); font-size: 13px; letter-spacing: 0.02em; }
+.constellation__tip-status { display: inline-flex; align-items: center; gap: 6px; margin: 2px 0 6px; color: var(--heat); font-weight: 700; }
+.constellation__tip-status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 8px currentColor; }
+.constellation__tip-status[data-tone="hot"] { --heat: var(--heat-hot); }
+.constellation__tip-status[data-tone="warm"] { --heat: var(--heat-warm); }
+.constellation__tip-status[data-tone="cool"] { --heat: var(--heat-cool); }
+.constellation__tip-status[data-tone="halt"] { --heat: var(--heat-halt); }
+.constellation__tip-status[data-tone="resume"] { --heat: var(--heat-resume); }
+.constellation__tip dl { display: grid; grid-template-columns: auto auto; column-gap: var(--space-4); row-gap: 2px; margin: 0; }
+.constellation__tip dd { margin: 0; color: var(--text); font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 500; text-align: right; }
+.constellation__tip dd.up { color: var(--green); }
+.constellation__tip dd.down { color: var(--red); }
+.constellation__tip-hint { display: block; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); font-size: 10px; }
+
 /* ---- Splitters: the gap between panes is the drag handle ---- */
 
 .splitter { position: relative; touch-action: none; outline: none; }
@@ -1026,7 +1066,7 @@ tr.is-new td, .alert-card.is-new { animation: rowIn 1.6s var(--ease); }
   .terminal.is-full .card-view { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
   .terminal.is-full .card-list { flex: 1 1 auto; min-height: 0; max-height: none; }
   .splitter { display: none; }
-  .chart-slot, .terminal > .chart-slot { flex: none; height: 220px; }
+  .chart-slot, .terminal > .chart-slot, .terminal > .constellation { flex: none; height: 220px; }
 
   .table-wrap { display: none; }
 

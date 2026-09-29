@@ -967,7 +967,7 @@
     });
   };
 
-  const mountTable = (root, seed, { cols, pins = PINNED, next, every = LIVE_INTERVAL, expires = false, quotes = false }) => {
+  const mountTable = (root, seed, { cols, pins = PINNED, next, every = LIVE_INTERVAL, expires = false, quotes = false, onAlert, onRender }) => {
     const tone = root.dataset.tone;
     const panel = root.dataset.panel;
     const table = root.querySelector(".scan-table");
@@ -1056,6 +1056,7 @@
       cards.replaceChildren(...derived.map(([d, sym]) => cardEl(d, sym)));
       tickTimers();
       feed?.sync();
+      onRender?.();
     };
 
     /* Column drag & drop */
@@ -1132,6 +1133,7 @@
       if (i >= 0) rows.splice(i, 1);
       rows.unshift(alert);
       rows.length = Math.min(rows.length, MAX_ROWS);
+      onAlert?.(alert); // every alert, shown or not (the chart applies its own test)
       // Excluded or filtered-out tickers are tracked but never shown (nor
       // sounded); an earlier row of the ticker leaves, as it no longer passes.
       body.querySelector(`[data-sym="${alert.sym}"]`)?.remove();
@@ -1232,6 +1234,7 @@
       defaults: cols,
       rows: () => rows,
       excluded: isExcluded,
+      shows: shownTest,
       state: () => ({ order: [...order], hidden: new Set(prefs.hidden), colors: { ...prefs.colors }, excluded: new Set(prefs.excluded) }),
       apply: (s) => {
         order = [...s.order];
@@ -3698,6 +3701,650 @@
     return { open };
   };
 
+  /* ---- Momentum constellation ---------------------------------------------
+     The Momentum table's tickers (the rows it shows: no exclusions, every
+     filter passed) as a constellation: the bigger, brighter, warmer and
+     closer to the center, the more momentum right now.
+     - Heat: every alert adds its intensity (each %Chg in multiples of the
+       scanner's minimum, log2-compressed and weighted, times a Vol. 1m
+       factor), which decays with a 4-minute half-life. A ticker leaves
+       15 minutes after its last alert, fading over the last 40 %.
+     - A Halt freezes that clock (no decay, no expiry) until the Resume.
+     - Each ticker keeps the angle it arrived with (golden angle); only its
+       distance to the center changes.
+     - Motion: labels never teleport. Every frame solves a layout with no
+       overlaps, starting from the previous one so it stays coherent, and
+       each label glides toward its spot on a critically damped spring with
+       capped speed and acceleration. However tight the space gets, nothing
+       jumps or bursts; size and distance follow the heat just as smoothly. */
+
+  const HEAT_WINDOW = 15 * 60e3;
+  const HEAT_HALF_LIFE = 4 * 60e3;
+  const HEAT_FRESH = 60e3;          // Rising: an alert in the last minute
+  const HEAT_FADING = 5 * 60e3;     // Fading: none in the last 5 minutes
+  const HEAT_RESUMED = 2 * 60e3;    // "RESUMED mm:ss" shows this long
+  const HEAT_MAX = 14;              // the rest is summed up as "+N more"
+  const HEAT_FLOOR = 1.5;           // scale minimum: a lone weak ticker is no leader
+  // Column · scanner minimum · weight
+  const HEAT_HORIZONS = [["chg1", 2.5, 0.35], ["chg5", 3, 0.3], ["chg15", 5, 0.2], ["chg30", 8, 0.15]];
+  const HEAT_COLUMN = { chg1: "%Chg 1m", chg5: "%Chg 5m", chg15: "%Chg 15m", chg30: "%Chg 30m" };
+  const HEAT_STATUS = { halted: "Halted", resumed: "Resumed", rising: "Rising", holding: "Momentum holding", fading: "Fading" };
+  const HEAT_TONE = { halted: "halt", resumed: "resume", rising: "hot", holding: "warm", fading: "cool" };
+  const LEGEND_H = 22;
+  // Motion
+  const SPRING = 6.5;       // rad/s: settles in about 0.7 s
+  const MAX_SPEED = 170;    // px/s
+  const MAX_ACCEL = 800;    // px/s²
+  const GROW_TAU = 0.45;    // s: size and distance ease toward the heat
+  const PULL_TAU = 0.3;     // s: the layout drifts back toward each anchor
+  const SCALE_TAU = 0.6;    // s: the scale follows the leader
+  // s: labels shrink fast when the room tightens and grow back slowly, so
+  // they never outgrow the spots they are still gliding toward.
+  const FIT_SHRINK_TAU = 0.25;
+  const FIT_GROW_TAU = 0.9;
+  const FIT_FILL = 0.42;    // share of the room the labels may cover
+  const FIT_MIN = 0.4;      // never below 40 % of their natural size
+  const FADE_MS = 450;      // in and out of the chart
+  const PULSE_MS = 900;     // a new alert
+  const SWAY = 2.5;         // px, drawn only: the layout never sees it
+  const GAP = 6;            // px between labels: covers two opposite sways
+  const REPEL = 45;         // px/s² per px of overlap between drawn labels
+
+  // One alert's intensity: 1 = right at the scanner's minimum.
+  const alertHeat = (r) => {
+    let total = 0;
+    let weights = 0;
+    for (const [key, min, weight] of HEAT_HORIZONS) {
+      if (!Number.isFinite(r[key])) continue;
+      total += weight * Math.log2(1 + Math.max(0, r[key]) / min);
+      weights += weight;
+    }
+    if (!weights) return 0;
+    const volume = r.vol1m > 0 ? Math.min(1.5, Math.max(0.8, 1 + 0.2 * Math.log2(r.vol1m))) : 1;
+    return (total / weights) * volume;
+  };
+
+  // Time a ticker spent halted between two instants.
+  const haltedFor = (list, from, to) => list.reduce((sum, h) => sum + Math.max(0, Math.min(h.end, to) - Math.max(h.start, from)), 0);
+
+  const fmtAgo = (ms) => {
+    const sec = Math.max(0, Math.round(ms / 1000));
+    return sec < 60 ? `${sec}s ago` : `${Math.floor(sec / 60)}m ${pad(sec % 60)}s ago`;
+  };
+
+  const mountConstellation = (root) => {
+    const canvas = root.querySelector("canvas");
+    const tip = root.querySelector(".constellation__tip");
+    const ctx = canvas.getContext("2d");
+
+    // Tokens → canvas colors (the canvas normalizes any CSS color to hex).
+    const css = getComputedStyle(document.documentElement);
+    const token = (name, fallback) => {
+      ctx.fillStyle = fallback;
+      ctx.fillStyle = css.getPropertyValue(name).trim() || fallback;
+      return ctx.fillStyle;
+    };
+    const C = {
+      cool: token("--heat-cool", "#6a86ad"),
+      warm: token("--heat-warm", "#ffb84d"),
+      hot: token("--heat-hot", "#ff6a3d"),
+      halt: token("--heat-halt", "#4cc9ff"),
+      resume: token("--heat-resume", "#c8ff38"),
+      ring: token("--heat-ring", "#1f242c"),
+      text: token("--text", "#f2f4f7"),
+      muted: token("--text-3", "#7b8492"),
+    };
+    const SANS = css.getPropertyValue("--font-sans").trim() || "sans-serif";
+    const MONO = css.getPropertyValue("--font-mono").trim() || "monospace";
+    const rgb = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+    const alpha = (hex, a) => `rgba(${rgb(hex).join(",")},${a})`;
+    const mix = (from, to, t) => {
+      const [a, b] = [rgb(from), rgb(to)];
+      return `#${a.map((v, i) => Math.round(v + (b[i] - v) * t).toString(16).padStart(2, "0")).join("")}`;
+    };
+    const heatColor = (s) => (s < 0.5 ? mix(C.cool, C.warm, s / 0.5) : mix(C.warm, C.hot, (s - 0.5) / 0.5));
+    const smooth = (v) => { const c = Math.min(1, Math.max(0, v)); return c * c * (3 - 2 * c); };
+
+    // Alerts per ticker, newest first; halts per ticker, oldest first.
+    const log = new Map();
+    const halts = new Map();
+    let visible = new Map(); // `log` narrowed to what the Momentum table shows
+    let dirty = true;
+    let emptyText = "Waiting for momentum alerts...";
+
+    // Animated state per ticker: angle, size, layout spot, drawn position.
+    const bubbles = new Map();
+    const axes = new Map(); // push axis per overlapping pair (with hysteresis)
+    let sequence = 0;
+    let scaleHeat = HEAT_FLOOR;
+    let fit = 1;
+    let W = 0;
+    let H = 0;
+    let raf = 0;
+    let timer = 0;
+    let last = 0;
+    let pointer = null;
+    let hover = "";
+    let selected = "";
+    let tipKey = "";
+    let ariaText = "";
+
+    const record = (r, t = r.time.getTime()) => {
+      const list = log.get(r.sym) ?? [];
+      list.push({ t, row: r, heat: alertHeat(r) });
+      list.sort((a, b) => b.t - a.t);
+      // Nothing older than the window can count again.
+      while (list.length && Date.now() - list[list.length - 1].t > HEAT_WINDOW * 2) list.pop();
+      log.set(r.sym, list);
+      invalidate();
+    };
+
+    const rebuild = () => {
+      const shows = tables.get("momentum")?.shows() ?? (() => true);
+      const excluded = tables.get("momentum")?.excluded ?? (() => false);
+      visible = new Map();
+      let included = 0;
+      log.forEach((list, sym) => {
+        if (excluded(sym)) return;
+        included += 1;
+        const kept = list.filter((a) => shows(a.row));
+        if (kept.length) visible.set(sym, kept);
+      });
+      emptyText = included ? "No rows match active filters" : "Waiting for momentum alerts...";
+      dirty = false;
+    };
+
+    // Heat now. Each alert's age leaves out the time spent halted.
+    const stateOf = (sym, alerts, now) => {
+      const list = halts.get(sym) ?? [];
+      const lastHalt = list[list.length - 1];
+      const halted = !!lastHalt && lastHalt.start <= now && now < lastHalt.end;
+      let heat = 0;
+      let count = 0;
+      let lastAge = Infinity;
+      for (const a of alerts) {
+        const age = Math.max(0, now - a.t - haltedFor(list, a.t, now));
+        if (age > HEAT_WINDOW) break;
+        if (!count) lastAge = age;
+        heat += a.heat * 0.5 ** (age / HEAT_HALF_LIFE);
+        count += 1;
+      }
+      if (!count) return null;
+      const resumedAt = !halted && lastHalt && now >= lastHalt.end && now - lastHalt.end < HEAT_RESUMED ? lastHalt.end : null;
+      const status = halted ? "halted" : resumedAt != null ? "resumed"
+        : lastAge < HEAT_FRESH ? "rising" : lastAge > HEAT_FADING ? "fading" : "holding";
+      return { sym, heat, count, lastAge, latest: alerts[0], first: alerts[count - 1], halted, haltStart: halted ? lastHalt.start : null, resumedAt, status };
+    };
+
+    const geometry = () => ({
+      cx: W / 2,
+      cy: (LEGEND_H + H) / 2,
+      rx: Math.max(10, W / 2 - 16),
+      ry: Math.max(10, (H - LEGEND_H) / 2 - 12),
+      minFont: 11,
+      maxFont: Math.max(18, Math.min(44, H * 0.2, W * 0.12)),
+    });
+
+    const sublabelOf = (st, now) => (st.halted ? `HALT ${fmtClock(now - st.haltStart)}`
+      : st.resumedAt != null ? `RESUMED ${fmtClock(now - st.resumedAt)}` : "");
+
+    // Text width scales with the font size: measure each ticker once, at
+    // 100px (measureText is the costly part of a frame).
+    const widths = new Map();
+    const textWidth = (sym, size) => {
+      if (!widths.has(sym)) {
+        ctx.font = `800 100px ${SANS}`;
+        widths.set(sym, ctx.measureText(sym).width / 100);
+      }
+      return widths.get(sym) * size;
+    };
+
+    // Box of a label at its current (eased) size.
+    const naturalFont = (b, g) => g.minFont + (g.maxFont - g.minFont) * b.s;
+    // The size eases too, whatever changes it (heat, room, panel size):
+    // shrinking is quick, growing slow, so a label never outgrows the spot
+    // it is still gliding toward.
+    const measure = (b, g, now, ease) => {
+      const st = b.state;
+      const font = Math.max(8, naturalFont(b, g) * fit);
+      b.font = b.font ? b.font + (font - b.font) * ease(font < b.font ? FIT_SHRINK_TAU : FIT_GROW_TAU) : font;
+      b.textW = textWidth(st.sym, b.font);
+      b.iconW = st.halted ? b.font * 0.58 : st.status === "rising" ? b.font * 0.42 : 0;
+      b.sub = sublabelOf(st, now);
+      b.hw = (b.textW + b.iconW) / 2 + 3 + b.font * 0.1;
+      b.hh = b.font * 0.5 + (b.sub ? 6 : 0) + 1;
+    };
+
+    // Separates overlapping boxes along the axis they overlap least on. The
+    // axis only switches when the other one is clearly shorter, or when a
+    // wall blocks it (at most every 0.6 s), so a pair never flip-flops; the
+    // bigger label gives way less.
+    const solve = (items, clock) => {
+      const top = LEGEND_H;
+      for (let pass = 0; pass < 24; pass++) {
+        let moved = false;
+        for (let i = 0; i < items.length; i++) {
+          for (let j = i + 1; j < items.length; j++) {
+            const a = items[i];
+            const b = items[j];
+            const key = a.sym < b.sym ? `${a.sym}|${b.sym}` : `${b.sym}|${a.sym}`;
+            const dx = b.lx - a.lx;
+            const dy = b.ly - a.ly;
+            const ox = a.hw + b.hw + GAP - Math.abs(dx);
+            const oy = a.hh + b.hh + GAP - Math.abs(dy);
+            if (ox <= 0 || oy <= 0) { if (pass === 0) axes.delete(key); continue; }
+            moved = true;
+            const fx = ox / (a.hw + b.hw);
+            const fy = oy / (a.hh + b.hh);
+            const held = axes.get(key) ?? { axis: fx < fy ? "x" : "y", at: clock, lock: 0 };
+            if (clock < held.lock) { /* a wall made it switch: keep it */ }
+            else if (held.axis === "x" && fy < fx * 0.7) Object.assign(held, { axis: "y", at: clock });
+            else if (held.axis === "y" && fx < fy * 0.7) Object.assign(held, { axis: "x", at: clock });
+            axes.set(key, held);
+            const { axis } = held;
+            const wa = (b.hw * b.hh) / (a.hw * a.hh + b.hw * b.hh);
+            // Side: where they are, or where they are headed when stacked.
+            const d = axis === "x" ? dx : dy;
+            const side = Math.sign(Math.abs(d) > 0.5 ? d : (axis === "x" ? b.ax - a.ax : b.ay - a.ay) || (a.angle > b.angle ? 1 : -1));
+            const push = side * (axis === "x" ? ox : oy);
+            if (axis === "x") { a.lx -= push * wa; b.lx += push * (1 - wa); }
+            else { a.ly -= push * wa; b.ly += push * (1 - wa); }
+          }
+        }
+        for (const b of items) {
+          b.lx = Math.min(W - b.hw - 2, Math.max(b.hw + 2, b.lx));
+          b.ly = Math.min(H - b.hh - 2, Math.max(top + b.hh, b.ly));
+        }
+        if (!moved) break;
+      }
+      // Still touching after every pass: a wall is in the way on that axis.
+      for (let i = 0; i < items.length; i++) {
+        for (let j = i + 1; j < items.length; j++) {
+          const a = items[i];
+          const b = items[j];
+          if (a.hw + b.hw - Math.abs(b.lx - a.lx) <= 0.5 || a.hh + b.hh - Math.abs(b.ly - a.ly) <= 0.5) continue;
+          const held = axes.get(a.sym < b.sym ? `${a.sym}|${b.sym}` : `${b.sym}|${a.sym}`);
+          if (held && clock - held.at > 600) Object.assign(held, { axis: held.axis === "x" ? "y" : "x", at: clock, lock: clock + 600 });
+        }
+      }
+    };
+
+    // Critically damped spring toward the layout spot. Acceleration and speed
+    // are capped as vectors, so the path stays straight and never spikes.
+    const glide = (b, dt, snap) => {
+      if (snap || !Number.isFinite(b.x)) {
+        b.x = b.lx; b.y = b.ly; b.vx = 0; b.vy = 0;
+        return;
+      }
+      let ax = SPRING * SPRING * (b.lx - b.x) - 2 * SPRING * b.vx + b.px;
+      let ay = SPRING * SPRING * (b.ly - b.y) - 2 * SPRING * b.vy + b.py;
+      const a = Math.hypot(ax, ay);
+      if (a > MAX_ACCEL) { ax *= MAX_ACCEL / a; ay *= MAX_ACCEL / a; }
+      b.vx += ax * dt;
+      b.vy += ay * dt;
+      const v = Math.hypot(b.vx, b.vy);
+      if (v > MAX_SPEED) { b.vx *= MAX_SPEED / v; b.vy *= MAX_SPEED / v; }
+      b.x += b.vx * dt;
+      b.y += b.vy * dt;
+    };
+
+    // On the way to their spots, labels that touch nudge each other aside
+    // (a force, inside the same acceleration cap) instead of crossing.
+    const repel = (items) => {
+      for (let i = 0; i < items.length; i++) {
+        for (let j = i + 1; j < items.length; j++) {
+          const a = items[i];
+          const b = items[j];
+          const dx = b.x - a.x;
+          const dy = b.y - a.y;
+          const ox = a.hw + b.hw + GAP / 2 - Math.abs(dx);
+          const oy = a.hh + b.hh + GAP / 2 - Math.abs(dy);
+          if (ox <= 0 || oy <= 0) continue;
+          const wa = (b.hw * b.hh) / (a.hw * a.hh + b.hw * b.hh);
+          if (ox / (a.hw + b.hw) < oy / (a.hh + b.hh)) {
+            const push = Math.sign(dx || b.lx - a.lx || 1) * ox * REPEL;
+            a.px -= push * wa;
+            b.px += push * (1 - wa);
+          } else {
+            const push = Math.sign(dy || b.ly - a.ly || 1) * oy * REPEL;
+            a.py -= push * wa;
+            b.py += push * (1 - wa);
+          }
+        }
+      }
+    };
+
+    const drawBackdrop = (g) => {
+      ctx.save();
+      ctx.strokeStyle = C.ring;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([2, 5]);
+      [1, 2 / 3, 1 / 3].forEach((f) => {
+        ctx.beginPath();
+        ctx.ellipse(g.cx, g.cy, g.rx * f, g.ry * f, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      });
+      ctx.restore();
+    };
+
+    const drawPause = (x, size, color) => {
+      const w = Math.max(2, size * 0.14);
+      const h = size * 0.62;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.roundRect(x, -h / 2, w, h, w / 2);
+      ctx.roundRect(x + w * 1.9, -h / 2, w, h, w / 2);
+      ctx.fill();
+      return w * 2.9 + size * 0.18;
+    };
+
+    const drawBubble = (b, now, still) => {
+      const st = b.state;
+      const sway = still ? 0 : SWAY;
+      const wave = (now / b.period) * Math.PI * 2 + b.phase;
+      const x = b.x + Math.sin(wave) * sway;
+      const y = b.y + Math.cos(wave * 1.3) * sway;
+      // Fades out over the last 40 % of the window unless new alerts arrive.
+      const life = st.halted ? 1 : smooth((HEAT_WINDOW - st.lastAge) / (HEAT_WINDOW * 0.4));
+      const a = smooth(b.vis) * Math.max(0.3, (0.45 + 0.55 * b.s) * life);
+      const pulse = still ? 0 : Math.max(0, 1 - (now - b.pulseAt) / PULSE_MS);
+      const color = st.halted ? C.halt : heatColor(b.s);
+      const isHover = st.sym === hover;
+      const isSelected = st.sym === selected;
+      const labelY = y - (b.sub ? 5.5 : 0);
+
+      ctx.save();
+      ctx.globalAlpha = isHover ? Math.max(a, 0.92) : a;
+      if (isHover || isSelected) {
+        ctx.fillStyle = alpha(isSelected ? color : C.text, isSelected ? 0.1 : 0.06);
+        ctx.strokeStyle = alpha(isSelected ? color : C.text, isSelected ? 0.55 : 0.22);
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(x - b.hw - 3, y - b.hh - 2, b.hw * 2 + 6, b.hh * 2 + 4, 8);
+        ctx.fill();
+        ctx.stroke();
+      }
+      ctx.translate(x, labelY);
+      const grow = 1 + 0.2 * pulse;
+      ctx.scale(grow, grow);
+      ctx.shadowColor = alpha(color, 0.55);
+      ctx.shadowBlur = st.halted ? 8 : 4 + 12 * b.s + 16 * pulse;
+      ctx.font = `800 ${b.font.toFixed(1)}px ${SANS}`;
+      ctx.textBaseline = "middle";
+      ctx.textAlign = "left";
+      let cursor = -(b.textW + b.iconW) / 2;
+      if (st.halted) cursor += drawPause(cursor, b.font, color);
+      ctx.fillStyle = color;
+      ctx.fillText(st.sym, cursor, b.font * 0.04);
+      if (st.status === "rising") {
+        // "Rising now": an alert in the last minute.
+        const size = b.font * 0.26;
+        const left = cursor + b.textW + b.font * 0.12;
+        const top = -b.font * 0.34;
+        ctx.beginPath();
+        ctx.moveTo(left, top + size);
+        ctx.lineTo(left + size, top + size);
+        ctx.lineTo(left + size / 2, top);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.restore();
+
+      if (b.sub) {
+        ctx.save();
+        ctx.globalAlpha = smooth(b.vis);
+        ctx.font = `700 9px ${MONO}`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = st.halted ? C.halt : C.resume;
+        ctx.fillText(b.sub, x, y + b.hh - 6);
+        ctx.restore();
+      }
+    };
+
+    const updateTip = (b, total, now) => {
+      if (!b) {
+        tipKey = "";
+        tip.hidden = true;
+        return;
+      }
+      const st = b.state;
+      // Its text only changes from second to second (ages and clocks).
+      const key = `${st.sym}|${st.latest.t}|${st.status}|${st.rank}|${total}|${Math.floor(now / 1000)}`;
+      if (key !== tipKey) {
+        tipKey = key;
+        const { latest, first } = st;
+        const r = latest.row;
+        const move = st.count > 1 && first.row.price > 0 ? (r.price / first.row.price - 1) * 100 : NaN;
+        let status = HEAT_STATUS[st.status];
+        if (st.halted) status += ` · ${fmtClock(now - st.haltStart)}`;
+        if (st.resumedAt != null) status += ` · ${fmtAgo(now - st.resumedAt)}`;
+        const line = (label, value, cls = "") => `<dt>${label}</dt><dd class="${cls}">${escHTML(value)}</dd>`;
+        const sign = (v) => (v > 0 ? "up" : v < 0 ? "down" : "");
+        tip.innerHTML = `
+          <span class="constellation__tip-title"><strong>${escHTML(st.sym)}</strong>#${st.rank} of ${total}</span>
+          <span class="constellation__tip-status" data-tone="${HEAT_TONE[st.status]}">${escHTML(status)}</span>
+          <dl>
+            ${line("Last alert", fmtTime(new Date(latest.t)))}
+            ${line("Age", fmtAgo(now - latest.t))}
+            ${line("Alerts (15m)", String(st.count))}
+            ${line("Price", fmtPrice(r.price))}
+            ${Number.isFinite(move) ? line("Since 1st alert", fmtPct(move, 1), sign(move)) : ""}
+            ${HEAT_HORIZONS.filter(([k]) => Number.isFinite(r[k])).map(([k]) => line(HEAT_COLUMN[k], fmtPct(r[k], 2), sign(r[k]))).join("")}
+            ${r.vol1m > 0 ? line("Vol. 1m", fmtMult(r.vol1m)) : ""}
+          </dl>
+          <span class="constellation__tip-hint">${st.sym === selected ? "Click to deselect" : "Click to select"}</span>`;
+        tip.hidden = false;
+      }
+      const { offsetWidth: tw, offsetHeight: th } = tip;
+      const left = b.x + b.hw + 12 + tw <= W ? b.x + b.hw + 12 : Math.max(4, b.x - b.hw - 12 - tw);
+      const top = Math.min(H - th - 4, Math.max(4, b.y - th / 2));
+      tip.style.left = `${Math.round(left)}px`;
+      tip.style.top = `${Math.round(top)}px`;
+    };
+
+    const frame = () => {
+      raf = 0;
+      if (!W || !H) return;
+      if (dirty) rebuild();
+      const now = Date.now();
+      // Motion runs on the monotonic clock; only the first frame snaps.
+      const tick = performance.now();
+      const dt = last ? Math.min(0.1, (tick - last) / 1000) : 0;
+      const snap = reduceMotion.matches || !last;
+      const still = reduceMotion.matches;
+      last = tick;
+      const ease = (tau) => (snap ? 1 : 1 - Math.exp(-dt / tau));
+      const g = geometry();
+
+      const states = [];
+      visible.forEach((alerts, sym) => {
+        const st = stateOf(sym, alerts, now);
+        if (st) states.push(st);
+      });
+      states.sort((a, b) => b.heat - a.heat);
+      const shown = states.slice(0, HEAT_MAX);
+      shown.forEach((st, i) => { st.rank = i + 1; });
+
+      // The scale follows the leader smoothly, so the rest never lurch.
+      const target = Math.max(HEAT_FLOOR, shown[0]?.heat ?? 0);
+      scaleHeat += (target - scaleHeat) * ease(SCALE_TAU);
+
+      const live = new Set();
+      shown.forEach((st) => {
+        const strength = Math.min(1, Math.sqrt(st.heat / scaleHeat));
+        let b = bubbles.get(st.sym);
+        if (!b) {
+          const seed = seeded(st.sym)();
+          b = {
+            sym: st.sym,
+            // Golden angle by arrival: tickers spread around the center.
+            angle: -Math.PI / 2 + sequence++ * 2.39996,
+            phase: seed * Math.PI * 2,
+            period: 7000 + seed * 4000,
+            s: strength,
+            vis: 0,
+            lastAlertAt: st.latest.t,
+            pulseAt: now - st.latest.t < PULSE_MS ? now : -Infinity,
+            lx: NaN, ly: NaN, x: NaN, y: NaN, vx: 0, vy: 0, px: 0, py: 0,
+          };
+          bubbles.set(st.sym, b);
+        } else if (st.latest.t > b.lastAlertAt) {
+          b.lastAlertAt = st.latest.t;
+          b.pulseAt = now;
+        }
+        b.state = st;
+        b.s += (strength - b.s) * ease(GROW_TAU);
+        live.add(st.sym);
+      });
+
+      // In and out: fade, then drop. A ticker that leaves the top list or
+      // expires keeps its spot while it fades.
+      const step = snap ? 1 : (dt * 1000) / FADE_MS;
+      bubbles.forEach((b, sym) => {
+        b.vis = live.has(sym) ? Math.min(1, b.vis + step) : Math.max(0, b.vis - step);
+        if (!live.has(sym) && (b.vis <= 0 || still)) bubbles.delete(sym);
+      });
+
+      // Layout: anchors from the eased strength, drifted toward from the
+      // previous spots, then pulled apart. The drawn labels glide after it.
+      const active = [...bubbles.values()].filter((b) => live.has(b.sym));
+      // Density: when the labels at their natural size would not fit (a
+      // narrow panel, many hot tickers), they all shrink together, smoothly,
+      // instead of shoving each other around.
+      const room = W * (H - LEGEND_H) * FIT_FILL;
+      const need = active.reduce((sum, b) => {
+        const font = naturalFont(b, g);
+        return sum + (textWidth(b.sym, font) + font * 0.8 + GAP) * (font + GAP + (b.state.halted || b.state.resumedAt != null ? 12 : 0));
+      }, 0);
+      fit = need ? Math.max(FIT_MIN, Math.min(1, Math.sqrt(room / need))) : 1;
+      const pull = ease(PULL_TAU);
+      active.forEach((b) => {
+        measure(b, g, now, ease);
+        const r = 1 - b.s;
+        b.ax = g.cx + g.rx * r * Math.cos(b.angle);
+        b.ay = g.cy + g.ry * r * Math.sin(b.angle);
+        if (!Number.isFinite(b.lx)) { b.lx = b.ax; b.ly = b.ay; }
+        else { b.lx += (b.ax - b.lx) * pull; b.ly += (b.ay - b.ly) * pull; }
+      });
+      solve(active, tick);
+      bubbles.forEach((b) => { b.px = 0; b.py = 0; });
+      repel(active.filter((b) => Number.isFinite(b.x)));
+      bubbles.forEach((b) => glide(b, dt, snap));
+
+      const items = [...bubbles.values()];
+      const hovered = pointer
+        ? [...active].sort((a, b) => b.s - a.s).find((b) => Math.abs(pointer.x - b.x) <= b.hw + 3 && Math.abs(pointer.y - b.y) <= b.hh + 3)
+        : null;
+      hover = hovered?.sym ?? "";
+      canvas.style.cursor = hovered ? "pointer" : "";
+
+      const dpr = window.devicePixelRatio || 1;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, W, H);
+      drawBackdrop(g);
+      // Weakest first: the leader is drawn on top.
+      items.sort((a, b) => a.s - b.s).forEach((b) => drawBubble(b, now, still));
+
+      ctx.font = `600 10px ${MONO}`;
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = C.muted;
+      ctx.textAlign = "left";
+      ctx.fillText("Last 15m · closer to center = stronger", 10, LEGEND_H / 2 + 2);
+      if (states.length > shown.length) {
+        ctx.textAlign = "right";
+        ctx.fillText(`+${states.length - shown.length} more`, W - 10, H - 10);
+      }
+      if (!items.length) {
+        ctx.font = `600 12px ${SANS}`;
+        ctx.textAlign = "center";
+        ctx.fillText(emptyText, g.cx, g.cy);
+      }
+
+      updateTip(hovered, shown.length, now);
+      const aria = shown.length
+        ? `Momentum constellation, strongest first: ${shown.slice(0, 5).map((st) => `${st.sym} ${HEAT_STATUS[st.status].toLowerCase()}`).join(", ")}`
+        : `Momentum constellation: ${emptyText}`;
+      if (aria !== ariaText) canvas.setAttribute("aria-label", (ariaText = aria));
+
+      if (!items.length) return;
+      // Reduced motion: one repaint a second is enough (decay and clocks).
+      if (still) timer = setTimeout(() => { timer = 0; schedule(); }, 1000);
+      else schedule();
+    };
+
+    const schedule = () => {
+      if (raf || timer || document.hidden) return;
+      raf = requestAnimationFrame(frame);
+    };
+    const invalidate = () => {
+      dirty = true;
+      schedule();
+    };
+
+    new ResizeObserver(() => {
+      const box = root.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      W = Math.floor(box.width);
+      H = Math.floor(box.height);
+      canvas.width = Math.max(1, Math.round(W * dpr));
+      canvas.height = Math.max(1, Math.round(H * dpr));
+      canvas.style.width = `${W}px`;
+      canvas.style.height = `${H}px`;
+      schedule();
+    }).observe(root);
+
+    canvas.addEventListener("pointermove", (e) => {
+      const box = canvas.getBoundingClientRect();
+      pointer = { x: e.clientX - box.left, y: e.clientY - box.top };
+      schedule();
+    });
+    canvas.addEventListener("pointerleave", () => {
+      pointer = null;
+      schedule();
+    });
+    // Select a ticker (framed here; the chart panel will listen for it).
+    canvas.addEventListener("click", () => {
+      if (!hover) return;
+      selected = selected === hover ? "" : hover;
+      tipKey = "";
+      document.dispatchEvent(new CustomEvent("scanner:select", { detail: { sym: selected } }));
+      schedule();
+    });
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) return;
+      last = 0;
+      schedule();
+    });
+    reduceMotion.addEventListener("change", () => {
+      clearTimeout(timer);
+      timer = 0;
+      schedule();
+    });
+    document.fonts?.ready.then(() => { widths.clear(); schedule(); });
+
+    return {
+      alert: (r) => record(r),
+      halt: (r) => {
+        const list = halts.get(r.sym) ?? [];
+        list.push({ start: r.haltAt.getTime(), end: r.resumeAt.getTime() });
+        halts.set(r.sym, list);
+        invalidate();
+      },
+      // Mock history: the seed tickers fired over the last few minutes, the
+      // strongest more often and more recently.
+      seed: (rows) => rows.forEach((r, i) => {
+        const rnd = seeded(`${r.sym}:heat`);
+        let t = Date.now() - (i * 34 + rnd() * 20) * 1000;
+        for (let n = Math.max(1, 4 - Math.floor(i / 3)); n > 0; n--) {
+          record(r, t);
+          t -= (40 + rnd() * 60) * 1000;
+        }
+      }),
+      refresh: invalidate,
+    };
+  };
+
   /* ---- Mount -------------------------------------------------------------- */
 
   const panel = (id) => document.querySelector(`.terminal[data-panel="${id}"]`);
@@ -3710,6 +4357,9 @@
   const floatSettings = mountFloatSettings();
   const tableSettings = mountTableSettings();
   mountFilters();
+  const constellation = mountConstellation(document.querySelector("[data-constellation]"));
+  constellation.seed(MOMENTUM);
+  HALTS.forEach(constellation.halt);
 
   // Vertical container: toplists
   mountTable(panel("gainers"), GAINERS, { cols: TOPLIST_COLS, pins: TOPLIST_PINS, quotes: true });
@@ -3720,8 +4370,8 @@
   mountTable(panel("buying"), BUYING, { cols: PRESSURE_COLS, next: nextAlert(BUYING) });
   mountTable(panel("selling"), BEAR, { cols: PRESSURE_COLS, next: nextAlert(BEAR) });
   // Bottom row: momentum + halts
-  mountTable(panel("momentum"), MOMENTUM, { cols: MOMENTUM_COLS, next: nextAlert(MOMENTUM) });
-  mountTable(panel("halts"), HALTS, { cols: HALT_COLS, next: nextHalt, every: 18000, expires: true });
+  mountTable(panel("momentum"), MOMENTUM, { cols: MOMENTUM_COLS, next: nextAlert(MOMENTUM), onAlert: constellation.alert, onRender: constellation.refresh });
+  mountTable(panel("halts"), HALTS, { cols: HALT_COLS, next: nextHalt, every: 18000, expires: true, onAlert: constellation.halt });
   syncSoundButtons();
 
   setInterval(() => {
