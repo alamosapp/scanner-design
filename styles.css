@@ -175,6 +175,24 @@
   --chart-pane-gap: 6px;
   --chart-pane-active: color-mix(in srgb, var(--green) 45%, transparent);
 
+  /* ---- Account: avatar, plan badge, profile menu, confirm dialogs ---- */
+  --grad-pro: linear-gradient(135deg, var(--green) 0%, var(--teal) 55%, var(--cyan) 100%);
+  --grad-avatar: linear-gradient(140deg, var(--violet) 0%, var(--cyan) 100%);
+  --pro: var(--green);                   /* plan accent: text, dot, glow */
+  --pro-a12: color-mix(in srgb, var(--green) 12%, transparent);
+  --pro-a28: color-mix(in srgb, var(--green) 28%, transparent);
+  --plan-active: var(--green);           /* plan status: active */
+  --plan-trial: var(--cyan);             /*              trial */
+  --plan-past-due: var(--amber);         /*              payment pending */
+  --plan-canceled: var(--text-3);        /*              canceled */
+  --avatar-sm: 22px;
+  --avatar: 28px;
+  --avatar-lg: 44px;
+  --menu-w: 288px;
+  --menu-item-h: 38px;
+  --z-menu: 150;                         /* above the panes, below dialogs */
+  --shadow-menu: 0 24px 60px -18px var(--shadow-color), 0 0 0 1px var(--white-a04);
+
   /* ---- Country flags (the ticker's country in the chart bar) ---- */
   --flag-red: #b22234;
   --flag-blue: #3c3b6e;
@@ -254,7 +272,10 @@ button { cursor: pointer; }
   border: 1px solid color-mix(in srgb, var(--chip) 30%, transparent); border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--chip) 10%, transparent); color: var(--chip);
   font-family: var(--font-mono); font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; white-space: nowrap;
+  line-height: 1; /* the body's 1.6 left the caps sitting high */
 }
+/* Caps only: trim the label to its cap height so it centers exactly */
+.nav-chip > span { text-box: trim-both cap alphabetic; }
 .status-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .market-session[data-session="pre"]     { --chip: var(--amber); }
 .market-session[data-session="regular"] { --chip: var(--green); }
@@ -265,8 +286,140 @@ button { cursor: pointer; }
 .market-clock { font-family: var(--font-mono); font-size: var(--fs-sm); font-weight: 500; color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .market-clock small { font-size: 10px; color: var(--text-3); }
 
-.user-avatar { display: inline-grid; place-items: center; width: 28px; height: 28px; border: 1px solid var(--line-strong); border-radius: 50%; background: var(--surface-3); color: var(--text-2); }
-.user-avatar svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; }
+/* ---- Account: avatar button + profile menu ---- */
+.avatar {
+  display: inline-grid; place-items: center; flex: none; width: var(--avatar); height: var(--avatar); border-radius: 50%;
+  background: var(--grad-avatar); color: var(--white);
+  font-size: 11px; font-weight: 800; letter-spacing: 0.02em; line-height: 1; user-select: none;
+}
+.avatar--sm { --avatar: var(--avatar-sm); font-size: 9px; }
+/* Large: a gradient ring in the plan's colors around the photo */
+.avatar--lg {
+  --avatar: var(--avatar-lg); font-size: 15px;
+  border: 2px solid var(--bg-elevated); box-shadow: 0 0 0 2px var(--pro), 0 8px 24px -8px var(--pro-a28);
+  background: var(--grad-avatar) padding-box;
+}
+
+.profile { position: relative; display: flex; }
+.user-avatar {
+  display: inline-grid; place-items: center; padding: 2px; border: 0; border-radius: 50%;
+  background: var(--line-strong); transition: background var(--t-fast), box-shadow var(--t-fast), transform var(--t-fast);
+}
+.user-avatar .avatar { --avatar: 26px; font-size: 10px; box-shadow: 0 0 0 2px var(--surface); }
+.user-avatar:hover, .user-avatar[aria-expanded="true"] { background: var(--grad-pro); box-shadow: 0 0 16px -4px var(--pro-a28); }
+.user-avatar:active { transform: scale(0.94); }
+.user-avatar:focus-visible { outline: none; background: var(--grad-pro); box-shadow: var(--ring); }
+
+.profile-menu {
+  position: absolute; top: calc(100% + 10px); right: 0; z-index: var(--z-menu);
+  width: var(--menu-w); max-width: calc(100vw - 2 * var(--space-3)); padding: 6px;
+  border: 1px solid var(--line-strong); border-radius: var(--radius);
+  background:
+    radial-gradient(120% 60% at 100% 0%, var(--pro-a12), transparent 60%),
+    var(--bg-elevated);
+  box-shadow: var(--shadow-menu);
+  transform-origin: top right;
+}
+.profile-menu:not([hidden]) { animation: menuIn 220ms var(--ease-spring); }
+.profile-menu[hidden] { display: none; }
+@keyframes menuIn { from { opacity: 0; transform: translateY(-6px) scale(0.96); } }
+
+.pm-head {
+  position: relative; display: flex; align-items: center; gap: 12px; padding: 12px 10px 14px;
+}
+/* Hairline in the plan's gradient under the header */
+.pm-head::after { content: ""; position: absolute; left: 10px; right: 10px; bottom: 0; height: 1px; background: var(--grad-pro); opacity: 0.35; }
+.pm-id { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.pm-plan { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.pm-email { overflow: hidden; font-size: 12.5px; font-weight: 600; line-height: 1.2; color: var(--text-2); text-overflow: ellipsis; white-space: nowrap; }
+
+/* Plan badge: gradient text on a tinted pill */
+.plan-badge {
+  display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 8px 0 6px;
+  border: 1px solid var(--pro-a28); border-radius: var(--radius-pill); background: var(--pro-a12);
+  color: var(--pro); font-size: 11.5px; font-weight: 800; letter-spacing: 0.01em; line-height: 1; white-space: nowrap;
+}
+.plan-badge svg { width: 12px; height: 12px; fill: currentColor; }
+@supports (background-clip: text) {
+  .plan-badge { background: linear-gradient(var(--pro-a12), var(--pro-a12)) padding-box, var(--grad-pro) text; -webkit-background-clip: padding-box, text; color: transparent; }
+  .plan-badge svg { fill: var(--pro); }
+}
+.plan-badge--sm { height: 18px; padding: 0 7px; font-size: 10.5px; }
+
+/* Plan status: dot + label, tinted by state */
+.plan-status {
+  --state: var(--plan-active);
+  display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 7px;
+  border-radius: var(--radius-pill); background: color-mix(in srgb, var(--state) 10%, transparent);
+  color: var(--state); font-family: var(--font-mono); font-size: 10px; font-weight: 700; letter-spacing: 0.06em; line-height: 1; text-transform: uppercase;
+}
+.plan-status i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 8px currentColor; }
+.plan-status[data-state="active"] i { animation: livePulse 2s ease-in-out infinite; }
+.plan-status[data-state="trial"] { --state: var(--plan-trial); }
+.plan-status[data-state="past-due"] { --state: var(--plan-past-due); }
+.plan-status[data-state="canceled"] { --state: var(--plan-canceled); }
+
+.pm-list { display: flex; flex-direction: column; gap: 2px; padding-top: 6px; }
+.pm-item {
+  display: flex; align-items: center; gap: 10px; width: 100%; height: var(--menu-item-h); padding: 0 10px;
+  border: 0; border-radius: var(--radius-md); background: transparent; color: var(--text-2);
+  font-size: 13px; font-weight: 700; text-align: left;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+.pm-item svg { width: 17px; height: 17px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; color: var(--text-3); transition: color var(--t-fast), transform var(--t-spring); }
+.pm-item:hover, .pm-item:focus-visible { outline: none; background: var(--white-a04); color: var(--text); }
+.pm-item:hover svg, .pm-item:focus-visible svg { color: var(--pro); transform: translateX(1px); }
+.pm-item:focus-visible { box-shadow: inset 0 0 0 1px var(--green-a32); }
+.pm-meta { margin-left: auto; padding: 2px 6px; border-radius: var(--radius-xs); background: var(--surface-3); font-family: var(--font-mono); font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); }
+.pm-sep { height: 1px; margin: 4px 10px; background: var(--line); }
+.pm-item--danger:hover, .pm-item--danger:focus-visible { background: var(--red-a08); color: var(--red); }
+.pm-item--danger:hover svg, .pm-item--danger:focus-visible svg { color: var(--red); }
+.pm-item--danger:focus-visible { box-shadow: inset 0 0 0 1px var(--red-a32); }
+
+/* ---- Confirm dialog (Log out): small centered card ---- */
+.confirm-modal {
+  width: min(400px, calc(100% - 2 * var(--space-4))); max-width: none; margin: auto; padding: 0; overflow: hidden;
+  border: 1px solid var(--line-strong); border-radius: var(--radius-lg);
+  background:
+    radial-gradient(90% 60% at 50% 0%, var(--red-a08), transparent 70%),
+    var(--bg-elevated);
+  color: var(--text); box-shadow: var(--shadow-modal);
+}
+.confirm-modal[open] { animation: modalIn 320ms var(--ease); }
+.confirm-modal::backdrop { background: var(--scrim); backdrop-filter: blur(var(--scrim-blur)); animation: fadeIn 220ms var(--ease); }
+.confirm-modal::before { content: ""; position: absolute; top: 0; left: 24px; right: 24px; height: 1px; background: linear-gradient(90deg, transparent, var(--red), transparent); opacity: 0.6; pointer-events: none; }
+html:has(.confirm-modal[open]) { overflow: hidden; }
+.cm-body { display: flex; flex-direction: column; align-items: center; padding: 28px 24px 20px; text-align: center; }
+.cm-icon {
+  display: grid; place-items: center; width: 52px; height: 52px; margin-bottom: 14px; border-radius: 16px;
+  border: 1px solid var(--red-a32); background: var(--red-a16); color: var(--red);
+  box-shadow: 0 0 32px -8px var(--red-a32);
+}
+.cm-icon svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.cm-title { margin: 0; font-size: 19px; font-weight: 800; letter-spacing: -0.01em; line-height: 1.25; }
+.cm-text { margin: 8px 0 0; max-width: 32ch; font-size: 13px; line-height: 1.5; color: var(--text-2); }
+.cm-account {
+  display: flex; align-items: center; gap: 8px; max-width: 100%; margin-top: 18px; padding: 6px 8px 6px 6px;
+  border: 1px solid var(--line); border-radius: var(--radius-pill); background: var(--surface);
+}
+.cm-email { overflow: hidden; min-width: 0; font-size: 12px; font-weight: 600; color: var(--text-2); text-overflow: ellipsis; white-space: nowrap; }
+.cm-foot { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); padding: 14px 20px; border-top: 1px solid var(--line); background: var(--surface); }
+
+@media (max-width: 720px) {
+  /* Menu: full width under the nav */
+  .profile { position: static; }
+  .app-nav { position: relative; }
+  .profile-menu { top: calc(100% + 6px); right: var(--space-3); left: var(--space-3); width: auto; max-width: none; }
+  .pm-item { height: 44px; }
+  /* Confirm: bottom sheet */
+  .confirm-modal { width: 100%; margin: auto 0 0; border-width: 1px 0 0; border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
+  .confirm-modal[open] { animation: sheetIn 360ms var(--ease); }
+  .cm-foot { padding: 12px var(--space-4) calc(12px + env(safe-area-inset-bottom)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .profile-menu:not([hidden]), .confirm-modal[open], .confirm-modal::backdrop { animation: none; }
+  .plan-status i { animation: none; }
+}
 
 /* ---- Help: floating button + User Guide side panel ---- */
 /* Desktop: help lives in the nav; the floating button is mobile only. */

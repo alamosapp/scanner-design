@@ -1777,6 +1777,69 @@
     });
   };
 
+  /* Account menu: the avatar opens it (click, Enter/Space or ↓ lands on the
+     first item, ↑ on the last). ↑/↓/Home/End move between items; Esc, Tab,
+     a click outside or picking an item closes it. Account and Subscriptions
+     have no screens yet. Log out asks first: the confirmation dialog fires
+     `scanner:logout` for the sign-in layer to handle. */
+  const mountProfile = () => {
+    const root = document.querySelector("[data-profile]");
+    if (!root) return;
+    const btn = root.querySelector("[data-profile-btn]");
+    const menu = root.querySelector(".profile-menu");
+    const items = [...menu.querySelectorAll("[role=menuitem]")];
+    const confirm = document.getElementById("logout-confirm");
+
+    const isOpen = () => !menu.hidden;
+    const focusItem = (i) => items[(i + items.length) % items.length].focus();
+    const open = (at = 0) => {
+      menu.hidden = false;
+      btn.setAttribute("aria-expanded", "true");
+      focusItem(at);
+    };
+    const close = (refocus = true) => {
+      if (!isOpen()) return;
+      menu.hidden = true;
+      btn.setAttribute("aria-expanded", "false");
+      if (refocus) btn.focus();
+    };
+
+    btn.addEventListener("click", () => (isOpen() ? close() : open()));
+    btn.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        open(e.key === "ArrowDown" ? 0 : -1);
+      }
+    });
+    menu.addEventListener("keydown", (e) => {
+      const at = items.indexOf(document.activeElement);
+      const moves = { ArrowDown: at + 1, ArrowUp: at - 1, Home: 0, End: -1 };
+      if (e.key in moves) { e.preventDefault(); focusItem(moves[e.key]); }
+      else if (e.key === "Escape") { e.preventDefault(); close(); }
+      else if (e.key === "Tab") close(false);
+    });
+    document.addEventListener("pointerdown", (e) => { if (isOpen() && !root.contains(e.target)) close(false); });
+
+    items.forEach((item) => item.addEventListener("click", () => {
+      close(item.dataset.profileAction !== "logout");
+      if (item.dataset.profileAction === "logout") confirm.showModal();
+    }));
+
+    confirm.querySelector("[data-logout-cancel]").addEventListener("click", () => confirm.close());
+    confirm.querySelector("[data-logout-confirm]").addEventListener("click", () => {
+      confirm.close("logout");
+      document.dispatchEvent(new CustomEvent("scanner:logout"));
+      showToast("Logged out");
+    });
+    // A click on the backdrop cancels.
+    confirm.addEventListener("click", (e) => {
+      if (e.target !== confirm) return;
+      const r = confirm.getBoundingClientRect();
+      if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) confirm.close();
+    });
+    confirm.addEventListener("close", () => btn.focus());
+  };
+
   /* Toast: a short confirmation at the bottom of the screen. */
   const toastEl = document.querySelector("[data-toast]");
   // As a popover it sits in the top layer, above any open dialog; re-showing
@@ -5056,6 +5119,7 @@
     mountLayout();
     mountAppFullscreen();
     mountGuide();
+    mountProfile();
   }
   mountNavStatus(); // the filters follow the market session
   const soundSettings = mountSoundSettings();
