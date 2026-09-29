@@ -44,18 +44,18 @@
           <button type="button" class="user-avatar" data-profile-btn aria-haspopup="menu" aria-expanded="false" aria-controls="profile-menu" aria-label="Account menu" title="Account">
             <span class="avatar" aria-hidden="true">JL</span>
           </button>
-          <div class="profile-menu" id="profile-menu" role="menu" aria-labelledby="pm-email" hidden>
+          <div class="profile-menu" id="profile-menu" role="menu" aria-labelledby="pm-name" hidden>
             <header class="pm-head">
-              <span class="avatar avatar--lg" aria-hidden="true">JL</span>
-              <div class="pm-id">
-                <div class="pm-plan">
-                  <span class="plan-badge">
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4.5 13.5H11L10 22l8.5-11.5H12z"/></svg>
-                    Pulse Pro
-                  </span>
-                  <span class="plan-status" data-state="active"><i aria-hidden="true"></i>Active</span>
+              <div class="pm-user">
+                <span class="avatar avatar--lg" aria-hidden="true">JL</span>
+                <div class="pm-id">
+                  <span class="pm-name" id="pm-name">Jordan Lee</span>
+                  <span class="pm-email" title="jordan.lee@example.com">jordan.lee@example.com</span>
                 </div>
-                <span class="pm-email" id="pm-email" title="jordan.lee@example.com">jordan.lee@example.com</span>
+              </div>
+              <div class="pm-plan">
+                <span>Current plan</span>
+                <span class="pm-plan__tag">Pulse Pro</span>
               </div>
             </header>
             <div class="pm-list">
@@ -66,7 +66,6 @@
               <button type="button" class="pm-item" role="menuitem" data-profile-action="subscriptions">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5.5" width="18" height="13" rx="2.5"/><path d="M3 10h18M7 15h3"/></svg>
                 <span>Subscriptions</span>
-                <span class="pm-meta">Pro</span>
               </button>
               <div class="pm-sep" role="separator"></div>
               <button type="button" class="pm-item pm-item--danger" role="menuitem" data-profile-action="logout" aria-haspopup="dialog" aria-controls="logout-confirm">
@@ -618,11 +617,6 @@
       </span>
       <h2 class="cm-title" id="lo-title">Log out of Pulse?</h2>
       <p class="cm-text" id="lo-text">Live alerts stop on this device until you sign back in. Your layout, filters and sounds stay saved.</p>
-      <div class="cm-account">
-        <span class="avatar avatar--sm" aria-hidden="true">JL</span>
-        <span class="cm-email">jordan.lee@example.com</span>
-        <span class="plan-badge plan-badge--sm">Pulse Pro</span>
-      </div>
     </div>
     <footer class="cm-foot">
       <button type="button" class="btn btn-secondary" data-logout-cancel autofocus>Cancel</button>
