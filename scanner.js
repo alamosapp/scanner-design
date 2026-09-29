@@ -4893,6 +4893,27 @@
     } catch { /* ignore */ }
     return null;
   };
+  // Chrome keeps a pop-up on the opener's screen unless the site holds the
+  // "window-management" permission. When the saved place is not on this
+  // screen, ask for it (once; the browser remembers the answer) and move the
+  // copy there once granted.
+  const onThisScreen = (g) => {
+    const s = window.screen;
+    const left = s.availLeft ?? 0;
+    const top = s.availTop ?? 0;
+    return g.x >= left && g.y >= top && g.x + g.w <= left + s.availWidth && g.y + g.h <= top + s.availHeight;
+  };
+  const placeOnScreen = (getWin, g) => {
+    if (!("getScreenDetails" in window)) return;
+    // Asked before window.open, while the click still counts as a gesture.
+    window.getScreenDetails().then(() => {
+      const win = getWin();
+      if (!win || win.closed) return;
+      win.moveTo(g.x, g.y);
+      win.resizeBy(g.w - win.innerWidth, g.h - win.innerHeight);
+    }, () => showToast("Allow window management for this site to reopen copies on other screens"));
+  };
+
   // Copies of the same panel opened in this session cascade down-right, so
   // they never land exactly on top of each other.
   const opened = new Map(); // panel → copies opened
@@ -4910,17 +4931,14 @@
       x: window.screenX + box.left,
       y: window.screenY + chrome + box.top,
     };
-    const features = [
-      "popup",
-      `width=${Math.round(g.w)}`,
-      `height=${Math.round(g.h)}`,
-      `left=${Math.round(g.x + step)}`,
-      `top=${Math.round(g.y + step)}`,
-    ].join(",");
+    const place = { w: Math.round(g.w), h: Math.round(g.h), x: Math.round(g.x + step), y: Math.round(g.y + step) };
+    const features = ["popup", `width=${place.w}`, `height=${place.h}`, `left=${place.x}`, `top=${place.y}`].join(",");
     const url = new URL(location.href);
     url.search = `?detach=${encodeURIComponent(root.dataset.panel)}`;
     url.hash = "";
-    const win = window.open(url, `scanner-${root.dataset.panel}-${Date.now()}`, features);
+    let win = null;
+    if (saved && !onThisScreen(place)) placeOnScreen(() => win, place);
+    win = window.open(url, `scanner-${root.dataset.panel}-${Date.now()}`, features);
     if (!win) showToast("Pop-ups are blocked: allow them for this site to detach panels");
   };
 
@@ -4975,11 +4993,14 @@
       } else link.relay?.(m);
     });
 
-    // Remember this window's size and place for the panel's next copy.
-    // Browsers fire no event when a window moves: check once a second.
-    let geom = "";
+    // Remember this window's size and place for the panel's next copy, once
+    // it moves or resizes: a copy the browser kept off its saved screen must
+    // not overwrite that place just by opening. Browsers fire no event when a
+    // window moves: check once a second.
+    const geomNow = () => JSON.stringify({ w: window.innerWidth, h: window.innerHeight, x: window.screenX, y: window.screenY });
+    let geom = geomNow();
     const keepGeom = () => {
-      const g = JSON.stringify({ w: window.innerWidth, h: window.innerHeight, x: window.screenX, y: window.screenY });
+      const g = geomNow();
       if (g === geom) return;
       geom = g;
       try { localStorage.setItem(geomKey(id), g); } catch { /* ignore */ }

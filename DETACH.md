@@ -8,6 +8,7 @@ Paneles con detach: las 8 tablas (`.terminal[data-panel]`), incluida *Fast-Growi
 
 - Clic en Detach → se abre la copia. La primera vez tiene el tamaño del panel y aparece junto a él.
 - La copia **recuerda su tamaño y posición** (por panel): la próxima copia de ese panel se abre donde quedó la última, también en otro monitor. Si se abren varias copias del mismo panel en una sesión, las siguientes se desplazan en cascada (28 px) para no quedar encimadas.
+- **Otro monitor:** Chrome solo abre ventanas emergentes en otra pantalla si el sitio tiene el permiso *Administración de ventanas* ("Administrar ventanas en todas tus pantallas"). La primera vez que una copia debe abrirse en otro monitor, el navegador lo pide; al aceptarlo, la copia se mueve allí y desde entonces se abre directamente en su sitio. Si se rechaza, se abre en la pantalla de la principal y aparece un aviso (se puede habilitar luego en la configuración del sitio, icono junto a la URL).
 - Si el navegador bloquea las ventanas emergentes, aparece un aviso para permitirlas.
 - En teléfonos (≤ 720 px) el botón no se muestra.
 
@@ -49,13 +50,13 @@ Una copia se enlaza con la primera principal que le responde e ignora a las dem�
 **Sincronización de ajustes** — todo vive en `localStorage`; el evento `storage` recarga en las demás ventanas:
 `scanner:columns:v2:<panel>`, `scanner:prefs:v1:<panel>`, `scanner:excluded:all`, `scanner:filters:v1`, `scanner:float:v1`, `scanner:sound:v1`, `scanner:sound-files` (se actualiza cuando los audios personalizados ya están guardados en IndexedDB).
 
-**Geometría** — `scanner:detach-geom:v1:<panel>` = `{ w, h, x, y }` (tamaño interior y posición en pantalla). La copia la guarda al redimensionar, al cerrarse y cada segundo (los navegadores no avisan cuando una ventana se mueve).
+**Geometría** — `scanner:detach-geom:v1:<panel>` = `{ w, h, x, y }` (tamaño interior y posición en pantalla). La copia la guarda al redimensionar, al cerrarse y cada segundo (los navegadores no avisan cuando una ventana se mueve), pero **solo si se movió o cambió de tamaño desde que se abrió**: así una copia que el navegador dejó en otra pantalla no borra el sitio guardado. Si el sitio guardado no está en la pantalla actual, la principal llama a `getScreenDetails()` (Window Management API) antes de `window.open` y, con permiso, mueve la copia con `moveTo`/`resizeBy`.
 
 ## Código
 
 En `scanner.js`:
 
-- Sección **"Detached copies"**: `DETACHED`, `canDetach`, `openCopy`, `loadGeom`, `serveCopies` (principal), `linkCopy` (copia).
+- Sección **"Detached copies"**: `DETACHED`, `canDetach`, `openCopy`, `loadGeom`, `onThisScreen`/`placeOnScreen` (otro monitor), `serveCopies` (principal), `linkCopy` (copia).
 - **Mount**: `TABLE_SETUP` (configuración de cada tabla) y el reparto principal/copia.
 - `mountTable(..., { relay })` devuelve `{ push, quote, reset }`; en `tables` cada tabla tiene `reload()`.
 - `mountConstellation` → `dump()` / `load()`.
