@@ -178,6 +178,7 @@
   /* ---- Table columns: resize edge on each header ---- */
   --col-handle-w: 8px;               /* grab area at a header's right edge */
   --col-handle-line: 2px;            /* the line drawn in it */
+  --col-handle-color: var(--line-strong); /* that line on header hover */
 
   /* ---- Account: avatar, plan badge, profile menu, confirm dialogs ---- */
   --grad-pro: linear-gradient(135deg, var(--green) 0%, var(--teal) 55%, var(--cyan) 100%);
@@ -1419,7 +1420,7 @@ html:has(.settings-modal[open]) { overflow: hidden; }
 }
 .col-resize::after {
   content: ""; position: absolute; top: 8px; bottom: 8px; right: 0; width: var(--col-handle-line);
-  border-radius: var(--radius-pill); background: var(--line-strong); opacity: 0; transition: opacity var(--t-fast), background var(--t-fast);
+  border-radius: var(--radius-pill); background: var(--col-handle-color); opacity: 0; transition: opacity var(--t-fast), background var(--t-fast);
 }
 .scan-table th:hover .col-resize::after { opacity: 1; }
 .col-resize:hover::after { background: var(--tone); opacity: 1; }
