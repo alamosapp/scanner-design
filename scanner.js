@@ -1744,19 +1744,28 @@
         });
       };
 
+      // A pane can be hidden for a session (Gainers Open after hours): its
+      // following splitter hides with it, so splitter i pairs pane i with
+      // the next visible pane.
+      const next = (i) => {
+        let j = i + 1;
+        while (j < items.length - 1 && items[j].hidden) j++;
+        return j;
+      };
       handles.forEach((handle, i) => {
-        const [a, b] = [items[i], items[i + 1]];
+        const a = items[i];
         panes.push({
           handle, axis,
           size: () => width(a),
           // Sizes follow the grow factors, so keeping the pair's sum fixed
           // leaves every other pane in the group exactly where it was.
           resize: (px) => {
-            const total = width(a) + width(b);
+            const j = next(i);
+            const total = width(a) + width(items[j]);
             const g = state.cols[row];
-            const pair = g[i] + g[i + 1];
+            const pair = g[i] + g[j];
             g[i] = (pair * clamp(px, min, total - min)) / (total || 1);
-            g[i + 1] = pair - g[i];
+            g[j] = pair - g[i];
             apply();
           },
           reset: () => {
@@ -1767,9 +1776,10 @@
               apply();
               return;
             }
-            const pair = g[i] + g[i + 1];
-            g[i] = (pair * d[i]) / (d[i] + d[i + 1]);
-            g[i + 1] = pair - g[i];
+            const j = next(i);
+            const pair = g[i] + g[j];
+            g[i] = (pair * d[i]) / (d[i] + d[j]);
+            g[j] = pair - g[i];
             apply();
           },
         });
@@ -5332,6 +5342,50 @@
     serveCopies(constellation, chart);
   }
   syncSoundButtons();
+
+  /* Session tables: Gainers Open (change vs. today's open) only runs from
+     the open: it is off in Pre-Market, After Hours and while closed. The main window
+     hides it with its splitter (Gainers and Volume Leaders share the space;
+     the saved split returns with it) and keeps its settings. A copy of it
+     stays open, dimmed with a notice, for the user to close it; it comes
+     back to life at the open. Follows the nav clock live. */
+  const SESSION_OFF = { "gainers-open": ["pre", "after", "closed"] };
+  const SESSION_OFF_TEXT = { pre: "during Pre-Market", after: "during After Hours", closed: "while the market is closed" };
+  const syncSessionTables = () => {
+    for (const [id, off] of Object.entries(SESSION_OFF)) {
+      const root = panel(id);
+      if (!root) continue;
+      const hide = off.includes(marketState);
+      if (DETACHED === id) {
+        let note = root.querySelector(".detach-status--session");
+        if (!note && hide) {
+          note = Object.assign(document.createElement("p"), { className: "detach-status detach-status--session" });
+          note.setAttribute("role", "status");
+          root.append(note);
+        }
+        if (note) {
+          note.textContent = hide ? `${root.dataset.title} is off ${SESSION_OFF_TEXT[marketState]} · back at the open` : "";
+          note.hidden = !hide;
+        }
+        root.toggleAttribute("data-session-off", hide);
+        continue;
+      }
+      if (root.hidden === hide) continue;
+      if (hide && document.fullscreenElement === root) document.exitFullscreen().catch(() => {});
+      root.classList.remove("is-maximized");
+      root.hidden = hide;
+      const split = root.nextElementSibling?.classList.contains("splitter") ? root.nextElementSibling : root.previousElementSibling;
+      if (split?.classList.contains("splitter")) split.hidden = hide;
+      // The splitter left in its place names the panes it now moves.
+      const prev = root.previousElementSibling;
+      if (prev?.classList.contains("splitter") && !prev.hidden) {
+        const after = [...root.parentElement.children].slice([...root.parentElement.children].indexOf(root)).find((el) => el.matches(".terminal:not([hidden])"));
+        prev.setAttribute("aria-label", `Resize ${prev.previousElementSibling.dataset.title} and ${(after || root).dataset.title}`);
+      }
+    }
+  };
+  syncSessionTables();
+  onSessionChange.push(syncSessionTables);
 
   // Saved in another window (a detached copy, or the main one): follow it.
   const PANEL_KEY = /^scanner:(?:columns:v2|prefs:v1):(.+)$/;

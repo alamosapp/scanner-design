@@ -1330,6 +1330,8 @@ html:has(.settings-modal[open]) { overflow: hidden; }
 .terminal[data-tone="bear"] { --tone: var(--red); }
 .terminal[data-tone="halt"] { --tone: var(--amber); }
 .terminal[data-kind="toplist"] { --tone: var(--cyan); }
+/* Off for the current market session (Gainers Open after hours) */
+.terminal[hidden], .splitter[hidden] { display: none; }
 
 /* Fullscreen panel (Fullscreen API), or maximized over the page where the
    API is unavailable */
@@ -1351,6 +1353,10 @@ html:has(.settings-modal[open]) { overflow: hidden; }
   box-shadow: 0 8px 20px -8px var(--shadow-color);
 }
 .detach-status[hidden] { display: none; }
+/* A copy of a table that is off this session (Gainers Open outside the
+   regular session): dimmed, with the notice in the middle */
+.detach-status--session { top: 50%; bottom: auto; transform: translate(-50%, -50%); width: max-content; max-width: calc(100% - 2 * var(--space-4)); white-space: normal; text-align: center; }
+.terminal[data-session-off] > :not(.terminal-bar):not(.detach-status) { opacity: 0.3; pointer-events: none; }
 
 .terminal-bar { flex: none; display: flex; align-items: center; gap: var(--space-3); min-width: 0; padding: 4px 6px 4px var(--space-3); background: var(--surface); border-bottom: 1px solid var(--line); }
 .terminal-title { display: inline-flex; align-items: center; gap: var(--space-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 700; color: var(--text); font-family: var(--font-mono); }

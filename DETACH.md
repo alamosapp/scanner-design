@@ -25,6 +25,7 @@ Paneles con detach: las 8 tablas (`.terminal[data-panel]`), incluida *Fast-Growi
 | Vista | Siempre tabla de escritorio, aunque la ventana sea estrecha. Fullscreen disponible. |
 | Recarga de la principal | Las copias se reconectan solas y reciben una foto nueva. |
 | Cierre de la principal | Cada copia muestra "Scanner closed · waiting for it…" y se cierra a los 4 s si la principal no vuelve. |
+| Gainers Open fuera de Market Open | La tabla no existe en Pre-Market, After Hours ni Closed. Una copia abierta **no se cierra**: se atenúa con el aviso "Gainers Open is off during … · back at the open" para que el usuario la cierre cuando quiera, y vuelve a la normalidad al abrir el mercado. La principal no ofrece Detach mientras la tabla está oculta. |
 
 ### Copia de Charts
 
