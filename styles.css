@@ -146,6 +146,31 @@
   --heat-resume: var(--green);
   --heat-ring: var(--surface-3);
   --heat-glow: color-mix(in srgb, var(--amber) 5%, transparent);
+
+  /* ---- Chart panel: Bull vs. Bear · Key levels · Rally tracker. Hex or
+     var() to hex only: the canvases will read them. ---- */
+  --chart-bg: var(--bg);             /* plot area */
+  --chart-grid: #14181e;             /* TradingView-style grid */
+  --chart-slot: var(--line-strong);  /* outline of a planned slot */
+  --chart-bull: var(--green);
+  --chart-bear: var(--red);
+  --chart-warn: var(--amber);        /* divergence · decelerating */
+  --chart-neutral: #5d6673;          /* no clear side · pullback */
+  --chart-price: var(--cyan);
+  --chart-vwap: var(--amber);
+  --chart-support: var(--violet);
+  --chart-resistance: var(--red);
+  --chart-volume: var(--line-strong);
+  --chart-accel: var(--green);
+  --chart-steady: var(--green-dim);
+  --chart-decel: var(--amber);
+  --chart-pullback: var(--chart-neutral);
+  /* Geometry shared by the three views */
+  --chart-axis-w: 52px;              /* value axis on the right */
+  --chart-axis-h: 20px;              /* time axis at the bottom */
+  --chart-sub-h: 0.36fr;             /* sub pane (volume · speed) vs 1fr main */
+  --chart-ribbon-h: 16px;            /* state ribbon under the plot */
+  --chart-grid-cell: 56px 40px;      /* grid spacing (x y) */
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -800,12 +825,6 @@ html:has(.settings-modal[open]) { overflow: hidden; }
 .pane-row > :not(.splitter) { flex: var(--grow, 1) 1 0px; }
 .pane-row > .splitter { flex: none; width: var(--gap); }
 
-/* Chart placeholder */
-.chart-slot { display: grid; place-items: center; min-width: 0; min-height: 0; border: 1px dashed var(--line-strong); border-radius: var(--radius); background: var(--bg-elevated); color: var(--text-3); font-family: var(--font-mono); font-size: var(--fs-xs); letter-spacing: 0.08em; text-transform: uppercase; }
-/* Chart inside a panel (Momentum): bar · chart · table read as one element */
-.terminal > .chart-slot { flex: 1 1 0px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; }
-.terminal > .chart-slot ~ .table-wrap { flex: 1 1 0px; }
-
 /* ---- Momentum constellation: the chart inside the Momentum panel ---- */
 .constellation {
   position: relative; min-width: 0; min-height: 0; overflow: hidden;
@@ -835,6 +854,226 @@ html:has(.settings-modal[open]) { overflow: hidden; }
 .constellation__tip dd.up { color: var(--green); }
 .constellation__tip dd.down { color: var(--red); }
 .constellation__tip-hint { display: block; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); font-size: 10px; }
+
+/* ==========================================================================
+   Chart panel: the selected ticker in three views (design stage)
+   Bar (ticker · quote · fullscreen) → tabs + metrics → stage. Every view
+   has the same anatomy, so a tab switch never moves the shared parts:
+   head (state + meter) · stats · legend / controls · plot slots.
+   ========================================================================== */
+
+.chart-panel {
+  --tone: var(--green);
+  container: chart / inline-size;
+  display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden;
+  border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--bg-elevated);
+}
+
+/* ---- Bar: same height as the panel bars around it ---- */
+.chart-bar { flex: none; display: flex; align-items: center; gap: var(--space-3); min-width: 0; padding: 4px 6px; background: var(--surface); border-bottom: 1px solid var(--line); line-height: 1.2; }
+.chart-symbol {
+  flex: none; display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg); color: var(--text-3); cursor: text;
+  transition: border-color var(--t-fast), box-shadow var(--t-fast);
+}
+.chart-symbol:hover { border-color: var(--line-strong); }
+.chart-symbol:focus-within { border-color: var(--green-a32); box-shadow: var(--ring); }
+.chart-symbol svg { flex: none; width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.chart-symbol__input { width: 6ch; padding: 0; border: 0; outline: none; background: transparent; color: var(--text); font-family: var(--font-mono); font-size: 13px; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; }
+.chart-quote { flex: none; display: flex; align-items: center; gap: var(--space-2); font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.chart-quote__price { color: var(--text); font-size: 16px; font-weight: 700; letter-spacing: -0.01em; }
+.chart-quote__change { display: inline-flex; gap: 6px; padding: 2px 7px; border-radius: var(--radius-pill); background: var(--dir-bg); color: var(--dir); font-size: 11.5px; font-weight: 700; }
+.chart-quote__change[data-dir="up"] { --dir: var(--green); --dir-bg: var(--green-a08); }
+.chart-quote__change[data-dir="down"] { --dir: var(--red); --dir-bg: var(--red-a08); }
+.chart-company { display: flex; align-items: center; gap: var(--space-2); min-width: 0; color: var(--text-2); font-size: 12px; font-weight: 600; }
+.chart-company__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chart-company__exchange { flex: none; padding: 1px 5px; border: 1px solid var(--line-strong); border-radius: 4px; color: var(--text-3); font-family: var(--font-mono); font-size: 9.5px; font-weight: 700; letter-spacing: 0.06em; }
+.chart-tools { flex: none; display: flex; align-items: center; gap: 2px; margin-left: auto; }
+
+/* ---- Toolbar: view tabs · session metrics ---- */
+.chart-toolbar { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px var(--space-3); min-width: 0; padding: 6px 8px; border-bottom: 1px solid var(--line); line-height: 1.2; }
+.chart-tabs { display: flex; gap: 2px; min-width: 0; padding: 2px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--bg); }
+.chart-tab {
+  display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px;
+  border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--text-3);
+  font-size: 12px; font-weight: 700; white-space: nowrap;
+  transition: color var(--t-fast), background var(--t-fast), border-color var(--t-fast);
+}
+.chart-tab svg { flex: none; width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.chart-tab:hover { color: var(--text-2); }
+.chart-tab[aria-selected="true"] { border-color: var(--line-strong); background: var(--surface-2); color: var(--text); box-shadow: 0 6px 16px -8px var(--shadow-color); }
+.chart-tab[aria-selected="true"] svg { color: var(--green); }
+.chart-tab:focus-visible { outline: none; box-shadow: var(--ring); }
+.chart-metrics { display: flex; align-items: center; margin: 0 0 0 auto; font-family: var(--font-mono); font-size: 11px; white-space: nowrap; }
+.chart-metrics div { display: flex; align-items: baseline; gap: 5px; }
+.chart-metrics div + div { margin-left: 10px; padding-left: 10px; border-left: 1px solid var(--line); }
+.chart-metrics dt { color: var(--text-3); font-weight: 500; }
+.chart-metrics dd { margin: 0; color: var(--text); font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* ---- Stage: one view at a time, all with the same parts ---- */
+.chart-stage { position: relative; flex: 1 1 0px; min-height: 0; container: chart-stage / size; background: var(--chart-bg); line-height: 1.2; }
+.chart-view { position: absolute; inset: 0; display: flex; flex-direction: column; }
+.chart-view[hidden] { display: none; }
+.chart-view:not([hidden]) { animation: panelIn 260ms var(--ease); }
+
+/* Head: state pill + since · meter, then one line of detail */
+.chart-head {
+  flex: none; display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "state meter" "detail detail" "signals signals";
+  align-items: center; gap: 5px var(--space-4); padding: 8px 12px; border-bottom: 1px solid var(--line);
+}
+.chart-head__state { grid-area: state; display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.chart-state {
+  --state: var(--chart-neutral);
+  flex: none; display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 10px 0 8px;
+  border-radius: var(--radius-pill); background: color-mix(in srgb, var(--state) 14%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--state) 40%, transparent);
+  color: var(--state); font-size: 11.5px; font-weight: 700; white-space: nowrap;
+}
+.chart-state::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--state); box-shadow: 0 0 8px var(--state); }
+.chart-state[data-tone="neutral"] { color: var(--text-2); }
+.chart-state[data-tone="bull"] { --state: var(--chart-bull); }
+.chart-state[data-tone="bear"] { --state: var(--chart-bear); }
+.chart-state[data-tone="warn"] { --state: var(--chart-warn); }
+.chart-since { min-width: 0; overflow: hidden; color: var(--text-3); font-family: var(--font-mono); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
+.chart-head__detail { grid-area: detail; min-width: 0; margin: 0; overflow: hidden; color: var(--text-2); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Meter: Bears ━━┃━━ Bulls (split, −100…+100) or Rally ━━━━┃ (0…100) */
+.chart-meter { grid-area: meter; display: flex; align-items: center; gap: 7px; }
+.chart-meter__label { color: var(--text-3); font-family: var(--font-mono); font-size: 9.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.chart-meter__label[data-side="bear"] { color: var(--chart-bear); }
+.chart-meter__label[data-side="bull"] { color: var(--chart-bull); }
+.chart-meter__track { position: relative; width: clamp(64px, 20cqw, 160px); height: 6px; border-radius: var(--radius-pill); background: var(--surface-3); }
+.chart-meter--split .chart-meter__track { background: linear-gradient(90deg, var(--red-a32), var(--surface-3) 50%, var(--green-a32)); }
+.chart-meter--split .chart-meter__track::after { content: ""; position: absolute; top: -3px; bottom: -3px; left: calc(50% - 0.5px); width: 1px; background: var(--line-strong); }
+.chart-meter__thumb { position: absolute; top: -4px; left: 0; width: 4px; height: 14px; border-radius: 2px; background: var(--text); box-shadow: 0 0 0 2px var(--chart-bg); transform: translateX(-50%); }
+.chart-meter--split .chart-meter__thumb { left: 50%; }
+.chart-meter__score { min-width: 3ch; color: var(--text); font-family: var(--font-mono); font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
+
+/* Rally tracker: fade signals as chips (amber when active) */
+.chart-signals { grid-area: signals; display: flex; align-items: center; gap: 6px; min-width: 0; margin: 0; overflow: hidden; }
+.chart-signals__count { flex: none; color: var(--text-3); font-family: var(--font-mono); font-size: 9.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.chart-signal { flex: none; display: inline-flex; align-items: center; height: 18px; padding: 0 8px; border-radius: var(--radius-pill); background: var(--amber-a08); box-shadow: inset 0 0 0 1px var(--amber-a32); color: var(--chart-decel); font-size: 10.5px; font-weight: 700; white-space: nowrap; }
+.chart-signal.is-empty { background: transparent; box-shadow: inset 0 0 0 1px var(--line); color: var(--text-3); font-weight: 600; }
+
+/* Stats: one strip, scrolls sideways when it does not fit */
+.chart-stats { flex: none; display: flex; gap: 20px; margin: 0; padding: 7px 12px; overflow-x: auto; border-bottom: 1px solid var(--line); scrollbar-width: none; }
+.chart-stats::-webkit-scrollbar { display: none; }
+.chart-stats div { flex: none; display: flex; flex-direction: column; gap: 2px; }
+.chart-stats dt { color: var(--text-3); font-family: var(--font-mono); font-size: 9.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; }
+.chart-stats dd { margin: 0; color: var(--text); font-family: var(--font-mono); font-size: 12.5px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Plot: legend left · controls right on one line; when they do not fit
+   the controls stay on top and the legend drops below them. */
+.chart-plot { flex: 1 1 0px; min-height: 0; display: flex; flex-direction: column; padding: 6px 8px 6px 10px; }
+.chart-overlay { flex: none; display: flex; flex-wrap: wrap-reverse; align-items: center; gap: 6px var(--space-3); padding-bottom: 6px; }
+.chart-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 12px; min-width: 0; color: var(--text-3); font-size: 11px; font-weight: 600; }
+.chart-legend span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.chart-controls { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin-left: auto; }
+
+.chart-key { --key: var(--chart-neutral); flex: none; width: 14px; height: 2px; border-radius: 1px; background: var(--key); }
+.chart-key--bar { width: 8px; height: 8px; border-radius: 2px; }
+.chart-key--dash { background: repeating-linear-gradient(90deg, var(--key) 0 4px, transparent 4px 7px); }
+.chart-key[data-key="control"] { background: linear-gradient(90deg, var(--chart-bull) 50%, var(--chart-bear) 50%); }
+.chart-key[data-key="price"] { --key: var(--chart-price); }
+.chart-key[data-key="buying"] { --key: var(--chart-bull); }
+.chart-key[data-key="selling"] { --key: var(--chart-bear); }
+.chart-key[data-key="vwap"] { --key: var(--chart-vwap); }
+.chart-key[data-key="volume"] { --key: var(--chart-volume); }
+.chart-key[data-key="support"] { --key: var(--chart-support); }
+.chart-key[data-key="resistance"] { --key: var(--chart-resistance); }
+.chart-key[data-key="accel"] { --key: var(--chart-accel); }
+.chart-key[data-key="steady"] { --key: var(--chart-steady); }
+.chart-key[data-key="decel"] { --key: var(--chart-decel); }
+.chart-key[data-key="pullback"] { --key: var(--chart-pullback); }
+
+/* Segmented controls: overlays (dot = on) · window · interval */
+.chart-seg { display: inline-flex; gap: 1px; padding: 2px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg-elevated); }
+.chart-seg button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 28px; height: 22px; padding: 0 7px;
+  border: 0; border-radius: 5px; background: transparent; color: var(--text-3);
+  font-family: var(--font-mono); font-size: 11px; font-weight: 700; white-space: nowrap;
+  transition: color var(--t-fast), background var(--t-fast);
+}
+.chart-seg button:hover { color: var(--text); }
+.chart-seg button[aria-pressed="true"] { background: var(--surface-3); color: var(--text); }
+.chart-seg button:focus-visible { outline: none; box-shadow: var(--ring); }
+.chart-toggle::before { content: ""; width: 6px; height: 6px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px currentColor; }
+.chart-toggle[aria-pressed="true"]::before { background: var(--green); box-shadow: 0 0 6px var(--green-a32); }
+.chart-menu__chevron { width: 5px; height: 5px; margin-top: -3px; border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); }
+
+/* Plot slots: where each canvas layer will draw. Main pane + value axis,
+   optional sub pane (volume · speed), optional state ribbon, time axis
+   with the live edge on the right. */
+.chart-slots {
+  flex: 1 1 0px; min-height: 0; display: grid; gap: 4px;
+  grid-template-columns: minmax(0, 1fr) var(--chart-axis-w);
+  grid-template-rows: minmax(0, 1fr) var(--chart-axis-h);
+  grid-template-areas: "main main-y" "x .";
+}
+.chart-slots[data-layout="ribbon"] {
+  grid-template-rows: minmax(0, 1fr) var(--chart-ribbon-h) var(--chart-axis-h);
+  grid-template-areas: "main main-y" "ribbon ." "x .";
+}
+.chart-slots[data-layout="sub"] {
+  grid-template-rows: minmax(0, 1fr) minmax(0, var(--chart-sub-h)) var(--chart-axis-h);
+  grid-template-areas: "main main-y" "sub sub-y" "x .";
+}
+.chart-slots[data-layout="sub ribbon"] {
+  grid-template-rows: minmax(0, 1fr) minmax(0, var(--chart-sub-h)) var(--chart-ribbon-h) var(--chart-axis-h);
+  grid-template-areas: "main main-y" "sub sub-y" "ribbon ." "x .";
+}
+.plot-slot {
+  position: relative; display: flex; align-items: flex-start; min-width: 0; min-height: 0; overflow: hidden; padding: 5px 7px;
+  border: 1px dashed var(--chart-slot); border-radius: 6px; color: var(--text-3);
+  font-family: var(--font-mono); font-size: 9.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+}
+.plot-slot span { position: relative; z-index: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plot-slot--main {
+  grid-area: main;
+  background-image: linear-gradient(var(--chart-grid) 1px, transparent 1px), linear-gradient(90deg, var(--chart-grid) 1px, transparent 1px);
+  background-size: var(--chart-grid-cell); background-position: -1px -1px;
+}
+.plot-slot--sub { grid-area: sub; background-image: linear-gradient(90deg, var(--chart-grid) 1px, transparent 1px); background-size: var(--chart-grid-cell); background-position: -1px 0; }
+.plot-slot--ribbon { grid-area: ribbon; align-items: center; padding-block: 0; font-size: 8.5px; }
+.plot-slot--axis { justify-content: center; align-items: center; padding: 0 4px; border-style: dotted; font-size: 8.5px; }
+.plot-slot--axis[data-area="main-y"] { grid-area: main-y; }
+.plot-slot--axis[data-area="sub-y"] { grid-area: sub-y; }
+.plot-slot--axis[data-area="x"] { grid-area: x; justify-content: flex-end; padding-right: 7px; }
+/* Ticker watermark, TradingView style */
+.plot-slot__mark { position: absolute; inset: 0; display: grid; place-items: center; color: var(--white-a04); font-family: var(--font-display); font-size: clamp(28px, 11cqw, 84px); font-weight: 800; letter-spacing: -0.02em; pointer-events: none; }
+
+/* Narrow panel: the company name goes first, then tab labels (the active
+   one keeps its label longest), the exchange and the change. */
+@container chart (max-width: 620px) { .chart-company__name { display: none; } }
+@container chart (max-width: 500px) {
+  .chart-tab:not([aria-selected="true"]) { padding: 0 8px; }
+  .chart-tab:not([aria-selected="true"]) span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+}
+@container chart (max-width: 400px) { .chart-company { display: none; } }
+@container chart (max-width: 320px) {
+  .chart-quote__change { display: none; }
+  .chart-tab { padding: 0 8px; }
+  .chart-tab span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+}
+@container chart (max-width: 260px) { .chart-metrics { display: none; } }
+@container chart (max-width: 196px) { .chart-quote { display: none; } }
+
+/* Short or narrow stage: the plot keeps priority */
+@container chart-stage (max-height: 300px) { .chart-stats { display: none; } }
+@container chart-stage (max-height: 230px) { .chart-head__detail, .chart-signals, .chart-legend { display: none; } }
+@container chart-stage (max-width: 440px) {
+  .chart-meter__label[data-side] { display: none; }
+  .chart-since { display: none; }
+}
+@container chart-stage (max-width: 320px) {
+  .chart-head { grid-template-columns: minmax(0, 1fr); grid-template-areas: "state" "meter"; }
+  .chart-head__detail, .chart-signals, .chart-legend { display: none; }
+  .chart-seg button { min-width: 24px; padding: 0 5px; }
+  .chart-slots { --chart-axis-w: 42px; }
+  .plot-slot--axis { padding: 0 2px; letter-spacing: 0.04em; }
+}
+@media (prefers-reduced-motion: reduce) { .chart-view:not([hidden]) { animation: none; } }
 
 /* ---- Splitters: the gap between panes is the drag handle ---- */
 
@@ -1066,7 +1305,8 @@ tr.is-new td, .alert-card.is-new { animation: rowIn 1.6s var(--ease); }
   .terminal.is-full .card-view { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
   .terminal.is-full .card-list { flex: 1 1 auto; min-height: 0; max-height: none; }
   .splitter { display: none; }
-  .chart-slot, .terminal > .chart-slot, .terminal > .constellation { flex: none; height: 220px; }
+  .terminal > .constellation { flex: none; height: 220px; }
+  .chart-panel { flex: none; height: 560px; }
 
   .table-wrap { display: none; }
 
