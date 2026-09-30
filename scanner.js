@@ -2515,9 +2515,9 @@
         const exp = `${String(card.expMonth).padStart(2, "0")}/${String(card.expYear).slice(-2)}`;
         const name = node("div", "am-method__name");
         name.append(node("strong", "", brandName(card.brand)));
-        if (card.isDefault) name.append(node("span", "am-badge", "Default"));
         text.append(name, node("span", "am-method__number", `•••• ${card.last4} · ${exp}`));
         row.append(brand, text);
+        if (card.isDefault) row.append(node("span", "am-badge", "Default")); // just left of ⋯
 
         const toggle = node("button", "icon-btn");
         toggle.type = "button";
@@ -2655,6 +2655,11 @@
     });
 
     /* Subscriptions tab */
+    // View all: the full invoice history lives in the payment provider's
+    // customer portal (Stripe's portal lists every invoice with its PDF).
+    // Frontend only: the backend will create the portal session and return
+    // its URL; until then the link says so.
+    $("[data-am-portal]").addEventListener("click", () => showToast("The billing portal opens here once payments are connected"));
     $("[data-am-cancel-plan]").addEventListener("click", (e) => askConfirm({
       title: "Cancel your plan?",
       text: `You'll keep full access to your scanner until ${longDate(ACCOUNT.plan.renews)}. After that, the scanner and its alerts stop.`,

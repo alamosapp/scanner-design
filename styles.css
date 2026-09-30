@@ -654,8 +654,8 @@ html:has(.account-modal[open], .form-modal[open]) { overflow: hidden; }
 .am-txn:hover { background: var(--white-a04); }
 .am-txn:focus-visible { outline: none; box-shadow: inset var(--ring); }
 /* → the invoice (the payment provider's page, once connected) */
-.am-txn__go { width: 16px; height: 16px; fill: none; stroke: var(--text-3); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; transition: stroke var(--t-fast), transform var(--t-fast); }
-.am-txn:hover .am-txn__go { stroke: var(--text); transform: translateX(2px); }
+.am-txn__go { width: 16px; height: 16px; fill: none; stroke: var(--text-3); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; transition: stroke var(--t-fast); }
+.am-txn:hover .am-txn__go { stroke: var(--text); }
 .am-txn + .am-txn { border-top: 1px solid var(--line); }
 .am-txn__name { overflow: hidden; font-weight: 600; color: var(--text); text-overflow: ellipsis; white-space: nowrap; }
 .am-txn__date, .am-txn__amount { font-family: var(--font-sans); font-size: 12.5px; font-variant-numeric: tabular-nums; }
@@ -678,6 +678,9 @@ html:has(.account-modal[open], .form-modal[open]) { overflow: hidden; }
 }
 .am-method__brand svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .am-method__text { flex: 1; min-width: 0; }
+.am-method > .am-badge { margin-right: 2px; }
+/* "View all": the full invoice history in the payment provider's portal */
+.am-section-foot { display: flex; justify-content: flex-end; margin-top: 8px; }
 .am-method__name { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .am-method__name strong { font-size: 14px; font-weight: 500; }
 .am-method__number { font-family: var(--font-mono); font-size: 12.5px; color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -934,8 +937,14 @@ select.field__input { appearance: none; padding-right: 36px; cursor: pointer; }
 .btn-danger:hover:not(:disabled) { background: var(--red); border-color: var(--red); color: var(--white); box-shadow: 0 8px 24px -10px var(--red-a32); }
 /* Icon and label turn together: the icon's stroke is set per state with the
    label's transition (an inherited currentColor can repaint late mid-transition) */
-.btn-danger svg { stroke: var(--red); transition: stroke var(--t-fast); }
-.btn-danger:hover:not(:disabled) svg { stroke: var(--white); }
+/* Danger inverts (red on dark → white on red). Fading the ink would pass
+   through pink on red, unreadable mid-way, so the label and icon flip at
+   once instead: on hover right away (white reads on the dark tint), on leave
+   once the red fill has faded. The fill keeps its fade. */
+.btn-danger { transition: background var(--t-fast), border-color var(--t-fast), box-shadow var(--t-fast), transform var(--t-fast), opacity var(--t-fast), color 0s 120ms; }
+.btn-danger svg { stroke: var(--red); transition: stroke 0s 120ms; }
+.btn-danger:hover:not(:disabled) { transition-delay: 0s, 0s, 0s, 0s, 0s, 0s; }
+.btn-danger:hover:not(:disabled) svg { stroke: var(--white); transition-delay: 0s; }
 .btn-danger:focus-visible { box-shadow: 0 0 0 3px var(--red-a32); }
 
 /* Switch (role="switch", aria-checked) */
