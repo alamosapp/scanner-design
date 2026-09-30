@@ -1939,7 +1939,8 @@
     openers.forEach((btn) => btn.addEventListener("click", () => {
       openBtn = btn;
       panel.showModal();
-      search.focus();
+      panel.querySelector("[data-guide-body]").scrollTop = 0; // always from the top
+      search.focus({ preventScroll: true });
     }));
     panel.querySelector("[data-guide-close]").addEventListener("click", () => panel.close());
     panel.addEventListener("click", (e) => {
@@ -2028,9 +2029,10 @@
     }));
   };
 
-  // A click on a modal dialog's backdrop (outside its box) closes it.
-  const closeOnBackdrop = (dialog) => dialog.addEventListener("click", (e) => {
-    if (e.target !== dialog) return;
+  // A click on a modal dialog's backdrop (outside its box) closes it, unless
+  // `canClose` says no.
+  const closeOnBackdrop = (dialog, canClose = () => true) => dialog.addEventListener("click", (e) => {
+    if (e.target !== dialog || !canClose()) return;
     const r = dialog.getBoundingClientRect();
     if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) dialog.close();
   });
@@ -2137,6 +2139,9 @@
       { name: "Pulse Pro", date: "2026-09-25", status: "Paid", amount: 39 },
       { name: "Pulse Pro", date: "2026-08-25", status: "Paid", amount: 39 },
       { name: "Pulse Pro", date: "2026-07-25", status: "Paid", amount: 39 },
+      { name: "Pulse Pro", date: "2026-06-25", status: "Paid", amount: 39 },
+      { name: "Pulse Pro", date: "2026-05-25", status: "Paid", amount: 39 },
+      { name: "Pulse Pro", date: "2026-04-25", status: "Paid", amount: 39 },
     ],
     billing: {
       email: "jordan.lee@example.com",
@@ -2162,6 +2167,11 @@
     "Entre Ríos", "Formosa", "Jujuy", "La Pampa", "La Rioja", "Mendoza", "Misiones", "Neuquén", "Río Negro",
     "Salta", "San Juan", "San Luis", "Santa Cruz", "Santa Fe", "Santiago del Estero", "Tierra del Fuego", "Tucumán",
   ];
+  // Transaction history: the latest payments, newest first. Five covers a
+  // monthly plan's last few months without making the tab long; older ones
+  // live in the payment provider's billing page.
+  const TXN_LIMIT = 5;
+  const CARD_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5.5" width="18" height="13" rx="2.5"/><path d="M3 10h18M7 15h3"/></svg>';
   const CARD_BRANDS = { visa: ["Visa", "Visa"], mastercard: ["Mastercard", "MC"], amex: ["American Express", "Amex"], discover: ["Discover", "Disc"] };
   // Gradient stops for New design, as palette tokens; neighbours read well together.
   const AVATAR_STOPS = ["--green", "--teal", "--cyan", "--violet", "--pink", "--orange", "--amber"];
@@ -2195,6 +2205,30 @@
     return el;
   };
 
+  /* Dialogs with text fields don't close by accident while one has the
+     focus: Esc first leaves the field (the focus goes to the title), and a
+     click on the backdrop does nothing. Cancel and ✕ still close. Returns
+     the backdrop check for closeOnBackdrop. */
+  const holdWhileTyping = (dialog) => {
+    const inField = () => dialog.contains(document.activeElement) && document.activeElement.matches(".field__input");
+    const leaveField = () => dialog.querySelector(".am-title, .fm-title").focus();
+    let typing = false;
+    // Read before the click moves the focus away from the field.
+    dialog.addEventListener("pointerdown", () => { typing = inField(); }, true);
+    dialog.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape" || !inField()) return;
+      e.preventDefault();
+      e.stopPropagation();
+      leaveField();
+    });
+    dialog.addEventListener("cancel", (e) => {
+      if (!inField()) return;
+      e.preventDefault();
+      leaveField();
+    });
+    return () => !typing;
+  };
+
   /* A form dialog (Edit billing, Edit card, Add card). `fill(form, ctx)`
      loads it; `save(form, ctx)` returns an error ({ message, field }) or
      nothing when it saved. The dialog handles Save's state, the error line,
@@ -2226,7 +2260,7 @@
       dialog.close();
     });
     dialog.querySelectorAll("[data-fm-close]").forEach((b) => b.addEventListener("click", () => dialog.close()));
-    closeOnBackdrop(dialog);
+    closeOnBackdrop(dialog, holdWhileTyping(dialog));
     dialog.addEventListener("close", () => {
       form.reset();
       showError("");
@@ -2244,7 +2278,9 @@
         submit.disabled = true;
         showError("");
         dialog.showModal();
-        dialog.querySelector(".fm-title").focus();
+        // Always from the top: the header and the first fields.
+        dialog.querySelector(".fm-body").scrollTop = 0;
+        dialog.querySelector(".fm-title").focus({ preventScroll: true });
       },
     };
   };
@@ -2344,7 +2380,7 @@
       tablist.dataset.active = name;
       body.scrollTop = 0;
       if (focus === "tab") tabs.find((t) => t.dataset.amTab === name).focus();
-      else if (focus === "title") title.focus();
+      else if (focus === "title") title.focus({ preventScroll: true });
     };
     tabs.forEach((tab) => tab.addEventListener("click", () => select(tab.dataset.amTab, null)));
     tablist.addEventListener("keydown", (e) => {
@@ -2401,10 +2437,14 @@
     const paintInvoices = () => {
       const box = $("[data-am-invoices]");
       if (!ACCOUNT.invoices.length) { box.replaceChildren(node("p", "am-empty", "No transactions yet.")); return; }
-      box.replaceChildren(...ACCOUNT.invoices.map((inv) => {
-        const row = node("div", "am-txn");
+      box.replaceChildren(...ACCOUNT.invoices.slice(0, TXN_LIMIT).map((inv) => {
+        // Each row will open its invoice (inv.url, from the payment provider);
+        // the mock has none, so it's a plain row with the same chevron.
+        const row = node(inv.url ? "a" : "div", "am-txn");
+        if (inv.url) Object.assign(row, { href: inv.url, target: "_blank", rel: "noopener noreferrer" });
         const badge = node("span", "am-badge", inv.status);
         row.append(node("span", "am-txn__name", inv.name), node("span", "am-txn__date", shortDate(inv.date)), badge, node("span", "am-txn__amount", money(inv.amount)));
+        row.insertAdjacentHTML("beforeend", '<svg class="am-txn__go" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>');
         return row;
       }));
     };
@@ -2468,7 +2508,8 @@
       box.replaceChildren(...ACCOUNT.cards.map((card) => {
         const row = node("div", "am-card am-method");
         row.dataset.card = card.id;
-        const brand = node("span", "am-method__brand", CARD_BRANDS[card.brand]?.[1] || "Card");
+        const brand = node("span", "am-method__brand");
+        brand.innerHTML = CARD_ICON;
         brand.setAttribute("aria-hidden", "true");
         const text = node("div", "am-method__text");
         const exp = `${String(card.expMonth).padStart(2, "0")}/${String(card.expYear).slice(-2)}`;
@@ -2659,7 +2700,8 @@
     const editCard = mountFormDialog(document.getElementById("edit-card"), {
       fill: (form, card) => {
         const id = form.querySelector("[data-fm-card]");
-        const brand = node("span", "am-method__brand", CARD_BRANDS[card.brand]?.[1] || "Card");
+        const brand = node("span", "am-method__brand");
+        brand.innerHTML = CARD_ICON;
         brand.setAttribute("aria-hidden", "true");
         id.replaceChildren(brand, `${brandName(card.brand)} ending in ${card.last4}`);
         form.elements.expMonth.value = String(card.expMonth).padStart(2, "0");
@@ -2729,7 +2771,7 @@
 
     /* Open / close */
     dialog.querySelector("[data-am-close]").addEventListener("click", () => dialog.close());
-    closeOnBackdrop(dialog);
+    closeOnBackdrop(dialog, holdWhileTyping(dialog));
     // Esc closes an open card menu first.
     dialog.addEventListener("cancel", (e) => {
       if (!openMenu) return;

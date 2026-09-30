@@ -19,7 +19,7 @@ Escritorio                                   Móvil (pantalla completa)
 | Account | Subscriptions |
 |---|---|
 | Perfil: avatar (tocarlo o **New design** dibuja un degradado nuevo), nombre y email | Plan: nombre, texto de estado y chip (**Active** verde / **Ending** ámbar) |
-| Personal information: nombre editable; el email es el inicio de sesión y es de solo lectura | Transaction history: nombre, fecha, estado y monto |
+| Personal information: nombre editable; el email es el inicio de sesión y es de solo lectura | Transaction history: los **5 últimos pagos** (`TXN_LIMIT`) con nombre, fecha, estado, monto y un chevron › (cada fila abrirá su factura del proveedor de pago cuando exista `url`) |
 | Session: **Log out** de este dispositivo | Billing information: email, nombre y dirección, con **Edit** |
 | Danger zone: **Delete**, bloqueado mientras el plan se renueva, con un enlace a *Cancel your plan in Subscriptions* | Payment methods: tarjetas con **Add new**; el menú ⋯ de cada una tiene *Edit card*, *Set as default* y *Remove card* |
 | | **Cancel plan** o, si ya está cancelado, **Resume plan** |
@@ -41,6 +41,12 @@ Escritorio                                   Móvil (pantalla completa)
 
 ## Comportamiento
 
+- **No se cierran por accidente** (`holdWhileTyping`): con un `.field__input` enfocado, Esc primero sale del campo (el foco pasa al título) y un clic en el fondo no hace nada. Cancel y ✕ siguen cerrando.
+- **Siempre abren desde arriba**: cada apertura vuelve el scroll a 0 y enfoca el título sin desplazar (también la User Guide).
+- **Botón peligroso deshabilitado** (`.btn-danger.btn-sm:disabled`): muestra un candado (`--icon-lock`, máscara en `currentColor`).
+- **Ícono y texto cambian juntos** en `.btn-danger` y `.am-menu-item`: el `stroke` del ícono se define por estado con la misma transición que el texto (un `currentColor` heredado puede repintarse tarde a mitad de la transición).
+- Las tarjetas muestran un ícono de tarjeta en `.am-method__brand` (la marca va en el nombre).
+
 - Cada cambio repinta todo lo que lo muestra (avatar de la nav y del menú, nombre, email, etiqueta del plan del menú y ambas pestañas) y lo confirma con un toast.
 - Tras repintar una tarjeta, el foco vuelve a su botón ⋯ (o a *Add new* si ya no existe).
 - **Menú ⋯**: se abre de uno en uno. Esc lo cierra sin cerrar el diálogo. Cerca del final del área con scroll se abre hacia arriba.
@@ -50,7 +56,7 @@ Escritorio                                   Móvil (pantalla completa)
 
 ## Tokens (`:root`)
 
-`--avatar-xl`, `--avatar-ink`, `--acct-w`, `--acct-h`, `--acct-side-w`, `--acct-pad`, `--acct-gap`, `--acct-row-h`, `--form-w` y `--form-field-h` (48 px en móvil). No hay colores nuevos:
+`--avatar-xl`, `--avatar-ink`, `--acct-w`, `--acct-h`, `--acct-side-w`, `--acct-pad`, `--acct-gap`, `--acct-row-h`, `--form-w`, `--form-field-h` (48 px en móvil) y `--icon-lock`. No hay colores nuevos:
 - Superficies y líneas de la paleta.
 - `--pro` para lo activo.
 - Rojo para lo que termina algo y ámbar para *Ending*.
