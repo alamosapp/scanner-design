@@ -5196,6 +5196,986 @@
     };
   };
 
+  /* ---- Bull vs. Bear: mock feed --------------------------------------------
+     Who controls the ticker, −100 (sellers) to +100 (buyers): the monitor's
+     algorithm (see BULL_BEAR.md) run in the browser on one simulated ticker,
+     GXAI, so the chart is designed against data that behaves like the real
+     thing. Three pieces of evidence, each weighing half after 2.5 minutes
+     (halted time does not count):
+     - alert flow A (40 %): Buying / Selling Pressure alerts weighted by
+       log2(1 + Vol. 1m / 100), capped at 12; A = tanh((buy − sell) / 16);
+     - volume flow T (35 %): each Top List update's volume split into buy and
+       sell by its return against recent volatility (Bulk Volume
+       Classification), net against the day's usual volume;
+     - price structure P (25 %): 3-minute momentum and distance to VWAP, both
+       in units of volatility.
+     Control C = 100 × (0.40 A + 0.35 T + 0.25 P). Every point also gets a
+     momentum state (Real conviction, Buyers taking over, Divergence…); the
+     state in force only changes once no point in the last 20 s backs it.
+     The day is scripted (pre-market, open drive, a Halt, a flush, a
+     divergence, a tug of war, a data gap, buyers back) on a mock clock that
+     reads 10:44 ET when the page opens; from there live regimes follow.
+     Only the main window runs it; copies get the series over the channel. */
+
+  const BB_SYM = "GXAI";
+  const BB_PREV_CLOSE = 1.66;        // GXAI's change in the chart bar
+  const BB_CLOCK = 10 * 3600 + 44 * 60; // mock clock at page load (ET seconds of day)
+  const BB_HALF_LIFE = 150e3;
+  const BB_LOT = 5000;               // one Top List update every 5 s (the live CSV: ~15 s)
+  const BB_GAP = 120e3;              // longer without data: no volume attributed, drawn gray
+  const BB_DEBOUNCE = 20e3;
+  const BB_MAX_WEIGHT = 12;          // heaviest alert: bars are drawn against it
+  const BB_LABEL = {
+    warming_up: "Warming up", quiet: "Quiet tape", tug_of_war: "Tug of war", holding: "Momentum holding",
+    fading: "Momentum fading", conviction: "Real conviction", divergence: "Divergence detected", halted: "Halted",
+  };
+  const bbLabel = (key, side) => (key === "taking_over" ? `${side > 0 ? "Buyers" : "Sellers"} taking over` : BB_LABEL[key]);
+
+  // The scripted day: minutes · price drift %/min · volume × usual · alerts/min
+  const BB_SCRIPT = [
+    { min: 40, drift: 0.05, vol: 0.3, buy: 0.08, sell: 0.06 },  // pre-market: quiet
+    { min: 18, drift: 0.9, vol: 1.7, buy: 0.9, sell: 0.05 },    // open drive: buyers take over
+    { min: 8, drift: 0.15, vol: 1, buy: 0.3, sell: 0.1 },       // holding
+    { min: 5, halt: true },                                     // volatility halt
+    { min: 11, drift: -0.8, vol: 1.9, buy: 0.05, sell: 1 },     // reopen flush: sellers
+    { min: 8, drift: 0.35, vol: 0.9, buy: 0, sell: 0.7 },       // price up, flow down: divergence
+    { min: 10, drift: 0, vol: 0.9, buy: 0.4, sell: 0.4 },       // tug of war
+    { min: 3, gap: true },                                      // off the Top List
+    { min: 11, drift: 0.6, vol: 1.4, buy: 0.8, sell: 0.1 },     // buyers back
+  ];
+  // Live: one of these every 2–5 minutes
+  const BB_REGIMES = [
+    { drift: 0.5, vol: 1.3, buy: 0.7, sell: 0.1 },
+    { drift: 0.1, vol: 0.8, buy: 0.3, sell: 0.3 },
+    { drift: -0.5, vol: 1.4, buy: 0.1, sell: 0.7 },
+    { drift: 0, vol: 0.35, buy: 0.05, sell: 0.05 },
+    { drift: 0.3, vol: 0.9, buy: 0, sell: 0.6 },
+  ];
+
+  // +62 · −18 · 0 (true minus sign)
+  const fmtScore = (v) => {
+    const r = Math.round(v);
+    return r > 0 ? `+${r}` : r < 0 ? `−${-r}` : "0";
+  };
+  const clampTo = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  // Normal CDF (Abramowitz–Stegun erf, error < 1.5e-7)
+  const ndtr = (x) => {
+    const a = Math.abs(x) / Math.SQRT2;
+    const k = 1 / (1 + 0.3275911 * a);
+    const erf = 1 - ((((1.061405429 * k - 1.453152027) * k + 1.421413741) * k - 0.284496736) * k + 0.254829592) * k * Math.exp(-a * a);
+    return 0.5 * (1 + Math.sign(x) * erf);
+  };
+  // Time spent halted between two instants (a Halt with no end is still on).
+  const haltedIn = (halts, from, to) => halts.reduce((sum, h) => sum + Math.max(0, Math.min(h.end ?? Infinity, to) - Math.max(h.start, from)), 0);
+  // Last index with t <= time (0 if none).
+  const indexAt = (points, time) => {
+    let lo = 0;
+    let hi = points.length - 1;
+    let found = 0;
+    while (lo <= hi) {
+      const m = (lo + hi) >> 1;
+      if (points[m].t <= time) { found = m; lo = m + 1; } else hi = m - 1;
+    }
+    return found;
+  };
+  const ET_PARTS = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "numeric", second: "numeric", hourCycle: "h23" });
+  const ET_HM = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  const ET_HMS = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" });
+
+  const createBullBearFeed = () => {
+    const now = Date.now();
+    const et = Object.fromEntries(ET_PARTS.formatToParts(now).map(({ type, value }) => [type, Number(value)]));
+    const shift = (et.hour * 3600 + et.minute * 60 + et.second - BB_CLOCK) * 1000 + (now % 1000);
+    const clock = () => Date.now() - shift;
+    const anchor = clock();
+    const session = (t) => {
+      const s = (((BB_CLOCK + (t - anchor) / 1000) % 86400) + 86400) % 86400;
+      return s < 9.5 * 3600 ? "pre" : s >= 16 * 3600 ? "post" : "";
+    };
+
+    const rand = seeded(BB_SYM);
+    const gauss = () => Math.sqrt(-2 * Math.log(1 - rand())) * Math.cos(2 * Math.PI * rand());
+    const points = [];
+    const alerts = [];
+    const halts = [];
+    // Decayed sums: buy / sell alert weight and volume, all volume; plus day totals
+    const ev = { t: 0, bA: 0, sA: 0, bV: 0, sV: 0, vol: 0, day: 0, active: 0, pv: 0, v: 0, lot: 0, last: 0, lots: 0, variance: 0.005 ** 2 / 15e3 };
+    let price = 2.4;
+    let status = null;
+    let summary = null;
+
+    const advance = (t) => {
+      if (ev.t) {
+        const dt = Math.max(0, t - ev.t - haltedIn(halts, ev.t, t));
+        const k = 2 ** (-dt / BB_HALF_LIFE);
+        ev.bA *= k; ev.sA *= k; ev.bV *= k; ev.sV *= k; ev.vol *= k;
+        ev.active += dt;
+      }
+      ev.t = t;
+    };
+
+    const priceAt = (t) => points[indexAt(points, t)]?.price ?? price;
+
+    // Raw state of one point, in priority order (BULL_BEAR.md · Estados)
+    const classify = (t, { c, A, T, P, mom, part, buyShare, buying, selling }) => {
+      const side = Math.sign(Math.round(c));
+      const abs = Math.abs(c);
+      const who = side > 0 ? "Buyers" : "Sellers";
+      const pct = (v) => `${Math.round(v * 100)}%`;
+      const x = `${part.toFixed(1)}x`;
+      if (ev.lots < 4 && alerts.length < 2) return { key: "warming_up", side: 0, detail: `Collecting data: ${ev.lots} Top List updates so far.` };
+      const flow = (0.4 * A + 0.35 * T) / 0.75;
+      if (mom >= 0.45 && flow <= -0.25) return { key: "divergence", side: -1, detail: `Price is rising while ${pct(1 - buyShare)} of volume sells and selling alerts lead: no confirmation.` };
+      if (mom <= -0.45 && flow >= 0.25) return { key: "divergence", side: 1, detail: `Price is falling but buyers absorb: ${pct(buyShare)} of volume on up-ticks.` };
+      if (abs >= 50 && side * A >= 0.3 && side * T >= 0.2 && side * P >= 0.2 && part >= 0.9) {
+        return { key: "conviction", side, detail: side > 0
+          ? `Buy alerts, up-tick volume and price above VWAP all agree on ${x} volume.`
+          : `Sell alerts, down-tick volume and price below VWAP all agree on ${x} volume.` };
+      }
+      let peak = 0;
+      let recent = -Infinity;
+      let flipped = false;
+      let swing = 0;
+      for (let i = points.length - 1; i >= 0 && points[i].t >= t - 600e3; i--) {
+        const v = side * points[i].c;
+        peak = Math.max(peak, v);
+        if (points[i].t >= t - 180e3 && -v >= 15) flipped = true;
+        if (points[i].t >= t - 120e3) { swing = Math.max(swing, side * (c - points[i].c)); recent = Math.max(recent, v); }
+      }
+      if (abs >= 20 && (flipped || swing >= 40)) return { key: "taking_over", side, detail: `${who} swung control to ${fmtScore(c)} in the last ${flipped ? 3 : 2} minutes.` };
+      if (peak >= 40 && abs <= 0.6 * peak && recent - abs >= 10 && abs >= 10) {
+        return { key: "fading", side, detail: `${who} still lead, but control fell from ${fmtScore(side * peak)} to ${fmtScore(c)} in 10 minutes.` };
+      }
+      if (abs >= 25 && !(side > 0 ? buying : selling) && part < 0.5) {
+        return { key: "fading", side, detail: `${who} lead with no ${side > 0 ? "buying" : "selling"} alerts in 5 minutes and ${x} volume.` };
+      }
+      if (abs >= 25) {
+        return { key: "holding", side, detail: `${who} keep control at ${fmtScore(c)}: ${pct(side > 0 ? buyShare : 1 - buyShare)} of recent volume on ${side > 0 ? "up" : "down"}-ticks.` };
+      }
+      if ((buying && selling) || part >= 0.5) return { key: "tug_of_war", side: 0, detail: `${buying} buying vs. ${selling} selling alerts in 5 minutes: neither side holds ±25.` };
+      return { key: "quiet", side: 0, detail: `Little activity: ${x} normal volume and no pressure alerts to lead.` };
+    };
+
+    const evaluate = (t) => {
+      const A = Math.tanh((ev.bA - ev.sA) / 16);
+      const active = Math.max(ev.active, BB_LOT);
+      const usual = ((ev.day / active) * BB_HALF_LIFE / Math.LN2) * (1 - 2 ** (-active / BB_HALF_LIFE));
+      const T = ev.bV + ev.sV > 0 ? (ev.bV - ev.sV) / (ev.bV + ev.sV + 0.25 * usual) : 0;
+      const part = usual > 0 ? ev.vol / usual : 0;
+      const z = (ret, ms) => ret / Math.sqrt(ev.variance * ms);
+      const mom = Math.tanh(z(Math.log(price / priceAt(t - 180e3)), 180e3) / 2);
+      const vwap = ev.v ? ev.pv / ev.v : price;
+      const P = (mom + Math.tanh(z(Math.log(price / vwap), 300e3) / 2)) / 2;
+      const c = 100 * (0.4 * A + 0.35 * T + 0.25 * P);
+      const buyShare = ev.bV + ev.sV > 0 ? ev.bV / (ev.bV + ev.sV) : 0.5;
+      let buying = 0;
+      let selling = 0;
+      for (let i = alerts.length - 1; i >= 0 && alerts[i].t > t - 300e3; i--) alerts[i].side > 0 ? buying++ : selling++;
+      const raw = classify(t, { c, A, T, P, mom, part, buyShare, buying, selling });
+      const point = { t, c, alerts: A, tape: T, trend: P, price: round(price, 4), part, raw: `${raw.key}:${raw.side}`, state: null, session: session(t) };
+      // Debounce: the state in force holds while a point of the last 20 s backs it
+      const current = status && `${status.key}:${status.side}`;
+      let held = current === point.raw;
+      for (let i = points.length - 1; !held && current && i >= 0 && points[i].t >= t - BB_DEBOUNCE; i--) held = points[i].raw === current;
+      if (!held) status = { key: raw.key, side: raw.side, label: bbLabel(raw.key, raw.side), detail: raw.detail, since: t };
+      else if (current === point.raw) status.detail = raw.detail; // the detail follows the last point that backs it
+      point.state = { key: status.key, side: status.side, label: status.label };
+      points.push(point);
+      summary = { control: c, alerts: A, tape: T, trend: P, buyShare, participation: part, buying, selling, price: point.price, vwap };
+    };
+
+    const lot = (t, volume) => {
+      const since = ev.lot ? t - ev.lot - haltedIn(halts, ev.lot, t) : Infinity;
+      advance(t);
+      if (since <= BB_GAP) {
+        const r = Math.log(price / ev.last);
+        const f = ndtr(r / Math.sqrt(ev.variance * since));
+        ev.bV += f * volume;
+        ev.sV += (1 - f) * volume;
+        // ~40 updates of memory, never below half a tick per update
+        ev.variance = Math.max((0.005 / price) ** 2 / BB_LOT, ev.variance + (r * r / since - ev.variance) / 40);
+      }
+      ev.vol += volume; ev.day += volume; ev.pv += price * volume; ev.v += volume;
+      ev.lot = t; ev.last = price; ev.lots += 1;
+      evaluate(t);
+    };
+
+    const alert = (t, side, vol) => {
+      advance(t);
+      const weight = clampTo(Math.log2(1 + vol / 100), 0.5, BB_MAX_WEIGHT);
+      if (side > 0) ev.bA += weight; else ev.sA += weight;
+      alerts.push({ t, side, weight, vol, price: round(price, 4) });
+      evaluate(t);
+    };
+
+    // One update: the alerts since the last one (in time order), then the update
+    const step = (phase, t) => {
+      const from = ev.lot || t - BB_LOT;
+      const span = t - from;
+      const due = [[1, phase.buy], [-1, phase.sell]]
+        .filter(([, perMin]) => rand() < (perMin * span) / 60e3)
+        .map(([side]) => ({ side, t: Math.round(from + (0.1 + 0.8 * rand()) * span), vol: 100 * 2 ** (1 + rand() * 7) }))
+        .sort((a, b) => a.t - b.t);
+      due.forEach((a) => alert(a.t, a.side, a.vol));
+      price = Math.max(0.05, price * Math.exp((phase.drift / 100) * (span / 60e3) + 0.0013 * gauss()));
+      lot(t, 12e3 * phase.vol * Math.exp(0.35 * gauss()));
+    };
+
+    let t = anchor - BB_SCRIPT.reduce((sum, p) => sum + p.min, 0) * 60e3;
+    for (const phase of BB_SCRIPT) {
+      const end = t + phase.min * 60e3;
+      if (phase.halt) halts.push({ start: t, end });
+      else if (!phase.gap) for (let at = t + BB_LOT; at <= end; at += BB_LOT) step(phase, at);
+      t = end;
+    }
+
+    const copy = () => ({ halts: halts.map((h) => ({ ...h })), status: { ...status }, summary: { ...summary } });
+    const listeners = [];
+    let regime = BB_SCRIPT[BB_SCRIPT.length - 1];
+    let regimeEnd = anchor + 3 * 60e3;
+    setInterval(() => {
+      const p0 = points.length;
+      const a0 = alerts.length;
+      const at = Math.max(ev.lot + 1000, clock());
+      if (at >= regimeEnd) {
+        regime = BB_REGIMES[Math.floor(rand() * BB_REGIMES.length)];
+        regimeEnd = at + (2 + rand() * 3) * 60e3;
+      }
+      step(regime, at);
+      const update = { points: points.slice(p0), alerts: alerts.slice(a0), ...copy() };
+      listeners.forEach((fn) => fn(update));
+    }, BB_LOT);
+
+    return {
+      dump: () => ({ points: points.slice(), alerts: alerts.slice(), ...copy() }),
+      onUpdate: (fn) => listeners.push(fn),
+    };
+  };
+
+  /* ---- Bull vs. Bear chart --------------------------------------------------
+     TradingView-style baseline chart on a canvas: control line green above
+     zero and red below, each with an area that fades toward the zero line;
+     fixed −100…+100 scale, so +60 always means the same. Around it:
+     - band ±25 (nobody leads), grid at ±50, solid zero line;
+     - each alert a bar from zero (Buying up, Selling down), as tall as its
+       weight; never merged, so a burst reads as a wall of bars;
+     - the price, neutral gray on a scale of its own, to spot divergences;
+     - Halts shaded and labeled (the line stays flat, then jumps at the
+       reopen); over 2 minutes without data, the line goes on solid in gray;
+       pre-market / after hours shaded;
+     - the state ribbon under the plot, stronger the clearer the lead;
+     - right axis: BULLS · +50 · 0 · −50 · BEARS and the live tags (control,
+       price); time axis with HH:MM, or HH:MM:SS below one-minute ticks.
+     Nothing overlaps: axis labels give way to the tags, the two tags push
+     each other apart, the HALT label only goes where no line, bar or price
+     passes, and time labels keep their width apart. The hover card sits
+     beside the cursor (left of it, right near the left edge).
+     Crosshair (magnet): snaps to the nearest point; chips on both axes. The
+     keyboard moves it too (←/→, Shift for a minute, Home/End, Esc).
+     Colors, strengths and sizes are tokens in :root (--chart-*); the window
+     and the price toggle are saved in localStorage. */
+
+  const BB_KEY = "scanner:bull-bear:v1";
+  const BB_WINDOWS = [60e3, 300e3, 900e3, 1800e3, 3600e3, 0];
+  const BB_ZONE = 25;                // |control| < 25: nobody leads
+  const BB_MIN_SPAN = 5 * 60e3;      // Day right after the first data still spans 5 minutes
+  const BB_TIME_STEPS = [5e3, 10e3, 15e3, 30e3, 60e3, 120e3, 300e3, 600e3, 900e3, 1800e3, 3600e3, 7200e3];
+  // Ribbon strength per state: the clearer the lead, the stronger.
+  const BB_STATE_ALPHA = { conviction: 0.95, taking_over: 0.75, divergence: 0.85, holding: 0.55, fading: 0.3, tug_of_war: 0.35, quiet: 0.16, warming_up: 0.1, halted: 0.45 };
+  const BB_AXIS = [[100, "BULLS"], [50, "+50"], [0, "0"], [-50, "−50"], [-100, "BEARS"]];
+  const BB_STAT_TITLES = {
+    alerts: "Net Buying vs. Selling Pressure alerts, weighted by Vol. 1m, with a 2.5-minute half-life (−100 to +100)",
+    buyShare: "Share of recent volume traded on up-ticks: each Top List update is split into buy and sell volume (Bulk Volume Classification)",
+    trend: "3-minute momentum and distance to VWAP, in units of recent volatility (−100 to +100)",
+    participation: "Recent volume against the day's normal pace (1.0x = normal)",
+    count: "Buying / Selling Pressure alerts in the last 5 minutes",
+  };
+  const bbTone = (key, side) => (key === "divergence" ? "warn" : key === "halted" || !side ? "neutral" : side > 0 ? "bull" : "bear");
+
+  const bbPrefs = { window: 1800e3, price: true };
+  const loadBbPrefs = () => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(BB_KEY) || "{}");
+      bbPrefs.window = BB_WINDOWS.includes(saved.window) ? saved.window : 1800e3;
+      bbPrefs.price = typeof saved.price === "boolean" ? saved.price : true;
+    } catch { /* ignore */ }
+  };
+  const saveBbPrefs = () => {
+    try { localStorage.setItem(BB_KEY, JSON.stringify(bbPrefs)); } catch { /* ignore */ }
+  };
+  loadBbPrefs();
+
+  const mountBullBear = (view, root) => {
+    const box = view.querySelector(".chart-canvas");
+    const canvas = box.querySelector("canvas");
+    const tip = box.querySelector(".chart-tip");
+    const note = box.querySelector(".chart-message");
+    const ctx = canvas.getContext("2d");
+    const symbol = root.querySelector(".chart-symbol__input");
+    const quote = { price: root.querySelector(".chart-quote__price"), change: root.querySelector(".chart-quote__change") };
+    const pill = view.querySelector(".chart-state");
+    const since = view.querySelector(".chart-since");
+    const detail = view.querySelector(".chart-head__detail");
+    const meter = view.querySelector(".chart-meter");
+    const fill = meter.querySelector(".chart-meter__fill");
+    const thumb = meter.querySelector(".chart-meter__thumb");
+    const score = meter.querySelector(".chart-meter__score");
+    const stats = view.querySelector(".chart-stats");
+    const legendPrice = view.querySelector(".chart-key[data-key='overlay']").parentElement;
+    const priceBtn = view.querySelector("[data-bb-price]");
+    const windowBtns = [...view.querySelectorAll("[data-bb-window]")];
+    const intro = detail.textContent;
+
+    // Tokens → canvas colors (the canvas normalizes any CSS color to hex).
+    const rootCss = getComputedStyle(document.documentElement);
+    const color = (name, fallback) => {
+      ctx.fillStyle = fallback;
+      ctx.fillStyle = rootCss.getPropertyValue(name).trim() || fallback;
+      return ctx.fillStyle;
+    };
+    const C = {
+      bg: color("--chart-bg", "#08090b"),
+      grid: color("--chart-grid", "#14181e"),
+      bull: color("--chart-bull", "#c8ff38"),
+      bear: color("--chart-bear", "#ff4f6b"),
+      warn: color("--chart-warn", "#ffb84d"),
+      neutral: color("--chart-neutral", "#5d6673"),
+      overlay: color("--chart-overlay", "#b4bbc6"),
+      zero: color("--chart-zero", "#7b8492"),
+      axis: color("--chart-axis-text", "#7b8492"),
+      cross: color("--chart-crosshair", "#7b8492"),
+      chip: color("--chart-chip", "#1f242c"),
+      chipText: color("--text", "#f2f4f7"),
+      ink: color("--chart-ink", "#0a0f00"),
+      mark: color("--chart-watermark", "#12151a"),
+      session: color("--chart-session", "#12151a"),
+      line: color("--line", "#23282f"),
+    };
+    const SANS = rootCss.getPropertyValue("--font-sans").trim() || "sans-serif";
+    const MONO = rootCss.getPropertyValue("--font-mono").trim() || "monospace";
+    const rgb = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+    const alpha = (hex, a) => `rgba(${rgb(hex).join(",")},${a})`;
+    const crisp = (v) => Math.round(v) + 0.5;
+    const TONE = { bull: C.bull, bear: C.bear, warn: C.warn, neutral: C.neutral };
+    const stateColor = (s) => (s ? alpha(s.key === "halted" ? C.neutral : TONE[bbTone(s.key, s.side)], BB_STATE_ALPHA[s.key] ?? 0.3) : null);
+    const sideColor = (c) => (c >= 0.5 ? C.bull : c <= -0.5 ? C.bear : C.neutral);
+
+    // Strengths and sizes, read from the box: a narrow stage may override them.
+    let A = {};
+    let G = {};
+    const readSizes = () => {
+      const css = getComputedStyle(box);
+      const num = (name, fallback) => {
+        const v = parseFloat(css.getPropertyValue(name));
+        return Number.isFinite(v) ? v : fallback;
+      };
+      A = { area: num("--chart-area-a", 0.2), bar: num("--chart-bar-a", 0.4), zone: num("--chart-zone-a", 0.06), overlay: num("--chart-overlay-a", 0.5), session: num("--chart-session-a", 0.6), halt: num("--chart-halt-a", 0.12) };
+      G = {
+        axisW: num("--chart-axis-w", 52), axisH: num("--chart-axis-h", 20), pad: num("--chart-pad", 10), live: num("--chart-live-pad", 28),
+        tag: num("--chart-tag-h", 18), band: num("--chart-band-h", 6), bandGap: num("--chart-band-gap", 6),
+      };
+    };
+
+    let data = null;
+    let W = 0;
+    let H = 0;
+    let frame = 0;
+    let geo = null;
+    let hover = null; // index into data.points
+    let pointerY = null; // cursor's y over the canvas (null: keyboard)
+
+    const ticker = () => symbol.value.trim().toUpperCase();
+    const message = () => {
+      const sym = ticker();
+      if (!sym) return "Type a ticker to see who is in control.";
+      if (sym !== BB_SYM) return `Mock data covers ${BB_SYM} only for now: type ${BB_SYM} to see the chart.`;
+      if (!data || !data.points.length) return `Waiting for ${sym} alerts and Top List data…`;
+      return "";
+    };
+
+    /* Head: state pill, since, detail, meter, component stats, quote */
+    const signOf = (v) => (v >= 0.005 ? "up" : v <= -0.005 ? "down" : "");
+    const renderHead = () => {
+      const off = message();
+      const s = off ? null : data.status;
+      const sum = off ? null : data.summary;
+      pill.dataset.tone = s ? bbTone(s.key, s.side) : "neutral";
+      pill.textContent = s ? s.label : "Waiting for data";
+      since.textContent = s ? `since ${ET_HMS.format(s.since)} ET` : "since --:--:-- ET";
+      detail.textContent = s ? s.detail : intro;
+      detail.title = s ? s.detail : "";
+
+      const c = sum ? clampTo(sum.control, -100, 100) : 0;
+      const r = Math.round(c);
+      meter.dataset.lead = r > 0 ? "bull" : r < 0 ? "bear" : "";
+      fill.style.left = `${50 + Math.min(0, c) / 2}%`;
+      fill.style.width = `${Math.abs(c) / 2}%`;
+      thumb.style.left = `${50 + c / 2}%`;
+      score.textContent = sum ? fmtScore(c) : "—";
+      meter.setAttribute("aria-valuenow", String(r));
+      meter.setAttribute("aria-valuetext", sum ? `${fmtScore(c)}, ${r > 0 ? "bulls ahead" : r < 0 ? "bears ahead" : "balanced"}` : "No data");
+
+      const items = [
+        ["Alert flow", sum && fmtScore(sum.alerts * 100), sum && signOf(sum.alerts), BB_STAT_TITLES.alerts],
+        ["Buy volume", sum && `${Math.round(sum.buyShare * 100)}%`, sum && (sum.buyShare >= 0.55 ? "up" : sum.buyShare <= 0.45 ? "down" : ""), BB_STAT_TITLES.buyShare],
+        ["Price trend", sum && fmtScore(sum.trend * 100), sum && signOf(sum.trend), BB_STAT_TITLES.trend],
+        ["Participation", sum && `${sum.participation.toFixed(1)}x`, "", BB_STAT_TITLES.participation],
+        ["Alerts 5m", sum && `${sum.buying}<small>buy</small>${sum.selling}<small>sell</small>`, "", BB_STAT_TITLES.count],
+      ];
+      stats.innerHTML = items.map(([label, value, sign, title]) => (
+        `<div title="${title}"><dt>${label}</dt><dd${sign ? ` data-sign="${sign}"` : ""}>${value ?? "—"}</dd></div>`
+      )).join("");
+
+      if (sum && ticker() === BB_SYM) {
+        const change = sum.price - BB_PREV_CLOSE;
+        quote.price.textContent = fmtPrice(sum.price);
+        quote.change.dataset.dir = change >= 0 ? "up" : "down";
+        quote.change.innerHTML = `${change >= 0 ? "+" : "-"}${Math.abs(change).toFixed(2)} <span>${fmtPct((change / BB_PREV_CLOSE) * 100, 2)}</span>`;
+      }
+    };
+
+    /* Plot geometry: +100 at `top`, −100 at `bottom`; `pad` above and below
+       leaves room for the tags. The live point sits `live` px from the axis. */
+    const geometry = (points) => {
+      const right = W - G.axisW;
+      const timeTop = H - G.axisH;
+      const band = timeTop - G.bandGap - G.band;
+      const top = G.pad;
+      const bottom = Math.max(top + 40, band - G.bandGap - G.pad);
+      const mid = (top + bottom) / 2;
+      const half = (bottom - top) / 2;
+      const end = points[points.length - 1].t;
+      let start = bbPrefs.window ? end - bbPrefs.window : points[0].t;
+      const minSpan = Math.min(BB_MIN_SPAN, bbPrefs.window || Infinity);
+      if (end - start < minSpan) start = end - minSpan;
+      const usable = Math.max(1, right - G.live);
+      return {
+        right, timeTop, band, top, bottom, mid, half, start, end, usable, floor: bottom + G.pad,
+        first: indexAt(points, start), // the point before the window enters from the left edge
+        x: (t) => ((t - start) / (end - start)) * usable,
+        y: (c) => mid - (clampTo(c, -100, 100) / 100) * half,
+      };
+    };
+
+    // Tags on the value axis, pushed apart (and kept inside [min, max]) so none overlaps.
+    const spread = (tags, min, max, h) => {
+      tags.sort((a, b) => a.y - b.y);
+      for (let pass = 0; pass < 3; pass++) {
+        for (let i = 1; i < tags.length; i++) {
+          const overlap = tags[i - 1].y + h - tags[i].y;
+          if (overlap > 0) { tags[i - 1].y -= overlap / 2; tags[i].y += overlap / 2; }
+        }
+        tags.forEach((tag) => { tag.y = clampTo(tag.y, min, max); });
+        for (let i = 1; i < tags.length; i++) tags[i].y = Math.max(tags[i].y, tags[i - 1].y + h);
+        for (let i = tags.length - 2; i >= 0; i--) tags[i].y = Math.min(tags[i].y, tags[i + 1].y - h);
+      }
+      return tags;
+    };
+
+    const axisTag = (g, y, text, bg, ink) => {
+      ctx.fillStyle = bg;
+      ctx.beginPath();
+      ctx.roundRect(g.right + 3, y - G.tag / 2, G.axisW - 6, G.tag, 3);
+      ctx.fill();
+      ctx.fillStyle = ink;
+      ctx.font = `700 10.5px ${MONO}`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(text, g.right + G.axisW / 2, y + 0.5);
+    };
+
+    const draw = () => {
+      if (!W || !H) return;
+      const dpr = window.devicePixelRatio || 1;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.fillStyle = C.bg;
+      ctx.fillRect(0, 0, W, H);
+      const off = message();
+      note.textContent = off;
+      note.hidden = !off;
+      legendPrice.hidden = !bbPrefs.price;
+      if (off) {
+        geo = null;
+        tip.hidden = true;
+        canvas.setAttribute("aria-label", `Bull vs. Bear chart. ${off}`);
+        return;
+      }
+
+      const { points, alerts, halts, status } = data;
+      const last = points[points.length - 1];
+      const g = (geo = geometry(points));
+      const { right, top, bottom, mid, half, floor, timeTop, start, end, first, usable, x, y } = g;
+      const continuous = (i) => points[i + 1].t - points[i].t - haltedIn(halts, points[i].t, points[i + 1].t) <= BB_GAP;
+      const haltBetween = (from, to) => halts.some((h) => h.start >= from && h.start < to);
+      ctx.lineJoin = "round";
+      ctx.lineCap = "round";
+
+      // Time ticks: the smallest step whose labels keep their width apart
+      ctx.font = `500 10.5px ${MONO}`;
+      const span = end - start;
+      const labelW = (step) => ctx.measureText(step < 60e3 ? "00:00:00" : "00:00").width + 24;
+      const step = BB_TIME_STEPS.find((s) => (s / span) * usable >= labelW(s)) || BB_TIME_STEPS[BB_TIME_STEPS.length - 1];
+      const tickFmt = step < 60e3 ? ET_HMS : ET_HM;
+      const ticks = [];
+      for (let t = Math.ceil(start / step) * step; t <= end; t += step) ticks.push({ x: x(t), t });
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, right, floor);
+      ctx.clip();
+
+      // Pre-market / after hours, one band per run
+      for (let i = first; i < points.length - 1; i++) {
+        const s = points[i].session;
+        if (!s) continue;
+        let j = i;
+        while (j < points.length - 1 && points[j].session === s) j++;
+        ctx.fillStyle = alpha(C.session, A.session);
+        ctx.fillRect(x(points[i].t), 0, x(points[j].t) - x(points[i].t), floor);
+        i = j - 1;
+      }
+
+      // Ticker watermark
+      ctx.font = `800 ${Math.round(clampTo(W * 0.11, 28, 84))}px ${SANS}`;
+      ctx.fillStyle = C.mark;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(ticker(), usable / 2, mid);
+
+      // No-control band, grid, zero line
+      ctx.fillStyle = alpha(C.neutral, A.zone);
+      ctx.fillRect(0, y(BB_ZONE), right, y(-BB_ZONE) - y(BB_ZONE));
+      ctx.strokeStyle = C.grid;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      [100, 50, -50, -100].forEach((v) => { ctx.moveTo(0, crisp(y(v))); ctx.lineTo(right, crisp(y(v))); });
+      ticks.forEach((tick) => { ctx.moveTo(crisp(tick.x), 0); ctx.lineTo(crisp(tick.x), floor); });
+      ctx.stroke();
+      ctx.strokeStyle = alpha(C.zero, 0.55);
+      ctx.beginPath();
+      ctx.moveTo(0, crisp(mid));
+      ctx.lineTo(right, crisp(mid));
+      ctx.stroke();
+
+      // Halts: shaded; the line stays flat through them
+      const haltSpans = halts
+        .map((h) => ({ l: Math.max(0, x(h.start)), r: Math.min(right, x(h.end ?? end)), c: points[indexAt(points, h.start)].c }))
+        .filter((s) => s.r > s.l);
+      ctx.fillStyle = alpha(C.neutral, A.halt);
+      haltSpans.forEach((s) => ctx.fillRect(s.l, 0, s.r - s.l, floor));
+
+      // Alert bars from zero, one per alert (never merged: a burst shows as
+      // a wall of bars); each as tall as its weight
+      const lotPx = (BB_LOT / span) * usable;
+      const barW = clampTo(Math.round(lotPx * 0.5), 3, 6);
+      const bars = [];
+      for (let i = indexAt(alerts, start); i < alerts.length; i++) {
+        const a = alerts[i];
+        if (a.t >= start) bars.push({ side: a.side, x: x(a.t), w: a.weight });
+      }
+      bars.forEach((bar) => {
+        bar.len = Math.max(3, Math.min(1, bar.w / BB_MAX_WEIGHT) * half * 0.9);
+        bar.top = bar.side > 0 ? mid - bar.len : mid;
+        ctx.fillStyle = alpha(bar.side > 0 ? C.bull : C.bear, A.bar);
+        ctx.beginPath();
+        ctx.roundRect(bar.x - barW / 2, bar.top, barW, bar.len, bar.side > 0 ? [1.5, 1.5, 0, 0] : [0, 0, 1.5, 1.5]);
+        ctx.fill();
+      });
+
+      // Control line and baseline areas. A Halt: flat to the reopen, then the jump.
+      const line = new Path2D();
+      const area = new Path2D();
+      const gaps = new Path2D();
+      let run = first;
+      for (let i = first; i < points.length; i++) {
+        const p = points[i];
+        const px = x(p.t);
+        const py = y(p.c);
+        if (i === run) {
+          line.moveTo(px, py);
+          area.moveTo(px, mid);
+        } else {
+          const prev = points[i - 1];
+          const resumed = halts.reduce((m, h) => (h.end != null && h.start < p.t && h.end > prev.t && h.end <= p.t ? Math.max(m, h.end) : m), -Infinity);
+          if (Number.isFinite(resumed)) {
+            line.lineTo(x(resumed), y(prev.c));
+            area.lineTo(x(resumed), y(prev.c));
+          }
+          line.lineTo(px, py);
+        }
+        area.lineTo(px, py);
+        const isLast = i === points.length - 1;
+        if (isLast || !continuous(i)) {
+          area.lineTo(px, mid);
+          area.closePath();
+          if (!isLast) {
+            gaps.moveTo(px, py);
+            gaps.lineTo(x(points[i + 1].t), y(points[i + 1].c));
+          }
+          run = i + 1;
+        }
+      }
+      [[C.bull, 0, mid, top, mid], [C.bear, mid, floor, bottom, mid]].forEach(([hue, from, to, edge, zero]) => {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, from, right, to - from);
+        ctx.clip();
+        const grad = ctx.createLinearGradient(0, edge, 0, zero);
+        grad.addColorStop(0, alpha(hue, A.area));
+        grad.addColorStop(1, alpha(hue, 0));
+        ctx.fillStyle = grad;
+        ctx.fill(area);
+        ctx.strokeStyle = hue;
+        ctx.lineWidth = 2;
+        ctx.stroke(line);
+        ctx.restore();
+      });
+      // No data for over 2 minutes: the same solid line, in neutral gray
+      ctx.strokeStyle = C.neutral;
+      ctx.lineWidth = 2;
+      ctx.stroke(gaps);
+
+      // Price on a scale of its own; broken at Halts and data gaps
+      let priceTag = null;
+      if (bbPrefs.price) {
+        let lo = Infinity;
+        let hi = -Infinity;
+        for (let i = first; i < points.length; i++) { lo = Math.min(lo, points[i].price); hi = Math.max(hi, points[i].price); }
+        const padP = Math.max((hi - lo) * 0.08, hi * 0.002, 1e-4);
+        const yP = (v) => bottom - 6 - ((v - (lo - padP)) / (hi - lo + 2 * padP)) * (bottom - top - 12);
+        const path = new Path2D();
+        for (let i = first; i < points.length; i++) {
+          const px = x(points[i].t);
+          const py = yP(points[i].price);
+          if (i === first || !continuous(i - 1) || haltBetween(points[i - 1].t, points[i].t)) path.moveTo(px, py);
+          else path.lineTo(px, py);
+        }
+        ctx.strokeStyle = alpha(C.overlay, A.overlay);
+        ctx.lineWidth = 1.25;
+        ctx.stroke(path);
+        priceTag = { y: yP(last.price), text: fmtPrice(last.price), bg: C.overlay };
+        g.yPrice = yP;
+      }
+
+      // Last value: dotted line across, live dot with a soft halo
+      const tone = sideColor(last.c);
+      const lx = x(last.t);
+      const ly = y(last.c);
+      ctx.setLineDash([1, 3]);
+      ctx.strokeStyle = alpha(tone, 0.55);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, crisp(ly));
+      ctx.lineTo(right, crisp(ly));
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = alpha(tone, 0.18);
+      ctx.beginPath();
+      ctx.arc(lx, ly, 9, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = tone;
+      ctx.strokeStyle = C.bg;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(lx, ly, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      // HALT label: centered on its Halt, at the edge of the half the frozen
+      // line leaves free (else the other edge); skipped if both would cover
+      // the control line, the price or an alert bar. It may be wider than a
+      // short Halt.
+      const clear = (l, r, t, b) => {
+        if (ly > t - 3 && ly < b + 3) return false; // the last value's dotted line
+        for (let i = Math.max(first, 1); i < points.length; i++) {
+          const x0 = x(points[i - 1].t);
+          const x1 = x(points[i].t);
+          if (x1 < l - 3 || x0 > r + 3) continue;
+          const spans = [[y(points[i - 1].c), y(points[i].c)]];
+          if (g.yPrice) spans.push([g.yPrice(points[i - 1].price), g.yPrice(points[i].price)]);
+          if (spans.some(([a, b2]) => Math.max(a, b2) > t - 3 && Math.min(a, b2) < b + 3)) return false;
+        }
+        for (const bar of bars) {
+          if (bar.x + barW / 2 > l - 3 && bar.x - barW / 2 < r + 3 && bar.top + bar.len > t - 3 && bar.top < b + 3) return false;
+        }
+        return true;
+      };
+      ctx.font = `700 9.5px ${MONO}`;
+      const haltW = ctx.measureText("HALT").width + 12;
+      haltSpans.forEach((s) => {
+        const l = clampTo((s.l + s.r - haltW) / 2, 0, right - haltW);
+        const edges = s.c >= 0 ? [bottom - 10, top + 10] : [top + 10, bottom - 10];
+        const cy = edges.find((e) => clear(l, l + haltW, e - 8, e + 8));
+        if (cy === undefined) return;
+        ctx.fillStyle = C.chip;
+        ctx.beginPath();
+        ctx.roundRect(l, cy - 8, haltW, 16, 4);
+        ctx.fill();
+        ctx.fillStyle = C.axis;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("HALT", l + haltW / 2, cy + 0.5);
+      });
+      ctx.restore();
+
+      // State ribbon: one run per state
+      ctx.save();
+      ctx.beginPath();
+      ctx.roundRect(0, g.band, right, G.band, G.band / 2);
+      ctx.clip();
+      ctx.fillStyle = alpha(C.neutral, 0.1);
+      ctx.fillRect(0, g.band, right, G.band);
+      for (let i = first; i < points.length - 1; i++) {
+        const hue = continuous(i) ? stateColor(points[i].state) : null;
+        let j = i + 1;
+        while (j < points.length - 1 && continuous(j) && stateColor(points[j].state) === hue) j++;
+        if (hue) {
+          ctx.fillStyle = hue;
+          ctx.fillRect(Math.max(0, x(points[i].t)), g.band, x(points[j].t) - Math.max(0, x(points[i].t)), G.band);
+        }
+        i = j - 1;
+      }
+      haltSpans.forEach((s) => {
+        ctx.fillStyle = C.bg;
+        ctx.fillRect(s.l, g.band, s.r - s.l, G.band);
+        ctx.fillStyle = alpha(C.neutral, BB_STATE_ALPHA.halted);
+        ctx.fillRect(s.l, g.band, s.r - s.l, G.band);
+      });
+      ctx.restore();
+
+      // Crosshair target (magnet: the nearest point)
+      const h = hover == null ? null : clampTo(hover, first, points.length - 1);
+      const hp = h == null ? null : points[h];
+      ctx.font = `600 10.5px ${MONO}`;
+      const hoverTime = hp && ET_HMS.format(hp.t);
+      const timeChip = hp && (() => {
+        const w = ctx.measureText(hoverTime).width + 14;
+        return { l: clampTo(x(hp.t) - w / 2, 0, right - w), w };
+      })();
+
+      // Axes: background, borders, value labels, live tags, time labels
+      ctx.fillStyle = C.bg;
+      ctx.fillRect(right, 0, W - right, H);
+      ctx.fillRect(0, timeTop, W, H - timeTop);
+      ctx.strokeStyle = C.line;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(crisp(right), 0);
+      ctx.lineTo(crisp(right), timeTop);
+      ctx.moveTo(0, crisp(timeTop));
+      ctx.lineTo(W, crisp(timeTop));
+      ctx.stroke();
+
+      const tags = spread([{ y: ly, text: fmtScore(last.c), bg: tone }, ...(priceTag ? [priceTag] : [])], top - G.pad + G.tag / 2, floor - G.tag / 2, G.tag + 2);
+      const blocked = [...tags.map((tag) => tag.y), ...(hp ? [y(hp.c)] : [])];
+      let lastLabel = -Infinity;
+      BB_AXIS.forEach(([v, text]) => {
+        const ly2 = y(v);
+        if (blocked.some((b) => Math.abs(b - ly2) < G.tag / 2 + 7) || ly2 - lastLabel < 14) return;
+        lastLabel = ly2;
+        const side = Math.abs(v) === 100;
+        ctx.font = side ? `700 9px ${MONO}` : `500 10.5px ${MONO}`;
+        ctx.fillStyle = side ? alpha(v > 0 ? C.bull : C.bear, 0.8) : C.axis;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(text, right + G.axisW / 2, ly2);
+      });
+      tags.forEach((tag) => axisTag(g, tag.y, tag.text, tag.bg, C.ink));
+
+      ctx.font = `500 10.5px ${MONO}`;
+      ctx.fillStyle = C.axis;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ticks.forEach((tick) => {
+        const text = tickFmt.format(tick.t);
+        const w = ctx.measureText(text).width;
+        if (tick.x - w / 2 < 2 || tick.x + w / 2 > right - 2) return;
+        if (timeChip && tick.x + w / 2 > timeChip.l - 4 && tick.x - w / 2 < timeChip.l + timeChip.w + 4) return;
+        ctx.fillText(text, tick.x, timeTop + G.axisH / 2);
+      });
+
+      // Crosshair: dashed lines, the point, chips on both axes, hover card
+      if (hp) {
+        const hx = x(hp.t);
+        const hy = y(hp.c);
+        ctx.setLineDash([4, 4]);
+        ctx.strokeStyle = alpha(C.cross, 0.8);
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(crisp(hx), 0);
+        ctx.lineTo(crisp(hx), timeTop);
+        ctx.moveTo(0, crisp(hy));
+        ctx.lineTo(right, crisp(hy));
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = sideColor(hp.c);
+        ctx.strokeStyle = C.bg;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(hx, hy, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        axisTag(g, clampTo(hy, top - G.pad + G.tag / 2, floor - G.tag / 2), fmtScore(hp.c), C.chip, C.chipText);
+        ctx.fillStyle = C.chip;
+        ctx.beginPath();
+        ctx.roundRect(timeChip.l, timeTop + 2, timeChip.w, G.axisH - 4, 3);
+        ctx.fill();
+        ctx.fillStyle = C.chipText;
+        ctx.font = `600 10.5px ${MONO}`;
+        ctx.fillText(hoverTime, timeChip.l + timeChip.w / 2, timeTop + G.axisH / 2 + 0.5);
+        showTip(g, hp);
+      } else tip.hidden = true;
+
+      canvas.setAttribute("aria-label", `${ticker()} Bull vs. Bear: ${status.label}, control ${fmtScore(last.c)}. ${status.detail}`);
+    };
+
+    // Hover card: next to the cursor, on its left; on the right when the
+    // left edge leaves no room. Vertically centered on the cursor (on the
+    // point, from the keyboard), kept inside the plot.
+    const TIP_GAP = 14;
+    const placeTip = (g, p) => {
+      const w = tip.offsetWidth;
+      const h = tip.offsetHeight;
+      const px = g.x(p.t);
+      const left = px - TIP_GAP - w >= 4 ? px - TIP_GAP - w : Math.min(px + TIP_GAP, g.right - w - 4);
+      const cy = pointerY ?? g.y(p.c);
+      tip.style.left = `${Math.round(left)}px`;
+      tip.style.top = `${Math.round(clampTo(cy - h / 2, 4, Math.max(4, g.floor - h)))}px`;
+    };
+
+    const showTip = (g, p) => {
+      const row = (label, value, sign = "") => `<dt>${label}</dt><dd${sign ? ` data-sign="${sign}"` : ""}>${value}</dd>`;
+      const here = data.alerts.filter((a) => a.t === p.t);
+      const session = p.session === "pre" ? "Pre-market" : p.session === "post" ? "After hours" : "";
+      tip.innerHTML = `
+        <p class="chart-tip__time">${ET_HMS.format(p.t)} ET${session ? `<span>${session}</span>` : ""}</p>
+        ${p.state ? `<p class="chart-tip__state" data-tone="${bbTone(p.state.key, p.state.side)}">${p.state.label}</p>` : ""}
+        <dl>
+          ${row("Control", fmtScore(p.c), signOf(p.c / 100))}
+          ${row("Alert flow", fmtScore(p.alerts * 100), signOf(p.alerts))}
+          ${row("Volume flow", fmtScore(p.tape * 100), signOf(p.tape))}
+          ${row("Price trend", fmtScore(p.trend * 100), signOf(p.trend))}
+          ${row("Participation", `${p.part.toFixed(1)}x`)}
+          ${row("Price", fmtPrice(p.price))}
+        </dl>
+        ${here.map((a) => `<p class="chart-tip__alert"><b data-tone="${a.side > 0 ? "bull" : "bear"}">${a.side > 0 ? "▲" : "▼"}</b>${a.side > 0 ? "Buying" : "Selling"} Pressure · ${fmtMult(a.vol / 100)}</p>`).join("")}`;
+      tip.hidden = false;
+      placeTip(g, p);
+    };
+
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(() => { frame = 0; draw(); });
+    };
+    const render = () => {
+      renderHead();
+      schedule();
+    };
+
+    const resize = () => {
+      const { width, height } = box.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      W = Math.floor(width);
+      H = Math.floor(height);
+      canvas.width = Math.max(1, Math.round(W * dpr));
+      canvas.height = Math.max(1, Math.round(H * dpr));
+      readSizes();
+      if (frame) cancelAnimationFrame(frame);
+      frame = 0;
+      draw();
+    };
+    new ResizeObserver(resize).observe(box);
+    // A copy dragged to a screen with another pixel ratio redraws sharp.
+    const watchDpr = () => matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`).addEventListener("change", () => { resize(); watchDpr(); }, { once: true });
+    watchDpr();
+    document.fonts?.ready.then(schedule);
+
+    /* Crosshair: pointer or keyboard */
+    const setHover = (i) => {
+      if (i === hover) return;
+      hover = i;
+      schedule();
+    };
+    const nearest = (px) => {
+      const t = geo.start + (px / geo.usable) * (geo.end - geo.start);
+      const pts = data.points;
+      let i = indexAt(pts, t);
+      if (pts[i + 1] && pts[i + 1].t - t < t - pts[i].t) i += 1;
+      return Math.max(geo.first, i);
+    };
+    const track = (e) => {
+      if (!geo) return;
+      const rect = canvas.getBoundingClientRect();
+      const px = e.clientX - rect.left;
+      pointerY = e.clientY - rect.top;
+      const next = px < geo.right ? nearest(px) : null;
+      // Same point: only the card follows the cursor, no redraw
+      if (next !== null && next === hover && !tip.hidden) placeTip(geo, data.points[next]);
+      else setHover(next);
+    };
+    canvas.addEventListener("pointermove", track);
+    canvas.addEventListener("pointerdown", track);
+    canvas.addEventListener("pointerleave", () => setHover(null));
+    canvas.addEventListener("blur", () => setHover(null));
+    canvas.addEventListener("keydown", (e) => {
+      if (!geo) return;
+      pointerY = null;
+      const lastIndex = data.points.length - 1;
+      const from = hover ?? lastIndex;
+      const jump = e.shiftKey ? 60e3 / BB_LOT : 1;
+      const next = { ArrowLeft: from - jump, ArrowRight: from + jump, Home: geo.first, End: lastIndex, Escape: null }[e.key];
+      if (next === undefined) return;
+      e.preventDefault();
+      setHover(next === null ? null : clampTo(next, geo.first, lastIndex));
+    });
+
+    /* Controls: price toggle and visible window (the live point stays at the right edge) */
+    const syncControls = () => {
+      windowBtns.forEach((b) => b.setAttribute("aria-pressed", String(Number(b.dataset.bbWindow) === bbPrefs.window)));
+      priceBtn.setAttribute("aria-pressed", String(bbPrefs.price));
+    };
+    windowBtns.forEach((b) => b.addEventListener("click", () => {
+      bbPrefs.window = Number(b.dataset.bbWindow);
+      saveBbPrefs();
+      syncControls();
+      schedule();
+    }));
+    priceBtn.addEventListener("click", () => {
+      bbPrefs.price = !bbPrefs.price;
+      saveBbPrefs();
+      syncControls();
+      schedule();
+    });
+    symbol.addEventListener("input", () => {
+      hover = null;
+      render();
+    });
+    syncControls();
+    render();
+
+    return {
+      // The whole day (a new page, or a copy's snapshot)
+      load: (dump) => {
+        data = dump && { points: dump.points.slice(), alerts: dump.alerts.slice(), halts: dump.halts, status: dump.status, summary: dump.summary };
+        hover = null;
+        render();
+      },
+      // One live update: new points and alerts, the Halts, status and summary
+      push: (u) => {
+        if (!data) return;
+        data.points.push(...u.points);
+        data.alerts.push(...u.alerts);
+        Object.assign(data, { halts: u.halts, status: u.status, summary: u.summary });
+        render();
+      },
+      // Window / price saved in another window
+      reload: () => {
+        loadBbPrefs();
+        syncControls();
+        schedule();
+      },
+    };
+  };
+
   /* ---- Detached copies -----------------------------------------------------
      The detach button opens a live copy of its panel in a window of its own
      (one more per click), to place anywhere on this screen or another one.
@@ -5283,10 +6263,10 @@
   };
 
   // Main window: each copy's hello gets a snapshot of its panel.
-  const serveCopies = (constellation, chart) => {
+  const serveCopies = (constellation, chart, bbFeed) => {
     if (!hub) return;
     const snapshotOf = (id) => {
-      if (id === "chart") return { sym: chart.symbol() };
+      if (id === "chart") return { sym: chart.symbol(), bb: bbFeed.dump() };
       if (!tables.has(id)) return null;
       return { rows: tables.get(id).rows(), heat: id === "momentum" ? constellation?.dump() : undefined };
     };
@@ -5378,6 +6358,8 @@
   const filterDialog = mountFilters();
   const chartRoot = document.querySelector(".chart-panel");
   const chart = chartRoot && mountChartPanel(chartRoot, { persist: !DETACHED, adaptive: Boolean(DETACHED) });
+  const bbView = chartRoot?.querySelector("#chart-view-bull-bear");
+  const bullBear = bbView && mountBullBear(bbView, chartRoot);
   const heatRoot = document.querySelector("[data-constellation]");
   const constellation = heatRoot && mountConstellation(heatRoot);
 
@@ -5397,7 +6379,14 @@
 
   if (DETACHED === "chart") {
     // The main window's ticker to start with; later tickers are this copy's own.
-    linkCopy(chartRoot, { snapshot: (m, first) => { if (first) chart.setSymbol(m.sym); } });
+    // Bull vs. Bear: the day's series in every snapshot, then each live update.
+    linkCopy(chartRoot, {
+      snapshot: (m, first) => {
+        if (first) chart.setSymbol(m.sym);
+        bullBear.load(m.bb);
+      },
+      relay: (m) => { if (m.type === "bb") bullBear.push(m); },
+    });
   } else if (DETACHED) {
     // No feed of its own: the rows come from the main window.
     const { seed, next, every, quotes, ...setup } = TABLE_SETUP[DETACHED];
@@ -5420,7 +6409,14 @@
     for (const [id, { seed, ...setup }] of Object.entries(TABLE_SETUP)) {
       mountTable(panel(id), seed, { ...setup, relay: hub ? (msg) => post({ ...msg, panel: id }) : undefined });
     }
-    serveCopies(constellation, chart);
+    // Bull vs. Bear runs here only; every update goes to the copies too.
+    const bbFeed = createBullBearFeed();
+    bullBear?.load(bbFeed.dump());
+    bbFeed.onUpdate((u) => {
+      bullBear?.push(u);
+      post({ type: "bb", ...u });
+    });
+    serveCopies(constellation, chart, bbFeed);
   }
   syncSoundButtons();
 
@@ -5479,6 +6475,7 @@
     else if (key === FLOAT_KEY) { loadFloat(); tables.forEach((t) => t.refresh()); }
     else if (key === SOUND_KEY) { loadSoundPrefs(); syncSoundButtons(); }
     else if (key === SOUND_FILES_KEY) loadSoundFiles();
+    else if (key === BB_KEY) bullBear?.reload();
   });
 
   setInterval(() => {

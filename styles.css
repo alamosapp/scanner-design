@@ -165,6 +165,28 @@
   --chart-steady: var(--green-dim);
   --chart-decel: var(--amber);
   --chart-pullback: var(--chart-neutral);
+  --chart-overlay: var(--text-2);    /* secondary series (Bull vs. Bear price): neutral, never a signal color */
+  --chart-zero: var(--text-3);       /* zero line */
+  --chart-axis-text: var(--text-3);
+  --chart-crosshair: var(--text-3);
+  --chart-chip: var(--surface-3);    /* crosshair labels, HALT label */
+  --chart-ink: var(--ink);           /* text on a colored axis tag */
+  --chart-watermark: var(--surface); /* ticker behind the plot */
+  --chart-session: var(--surface);   /* pre-market / after hours band */
+  /* Canvas strengths (0–1), applied to the colors above */
+  --chart-area-a: 0.2;               /* baseline area at ±100, fading to 0 at zero */
+  --chart-bar-a: 0.32;               /* alert bars */
+  --chart-zone-a: 0.06;              /* no-control band (±25) */
+  --chart-overlay-a: 0.5;            /* price line */
+  --chart-session-a: 0.6;
+  --chart-halt-a: 0.12;
+  /* Canvas geometry */
+  --chart-pad: 10px;                 /* room above +100 / below −100 for the tags */
+  --chart-live-pad: 28px;            /* space right of the live point */
+  --chart-tag-h: 18px;               /* value tags on the right axis */
+  --chart-band-h: 6px;               /* state ribbon (canvas) */
+  --chart-band-gap: 6px;             /* ribbon ↔ plot and ↔ time axis */
+  --chart-tip-w: 184px;              /* hover card */
   /* Geometry shared by the three views */
   --chart-axis-w: 52px;              /* value axis on the right */
   --chart-axis-h: 20px;              /* time axis at the bottom */
@@ -1144,14 +1166,18 @@ html:has(.settings-modal[open]) { overflow: hidden; }
 /* Meter: Bears ━━┃━━ Bulls (split, −100…+100) or Rally ━━━━┃ (0…100) */
 .chart-meter { grid-area: meter; display: flex; align-items: center; gap: 7px; }
 .chart-meter__label { color: var(--text-3); font-family: var(--font-mono); font-size: 9.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
-.chart-meter__label[data-side="bear"] { color: var(--chart-bear); }
-.chart-meter__label[data-side="bull"] { color: var(--chart-bull); }
+/* Split meter: a neutral track; only the side in the lead takes its color
+   (fill from the center, its label, the score). */
+.chart-meter[data-lead="bull"] { --lead: var(--chart-bull); }
+.chart-meter[data-lead="bear"] { --lead: var(--chart-bear); }
+.chart-meter[data-lead="bull"] .chart-meter__label[data-side="bull"],
+.chart-meter[data-lead="bear"] .chart-meter__label[data-side="bear"] { color: var(--lead); }
 .chart-meter__track { position: relative; width: clamp(64px, 20cqw, 160px); height: 6px; border-radius: var(--radius-pill); background: var(--surface-3); }
-.chart-meter--split .chart-meter__track { background: linear-gradient(90deg, var(--red-a32), var(--surface-3) 50%, var(--green-a32)); }
 .chart-meter--split .chart-meter__track::after { content: ""; position: absolute; top: -3px; bottom: -3px; left: calc(50% - 0.5px); width: 1px; background: var(--line-strong); }
+.chart-meter__fill { position: absolute; top: 0; bottom: 0; left: 50%; width: 0; border-radius: inherit; background: var(--lead, transparent); transition: left var(--t-base), width var(--t-base); }
 .chart-meter__thumb { position: absolute; top: -4px; left: 0; width: 4px; height: 14px; border-radius: 2px; background: var(--text); box-shadow: 0 0 0 2px var(--chart-bg); transform: translateX(-50%); }
-.chart-meter--split .chart-meter__thumb { left: 50%; }
-.chart-meter__score { min-width: 3ch; color: var(--text); font-family: var(--font-mono); font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
+.chart-meter--split .chart-meter__thumb { left: 50%; transition: left var(--t-base); }
+.chart-meter__score { min-width: 3ch; color: var(--lead, var(--text)); font-family: var(--font-mono); font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
 
 /* Rally tracker: fade signals as chips (amber when active) */
 .chart-signals { grid-area: signals; display: flex; align-items: center; gap: 6px; min-width: 0; margin: 0; overflow: hidden; }
@@ -1165,6 +1191,11 @@ html:has(.settings-modal[open]) { overflow: hidden; }
 .chart-stats div { flex: none; display: flex; flex-direction: column; gap: 2px; }
 .chart-stats dt { color: var(--text-3); font-family: var(--font-mono); font-size: 9.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; }
 .chart-stats dd { margin: 0; color: var(--text); font-family: var(--font-mono); font-size: 12.5px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.chart-stats dd small { margin: 0 8px 0 3px; color: var(--text-3); font-size: 9.5px; font-weight: 600; }
+.chart-stats dd small:last-child { margin-right: 0; }
+/* Signed values: color only for the side they favor */
+.chart-stats dd[data-sign="up"], .chart-tip dd[data-sign="up"] { color: var(--chart-bull); }
+.chart-stats dd[data-sign="down"], .chart-tip dd[data-sign="down"] { color: var(--chart-bear); }
 
 /* Plot: legend left · controls right on one line; when they do not fit
    the controls stay on top and the legend drops below them. */
@@ -1172,13 +1203,16 @@ html:has(.settings-modal[open]) { overflow: hidden; }
 .chart-overlay { flex: none; display: flex; flex-wrap: wrap-reverse; align-items: center; gap: 6px var(--space-3); padding-bottom: 6px; }
 .chart-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 12px; min-width: 0; color: var(--text-3); font-size: 11px; font-weight: 600; }
 .chart-legend span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.chart-legend span[hidden] { display: none; }
 .chart-controls { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin-left: auto; }
 
 .chart-key { --key: var(--chart-neutral); flex: none; width: 14px; height: 2px; border-radius: 1px; background: var(--key); }
 .chart-key--bar { width: 8px; height: 8px; border-radius: 2px; }
 .chart-key--dash { background: repeating-linear-gradient(90deg, var(--key) 0 4px, transparent 4px 7px); }
-.chart-key[data-key="control"] { background: linear-gradient(90deg, var(--chart-bull) 50%, var(--chart-bear) 50%); }
+/* Control changes color with its side: one solid neutral key */
+.chart-key[data-key="control"] { --key: var(--chart-neutral); height: 3px; } /* thicker than price, as drawn */
 .chart-key[data-key="price"] { --key: var(--chart-price); }
+.chart-key[data-key="overlay"] { --key: var(--chart-overlay); opacity: 0.7; }
 .chart-key[data-key="buying"] { --key: var(--chart-bull); }
 .chart-key[data-key="selling"] { --key: var(--chart-bear); }
 .chart-key[data-key="vwap"] { --key: var(--chart-vwap); }
@@ -1243,6 +1277,34 @@ html:has(.settings-modal[open]) { overflow: hidden; }
 .plot-slot--axis[data-area="main-y"] { grid-area: main-y; }
 .plot-slot--axis[data-area="sub-y"] { grid-area: sub-y; }
 .plot-slot--axis[data-area="x"] { grid-area: x; justify-content: flex-end; padding-right: 7px; }
+/* Canvas chart (Bull vs. Bear): plot, ribbon and axes are drawn by
+   scanner.js with the --chart-* tokens; the hover card and the empty
+   note are HTML on top. */
+.chart-canvas { position: relative; flex: 1 1 0px; min-height: 0; }
+.chart-canvas canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; border-radius: 4px; outline: none; cursor: crosshair; touch-action: pan-y; }
+.chart-canvas canvas:focus-visible { box-shadow: var(--ring); }
+.chart-message { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; padding: 0 var(--space-5); color: var(--text-3); font-size: 12px; text-align: center; pointer-events: none; }
+.chart-message[hidden], .chart-tip[hidden] { display: none; }
+.chart-tip {
+  position: absolute; top: 8px; z-index: 1; width: var(--chart-tip-w); max-height: calc(100% - 16px); overflow: hidden; padding: 8px 10px;
+  border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--glass); backdrop-filter: blur(var(--scrim-blur));
+  box-shadow: var(--shadow-pop); color: var(--text-3); font-size: 11px; line-height: 1.35; pointer-events: none;
+}
+.chart-tip p { margin: 0; }
+.chart-tip__time { display: flex; justify-content: space-between; gap: var(--space-2); color: var(--text); font-family: var(--font-mono); font-weight: 700; }
+.chart-tip__time span { color: var(--text-3); font-family: var(--font-sans); font-weight: 600; }
+.chart-tip .chart-tip__state { --state: var(--chart-neutral); display: flex; align-items: center; gap: 6px; margin: 3px 0 6px; color: var(--state); font-weight: 700; }
+.chart-tip__state::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--state); }
+.chart-tip__state[data-tone="neutral"] { color: var(--text-2); }
+.chart-tip__state[data-tone="bull"], .chart-tip__alert b[data-tone="bull"] { --state: var(--chart-bull); }
+.chart-tip__state[data-tone="bear"], .chart-tip__alert b[data-tone="bear"] { --state: var(--chart-bear); }
+.chart-tip__state[data-tone="warn"] { --state: var(--chart-warn); }
+.chart-tip dl { display: grid; grid-template-columns: 1fr auto; gap: 2px var(--space-3); margin: 0; }
+.chart-tip dd { margin: 0; color: var(--text); font-family: var(--font-mono); font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
+.chart-tip .chart-tip__alert { display: flex; gap: 6px; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); color: var(--text-2); font-weight: 600; }
+.chart-tip__alert + .chart-tip__alert { margin-top: 2px; padding-top: 0; border-top: 0; }
+.chart-tip__alert b { color: var(--state); }
+
 /* Ticker watermark, TradingView style */
 .plot-slot__mark { position: absolute; inset: 0; display: grid; place-items: center; color: var(--white-a04); font-family: var(--font-display); font-size: clamp(28px, 11cqw, 84px); font-weight: 800; letter-spacing: -0.02em; pointer-events: none; }
 
@@ -1276,11 +1338,13 @@ html:has(.settings-modal[open]) { overflow: hidden; }
   .chart-head { grid-template-columns: minmax(0, 1fr); grid-template-areas: "state" "meter"; }
   .chart-head__detail, .chart-signals, .chart-legend { display: none; }
   .chart-seg button { min-width: 24px; padding: 0 5px; }
-  .chart-slots { --chart-axis-w: 42px; }
+  .chart-slots, .chart-canvas { --chart-axis-w: 44px; }
+  .chart-canvas { --chart-live-pad: 18px; --chart-tip-w: 160px; }
   .plot-slot--axis { padding: 0 2px; letter-spacing: 0.04em; }
 }
 @media (prefers-reduced-motion: reduce) {
   .chart-view:not([hidden]), .chart-layouts { animation: none; }
+  .chart-meter__fill, .chart-meter__thumb { transition: none !important; }
   .chart-layout-opt:hover { transform: none; }
 }
 

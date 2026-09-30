@@ -118,7 +118,8 @@
           <div class="splitter splitter--col" data-split="col" role="separator" aria-orientation="vertical" aria-label="Resize Momentum and chart" aria-valuemin="0" aria-valuemax="100" tabindex="0"></div>
           <!-- Charts of the selected ticker: one bar, three views on one stage.
                scanner.js (mountChartPanel) drives the tabs, fullscreen and layouts;
-               the charts themselves are not drawn yet. -->
+               Bull vs. Bear is drawn (mountBullBear, mock GXAI data); Key levels
+               and Rally tracker are still layout slots. -->
           <section class="chart-panel" data-panel="chart" data-title="Charts" aria-label="Charts of the selected ticker">
             <div class="chart-bar">
               <label class="chart-symbol">
@@ -193,7 +194,7 @@
                   </div>
                   <div class="chart-meter chart-meter--split" role="meter" aria-label="Who is in control, from −100 (bears) to +100 (bulls)" aria-valuemin="-100" aria-valuemax="100" aria-valuenow="0">
                     <span class="chart-meter__label" data-side="bear" aria-hidden="true">Bears</span>
-                    <span class="chart-meter__track" aria-hidden="true"><i class="chart-meter__thumb"></i></span>
+                    <span class="chart-meter__track" aria-hidden="true"><i class="chart-meter__fill"></i><i class="chart-meter__thumb"></i></span>
                     <span class="chart-meter__label" data-side="bull" aria-hidden="true">Bulls</span>
                     <strong class="chart-meter__score">—</strong>
                   </div>
@@ -212,27 +213,28 @@
                       <span><i class="chart-key" data-key="control"></i>Control</span>
                       <span><i class="chart-key chart-key--bar" data-key="buying"></i>Buying</span>
                       <span><i class="chart-key chart-key--bar" data-key="selling"></i>Selling</span>
-                      <span><i class="chart-key" data-key="price"></i>Price</span>
+                      <span><i class="chart-key" data-key="overlay"></i>Price</span>
                     </div>
                     <div class="chart-controls">
                       <div class="chart-seg" role="group" aria-label="Chart overlays">
-                        <button type="button" class="chart-toggle" aria-pressed="true" title="Show or hide the price line">Price</button>
+                        <button type="button" class="chart-toggle" data-bb-price aria-pressed="true" title="Show or hide the price line">Price</button>
                       </div>
                       <div class="chart-seg" role="group" aria-label="Time window">
-                        <button type="button" aria-pressed="false">1m</button>
-                        <button type="button" aria-pressed="false">5m</button>
-                        <button type="button" aria-pressed="false">15m</button>
-                        <button type="button" aria-pressed="true">30m</button>
-                        <button type="button" aria-pressed="false">1h</button>
-                        <button type="button" aria-pressed="false" title="Whole day">Day</button>
+                        <button type="button" data-bb-window="60000" aria-pressed="false">1m</button>
+                        <button type="button" data-bb-window="300000" aria-pressed="false">5m</button>
+                        <button type="button" data-bb-window="900000" aria-pressed="false">15m</button>
+                        <button type="button" data-bb-window="1800000" aria-pressed="true">30m</button>
+                        <button type="button" data-bb-window="3600000" aria-pressed="false">1h</button>
+                        <button type="button" data-bb-window="0" aria-pressed="false" title="Whole day">Day</button>
                       </div>
                     </div>
                   </div>
-                  <div class="chart-slots" data-layout="ribbon" role="img" aria-label="Bull vs. Bear chart (coming soon)">
-                    <div class="plot-slot plot-slot--main"><span>Control line · alert bars · price</span><b class="plot-slot__mark" aria-hidden="true">GXAI</b></div>
-                    <div class="plot-slot plot-slot--axis" data-area="main-y"><span>Score</span></div>
-                    <div class="plot-slot plot-slot--ribbon"><span>State ribbon</span></div>
-                    <div class="plot-slot plot-slot--axis" data-area="x"><span>Time · live edge →</span></div>
+                  <!-- Drawn by scanner.js (Bull vs. Bear chart): plot, ribbon and axes.
+                       Focus it and use ←/→ to move the crosshair. -->
+                  <div class="chart-canvas">
+                    <canvas tabindex="0" role="img" aria-label="Bull vs. Bear chart"></canvas>
+                    <div class="chart-tip" aria-live="polite" hidden></div>
+                    <p class="chart-message" role="status" hidden></p>
                   </div>
                 </div>
               </div>

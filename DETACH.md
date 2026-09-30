@@ -30,6 +30,7 @@ Paneles con detach: las 8 tablas (`.terminal[data-panel]`), incluida *Fast-Growi
 ### Copia de Charts
 
 - Arranca con el **ticker** y las **vistas/layout** de la principal y luego es independiente: cambiar ticker, pestaña o layout en la copia no afecta a la principal ni se guarda.
+- **Bull vs. Bear** llega por el canal: el `snapshot` trae la serie del día y cada lote nuevo llega como mensaje `bb`. La ventana visible y el botón `Price` (`scanner:bull-bear:v1`) se comparten con todas las ventanas. Ver `BULL_BEAR.md`.
 - El botón de **layout** (`.layout-icon`) aparece sin fullscreen cuando el panel mide **≥ 960 × 600 px**, y se oculta por debajo de **920 × 560 px** (40 px de margen para que no parpadee). El layout elegido se recuerda al achicar y volver a agrandar.
 
 ## Cómo funciona
@@ -41,16 +42,17 @@ La copia es la misma página cargada con `?detach=<panel>` (p. ej. `index.html?d
 | Mensaje | Dirección | Contenido |
 |---|---|---|
 | `hello` | copia → principal | `panel` |
-| `snapshot` | principal → copia (`to`) | Tablas: `rows` (+ `heat` en Momentum). Charts: `sym` |
+| `snapshot` | principal → copia (`to`) | Tablas: `rows` (+ `heat` en Momentum). Charts: `sym` y `bb` (serie Bull vs. Bear del día) |
 | `alert` | principal → todas | `panel`, `row` |
 | `quote` | principal → todas | `panel`, `sym`, `price` |
+| `bb` | principal → todas | Bull vs. Bear: `points` y `alerts` nuevos, `halts`, `status`, `summary` |
 | `ready` | principal → todas | al cargar: las copias sin enlace mandan `hello` |
 | `bye` | principal → todas | al cerrar/recargar (`pagehide`) |
 
 Una copia se enlaza con la primera principal que le responde e ignora a las demás.
 
 **Sincronización de ajustes** — todo vive en `localStorage`; el evento `storage` recarga en las demás ventanas:
-`scanner:columns:v2:<panel>`, `scanner:prefs:v1:<panel>`, `scanner:excluded:all`, `scanner:filters:v1`, `scanner:float:v1`, `scanner:sound:v1`, `scanner:sound-files` (se actualiza cuando los audios personalizados ya están guardados en IndexedDB).
+`scanner:columns:v2:<panel>`, `scanner:prefs:v1:<panel>`, `scanner:excluded:all`, `scanner:filters:v1`, `scanner:float:v1`, `scanner:sound:v1`, `scanner:bull-bear:v1`, `scanner:sound-files` (se actualiza cuando los audios personalizados ya están guardados en IndexedDB).
 
 **Geometría** — `scanner:detach-geom:v1:<panel>` = `{ w, h, x, y }` (tamaño interior y posición en pantalla). La copia la guarda al redimensionar, al cerrarse y cada segundo (los navegadores no avisan cuando una ventana se mueve), pero **solo si se movió o cambió de tamaño desde que se abrió**: así una copia que el navegador dejó en otra pantalla no borra el sitio guardado. Si el sitio guardado no está en la pantalla actual, la principal llama a `getScreenDetails()` (Window Management API) antes de `window.open` y, con permiso, mueve la copia con `moveTo`/`resizeBy`.
 
@@ -63,11 +65,12 @@ En `scanner.js`:
 - `mountTable(..., { relay })` devuelve `{ push, quote, reset }`; en `tables` cada tabla tiene `reload()`.
 - `mountConstellation` → `dump()` / `load()`.
 - `mountChartPanel(root, { persist, adaptive })`: `persist: false` no guarda el layout; `adaptive` activa los layouts por tamaño (`CHART_ROOMY`).
+- `createBullBearFeed()` (solo la principal) → `dump()` / `onUpdate()`; `mountBullBear()` → `load()` / `push()` / `reload()`.
 
 En `styles.css`: reglas `.is-detached` y `.detach-status`.
 
 ## Limitaciones
 
 - Con los datos simulados, si la ventana principal se minimiza mucho tiempo, Chrome ralentiza sus temporizadores y las copias se actualizan más lento. Con un feed real (websocket) no pasa.
-- Los gráficos aún no tienen datos: la copia de Charts solo hereda el ticker. Cuando tengan datos, deben enviarse por el mismo canal.
+- De los gráficos solo Bull vs. Bear tiene datos (simulados, un ticker). Key levels y Rally tracker, cuando los tengan, deben enviarse por el mismo canal.
 - Una copia abierta a mano como pestaña normal también guarda su geometría.
