@@ -18,7 +18,7 @@ A ≤ 720 px, o en un teléfono en horizontal (`(max-height: 480px) and (pointer
 
 | Parte | Comportamiento |
 |---|---|
-| Nav | Solo `app-brand` y `profile`. Filtros, ayuda y pantalla completa se ocultan. |
+| Nav | `app-brand`, el botón de **pantalla completa de todo el scanner** (a la izquierda de `profile`) y `profile`. Filtros y ayuda se ocultan. El botón solo aparece donde el navegador tiene la Fullscreen API (Android sí; el iPhone no la ofrece para páginas web, así que ahí no se muestra). |
 | Estado | `mountPhone` mueve `.app-status` de la nav a `.m-bar` (bajo la nav) y la devuelve a la nav en anchos de escritorio. Hasta que el JS lo mueve, en móvil está oculto en la nav y su fila (y la de la cinta) ya está reservada en `.m-bar`: al cargar nada se solapa ni salta. La sesión y el reloj son `flex: none` (nunca se aprietan uno contra otro, tampoco en escritorio). |
 | Pantalla | `.app` ocupa `100dvh`, con `safe-area-inset-*` (`viewport-fit=cover`). La página no hace scroll ni crece: `html`/`body` con `overflow: hidden` y `.app` con `position: relative; overflow: clip`, así cualquier pieza absoluta (p. ej. `.sr-only`) se resuelve dentro de `.app` y no ensancha el documento. Solo hace scroll la lista del panel. `theme-color` toma `--bg`. |
 | Ayuda | El botón flotante desapareció: *User Guide* es un ítem del menú de cuenta (solo móvil). |
@@ -39,7 +39,7 @@ A ≤ 720 px, o en un teléfono en horizontal (`(max-height: 480px) and (pointer
 |---|---|
 | Toplists (tablas de estado) | Siguen siendo **tabla** (no tarjetas). Columnas fijas por tabla (`PHONE_COLS`): Signal · Ticker · Price · su %Chg (Close u Open) · Volume · RVol · Float, con anchos `PHONE_W`. Se desliza en horizontal con Ticker fijo. Sin reordenar ni redimensionar; el orden y los anchos de escritorio no se tocan. |
 | Alertas (New HoD, Buying, Selling, Halts) | Tarjetas: ticker + hora / Vol · RVol a la izquierda, precio / %Chg 1m (o timers del halt) a la derecha, franja de float a la izquierda. Píldora "N new" si llegan alertas con la lista desplazada. |
-| Fast-Growing Momentum | Constelación arriba (`clamp(200px, 36dvh, 300px)`) y tarjetas debajo. |
+| Fast-Growing Momentum | Constelación arriba (`clamp(200px, 36dvh, 300px)`) y tarjetas debajo. Sin hover: un **tap en un ticker fija su tooltip** (`.is-pinned`) con un botón ✕ en la esquina superior derecha; otro tap en el mismo ticker lo selecciona o deselecciona; un tap en un espacio vacío o en ✕ lo cierra, y en otro ticker cambia a ese. El tooltip no sube por encima del borde superior de la constelación. Fijado es opaco (`--bg-elevated`, no el cristal `--glass` que depende del desenfoque: en iPhone se veía casi transparente) y queda por debajo del menú de cuenta y su fondo (`--z-menu − 2`). En escritorio y en las copias sigue siendo hover + clic. |
 | Charts | Panel completo; sin pantalla completa, layouts ni detach. Botón de **vista horizontal** (ver abajo). |
 
 La barra del panel (`.terminal-bar`) se oculta: el tab ya lo nombra y sus herramientas son de escritorio.

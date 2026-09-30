@@ -4184,6 +4184,14 @@
     let pointer = null;
     let hover = "";
     let selected = "";
+    // Phones: no hover there, so a tap on a ticker pins its card (with a
+    // close button) until ✕, a tap on empty space, or another ticker.
+    let pinned = "";
+    const tapMode = () => PHONE.matches && !DETACHED;
+    const hitAt = (p) => [...bubbles.values()]
+      .filter((b) => !b.leaving && Number.isFinite(b.x))
+      .sort((a, b) => b.s - a.s)
+      .find((b) => Math.abs(p.x - b.x) <= b.hw + 3 && Math.abs(p.y - b.y) <= b.hh + 3) ?? null;
     let tipKey = "";
     let ariaText = "";
 
@@ -4548,7 +4556,8 @@
       }
       const st = b.state;
       // Its text only changes from second to second (ages and clocks).
-      const key = `${st.sym}|${st.latest.t}|${st.status}|${st.rank}|${total}|${Math.floor(now / 1000)}`;
+      const tap = tapMode();
+      const key = `${st.sym}|${st.latest.t}|${st.status}|${st.rank}|${total}|${Math.floor(now / 1000)}|${tap}|${selected}`;
       if (key !== tipKey) {
         tipKey = key;
         const { latest, first } = st;
@@ -4560,6 +4569,7 @@
         const line = (label, value, cls = "") => `<dt>${label}</dt><dd class="${cls}">${escHTML(value)}</dd>`;
         const sign = (v) => (v > 0 ? "up" : v < 0 ? "down" : "");
         tip.innerHTML = `
+          ${tap ? `<button type="button" class="constellation__tip-close" data-tip-close aria-label="Close ${escHTML(st.sym)} details" title="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>` : ""}
           <span class="constellation__tip-title"><strong>${escHTML(st.sym)}</strong>#${st.rank} of ${total}</span>
           <span class="constellation__tip-status" data-tone="${HEAT_TONE[st.status]}">${escHTML(status)}</span>
           <dl>
@@ -4571,9 +4581,10 @@
             ${HEAT_HORIZONS.filter(([k]) => Number.isFinite(r[k])).map(([k]) => line(HEAT_COLUMN[k], fmtPct(r[k], 2), sign(r[k]))).join("")}
             ${r.vol1m > 0 ? line("Vol. 1m", fmtMult(r.vol1m)) : ""}
           </dl>
-          <span class="constellation__tip-hint">${st.sym === selected ? "Click to deselect" : "Click to select"}</span>`;
+          <span class="constellation__tip-hint">${st.sym === selected ? `${tap ? "Tap" : "Click"} to deselect` : `${tap ? "Tap" : "Click"} to select`}</span>`;
         tip.hidden = false;
       }
+      tip.classList.toggle("is-pinned", tap);
       // Fixed to the viewport: it may overflow the panel, never the screen.
       const { offsetWidth: tw, offsetHeight: th } = tip;
       const box = canvas.getBoundingClientRect();
@@ -4582,7 +4593,9 @@
       const x = box.left + b.x;
       const right = x + b.hw + 12;
       const left = right + tw <= vw - 8 ? right : Math.min(vw - tw - 8, Math.max(8, x - b.hw - 12 - tw));
-      const top = Math.min(vh - th - 8, Math.max(8, box.top + b.y - th / 2));
+      // Phones: never over the nav and tabs, only from the chart's top down
+      const floor = tap ? Math.max(8, box.top + 8) : 8;
+      const top = Math.min(vh - th - 8, Math.max(floor, box.top + b.y - th / 2));
       tip.style.left = `${Math.round(left)}px`;
       tip.style.top = `${Math.round(top)}px`;
     };
@@ -4692,11 +4705,14 @@
       bubbles.forEach((b) => glide(b, dt, snap));
 
       const items = [...bubbles.values()];
-      const hovered = pointer
+      const pointed = pointer
         ? [...active].sort((a, b) => b.s - a.s).find((b) => Math.abs(pointer.x - b.x) <= b.hw + 3 && Math.abs(pointer.y - b.y) <= b.hh + 3)
         : null;
+      // Phones: the pinned ticker (gone from the chart, its card closes)
+      if (pinned && !(tapMode() && active.some((b) => b.sym === pinned))) pinned = "";
+      const hovered = tapMode() ? active.find((b) => b.sym === pinned) ?? null : pointed;
       hover = hovered?.sym ?? "";
-      canvas.style.cursor = hovered ? "pointer" : "";
+      canvas.style.cursor = pointed ? "pointer" : "";
 
       const dpr = window.devicePixelRatio || 1;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -4763,13 +4779,30 @@
       schedule();
     });
     // Select a ticker (framed here; the chart panel will listen for it).
-    canvas.addEventListener("click", () => {
-      if (!hover) return;
+    canvas.addEventListener("click", (e) => {
+      if (tapMode()) {
+        // A tap on a ticker pins its card (again on it: select / deselect);
+        // on empty space it closes the card.
+        const box = canvas.getBoundingClientRect();
+        const sym = hitAt({ x: e.clientX - box.left, y: e.clientY - box.top })?.sym ?? "";
+        if (!sym || sym !== pinned) {
+          pinned = sym;
+          tipKey = "";
+          schedule();
+          return;
+        }
+      } else if (!hover) return;
       selected = selected === hover ? "" : hover;
       tipKey = "";
       document.dispatchEvent(new CustomEvent("scanner:select", { detail: { sym: selected } }));
       schedule();
     });
+    tip.addEventListener("click", (e) => {
+      if (!e.target.closest("[data-tip-close]")) return;
+      pinned = "";
+      schedule();
+    });
+    PHONE.addEventListener("change", () => { pinned = ""; tipKey = ""; schedule(); });
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) return;
       last = 0;

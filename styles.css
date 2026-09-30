@@ -269,8 +269,8 @@
   --m-fs-sym: 16px;
   --m-fs-price: 16px;
   --m-fs-meta: 12.5px;
-  --m-menu-fs: 16px;                 /* account menu: bigger type, square edges */
-  --m-menu-item-h: 56px;
+  --m-menu-fs: 15px;                 /* account menu: bigger type, square edges */
+  --m-menu-item-h: 52px;
   --m-touch: 48px;                   /* phone buttons: a full thumb target */
   --m-avatar: 34px;
   --m-scrim: color-mix(in srgb, var(--black) 84%, transparent); /* under the account menu */
@@ -441,7 +441,7 @@ button { cursor: pointer; }
   color: var(--text); box-shadow: var(--shadow-modal);
 }
 .confirm-modal[open] { animation: modalIn 320ms var(--ease); }
-.confirm-modal::backdrop { background: var(--scrim); backdrop-filter: blur(var(--scrim-blur)); animation: fadeIn 220ms var(--ease); }
+.confirm-modal::backdrop { background: var(--scrim); -webkit-backdrop-filter: blur(var(--scrim-blur)); backdrop-filter: blur(var(--scrim-blur)); animation: fadeIn 220ms var(--ease); }
 .confirm-modal::before { content: ""; position: absolute; top: 0; left: 24px; right: 24px; height: 1px; background: linear-gradient(90deg, transparent, var(--red), transparent); opacity: 0.6; pointer-events: none; }
 html:has(.confirm-modal[open]) { overflow: hidden; }
 .cm-body { display: flex; flex-direction: column; align-items: center; padding: 28px 24px 20px; text-align: center; }
@@ -479,8 +479,8 @@ html:has(.confirm-modal[open]) { overflow: hidden; }
   .avatar--lg { --avatar: 52px; font-size: 18px; }
   .pm-name { font-size: 19px; }
   .pm-email { font-size: 14px; }
-  .pm-plan { min-height: 48px; padding: 0 var(--space-3) 0 var(--space-4); border-radius: 0; font-size: 14px; }
-  .pm-plan__tag { padding: 5px 10px; border-radius: 0; font-size: 13px; }
+  .pm-plan { min-height: 48px; padding: 0 var(--space-3) 0 var(--space-4); border-radius: var(--radius-sm); font-size: 14px; }
+  .pm-plan__tag { padding: 5px 10px; border-radius: var(--radius-sm); font-size: 13px; }
   .pm-list { gap: 0; padding-top: var(--space-2); }
   .pm-item { gap: 14px; height: var(--m-menu-item-h); padding: 0 var(--m-gutter); border-radius: 0; font-size: var(--m-menu-fs); }
   .pm-item svg { width: 22px; height: 22px; }
@@ -653,7 +653,7 @@ html:has(.settings-modal[open]) { overflow: hidden; }
   color: var(--text); box-shadow: var(--shadow-modal);
 }
 .settings-modal[open] { animation: modalIn 320ms var(--ease); }
-.settings-modal::backdrop { background: var(--scrim); backdrop-filter: blur(var(--scrim-blur)); animation: fadeIn 220ms var(--ease); }
+.settings-modal::backdrop { background: var(--scrim); -webkit-backdrop-filter: blur(var(--scrim-blur)); backdrop-filter: blur(var(--scrim-blur)); animation: fadeIn 220ms var(--ease); }
 /* Hairline of the panel's tone along the top edge */
 .settings-modal::before { content: ""; position: absolute; top: 0; left: 24px; right: 24px; height: 1px; background: linear-gradient(90deg, transparent, var(--tone), transparent); opacity: 0.7; pointer-events: none; }
 @keyframes modalIn { from { opacity: 0; transform: translateY(10px) scale(0.97); } }
@@ -1072,10 +1072,23 @@ html:has(.settings-modal[open]) { overflow: hidden; }
 .constellation__tip {
   position: fixed; z-index: calc(var(--z-modal) - 1); min-width: 168px; padding: var(--space-2) var(--space-3);
   border: 1px solid var(--line-strong); border-radius: var(--radius-sm);
-  background: var(--glass); backdrop-filter: blur(8px); box-shadow: var(--shadow-pop);
+  background: var(--glass); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); box-shadow: var(--shadow-pop);
   color: var(--text-3); font-size: 11px; pointer-events: none;
 }
 .constellation__tip[hidden] { display: none; }
+/* Phones: pinned by a tap, closed with ✕ in its top-right corner */
+/* Opaque, not glass: legible over the bright bubbles whether or not the
+   browser blurs (iOS Safari may not), and under the account menu's scrim */
+.constellation__tip.is-pinned { z-index: calc(var(--z-menu) - 2); background: var(--bg-elevated); pointer-events: auto; padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4); font-size: 12.5px; }
+.constellation__tip.is-pinned .constellation__tip-title { padding-right: 36px; }
+.constellation__tip.is-pinned .constellation__tip-title strong { font-size: 15px; }
+.constellation__tip-close {
+  position: absolute; top: 2px; right: 2px; display: grid; place-items: center; width: 40px; height: 40px; padding: 0;
+  border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); -webkit-tap-highlight-color: transparent;
+}
+.constellation__tip-close svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.constellation__tip-close:active { color: var(--text); background: var(--white-a04); }
+.constellation__tip-close:focus-visible { outline: 2px solid var(--green); outline-offset: -2px; }
 .constellation__tip-title { display: flex; align-items: baseline; gap: var(--space-2); }
 .constellation__tip-title strong { color: var(--text); font-family: var(--font-mono); font-size: 13px; letter-spacing: 0.02em; }
 .constellation__tip-status { display: inline-flex; align-items: center; gap: 6px; margin: 2px 0 6px; color: var(--heat); font-weight: 700; }
@@ -1199,7 +1212,7 @@ html:has(.settings-modal[open]) { overflow: hidden; }
 .layout-icon[aria-expanded="true"] { color: var(--text); background: var(--white-a04); border-color: var(--line); }
 .chart-layouts {
   position: absolute; top: calc(100% + 8px); right: 0; z-index: 20; width: max-content; padding: 10px 12px 12px;
-  border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--glass); backdrop-filter: blur(10px);
+  border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--glass); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
   box-shadow: var(--shadow-pop); animation: popIn 180ms var(--ease);
 }
 .chart-layouts[hidden] { display: none; }
@@ -1346,7 +1359,7 @@ html:has(.settings-modal[open]) { overflow: hidden; }
 .chart-pop { position: relative; }
 .chart-menu-list {
   position: absolute; top: calc(100% + 6px); right: 0; z-index: 20; display: flex; flex-direction: column; gap: 1px; min-width: 184px; padding: 5px;
-  border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--glass); backdrop-filter: blur(10px);
+  border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--glass); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
   box-shadow: var(--shadow-pop); animation: popIn 180ms var(--ease);
 }
 .chart-menu-list[hidden] { display: none; }
@@ -1375,7 +1388,7 @@ html:has(.settings-modal[open]) { overflow: hidden; }
 .chart-message[hidden], .chart-tip[hidden] { display: none; }
 .chart-tip {
   position: absolute; top: 8px; z-index: 1; width: var(--chart-tip-w); max-height: calc(100% - 16px); overflow: hidden; padding: 8px 10px;
-  border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--glass); backdrop-filter: blur(var(--scrim-blur));
+  border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--glass); -webkit-backdrop-filter: blur(var(--scrim-blur)); backdrop-filter: blur(var(--scrim-blur));
   box-shadow: var(--shadow-pop); color: var(--text-3); font-size: 11px; line-height: 1.35; pointer-events: none;
 }
 .chart-tip p { margin: 0; }
@@ -1734,7 +1747,10 @@ tr.is-new td, .alert-card.is-new { animation: rowIn 1.6s var(--ease); }
   .app-nav { flex: none; height: var(--m-nav-h); gap: var(--space-3); padding: 0 var(--space-3) 0 var(--m-gutter); border-bottom: 0; background: var(--bg); }
   .app-brand { display: inline-flex; align-items: center; gap: 10px; font-size: 18px; letter-spacing: 0.02em; }
   .app-brand::before { content: ""; width: 10px; height: 10px; border-radius: 3px; background: var(--green); box-shadow: 0 0 12px var(--green-a32); }
-  .filter-btn, .app-tools > .icon-btn { display: none; }
+  /* Only the whole-scanner fullscreen stays, left of the account */
+  .filter-btn, .app-tools > .guide-icon { display: none; }
+  .app-tools > .fullscreen-icon { width: 40px; height: 40px; color: var(--text-2); }
+  .app-tools > .fullscreen-icon svg { width: 20px; height: 20px; }
   .app-tools { margin-left: auto; padding-left: 0; border-left: 0; }
   .user-avatar .avatar { --avatar: var(--m-avatar); font-size: 12px; box-shadow: 0 0 0 2px var(--bg); }
   /* Until scanner.js moves the status under the nav, it waits hidden and
