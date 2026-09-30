@@ -5215,6 +5215,8 @@
      The day is scripted (pre-market, open drive, a Halt, a flush, a
      divergence, a tug of war, a data gap, buyers back) on a mock clock that
      reads 10:44 ET when the page opens; from there live regimes follow.
+     Key levels draws the same day: each Top List update's price, volume and
+     VWAP, the Pressure alerts and the Halts.
      Only the main window runs it; copies get the series over the channel. */
 
   const BB_SYM = "GXAI";
@@ -5372,7 +5374,7 @@
       let selling = 0;
       for (let i = alerts.length - 1; i >= 0 && alerts[i].t > t - 300e3; i--) alerts[i].side > 0 ? buying++ : selling++;
       const raw = classify(t, { c, A, T, P, mom, part, buyShare, buying, selling });
-      const point = { t, c, alerts: A, tape: T, trend: P, price: round(price, 4), part, raw: `${raw.key}:${raw.side}`, state: null, session: session(t) };
+      const point = { t, c, alerts: A, tape: T, trend: P, price: round(price, 4), vwap: round(vwap, 4), part, raw: `${raw.key}:${raw.side}`, state: null, session: session(t) };
       // Debounce: the state in force holds while a point of the last 20 s backs it
       const current = status && `${status.key}:${status.side}`;
       let held = current === point.raw;
@@ -5398,6 +5400,8 @@
       ev.vol += volume; ev.day += volume; ev.pv += price * volume; ev.v += volume;
       ev.lot = t; ev.last = price; ev.lots += 1;
       evaluate(t);
+      // Top List updates carry their volume (Key levels); alert points do not.
+      points[points.length - 1].vol = Math.round(volume);
     };
 
     const alert = (t, side, vol) => {
@@ -5450,6 +5454,46 @@
       dump: () => ({ points: points.slice(), alerts: alerts.slice(), ...copy() }),
       onUpdate: (fn) => listeners.push(fn),
     };
+  };
+
+  /* ---- Chart canvas helpers ------------------------------------------------
+     Shared by the canvas charts (Bull vs. Bear, Key levels): tokens read as
+     canvas colors, crisp 1 px lines, value tags pushed apart on the axis
+     and the hover card placed beside the cursor. */
+
+  // A CSS token as a canvas color (the canvas normalizes any CSS color to hex).
+  const chartColor = (ctx, css, name, fallback) => {
+    ctx.fillStyle = fallback;
+    ctx.fillStyle = css.getPropertyValue(name).trim() || fallback;
+    return ctx.fillStyle;
+  };
+  const chartAlpha = (hex, a) => `rgba(${[1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(",")},${a})`;
+  const crisp = (v) => Math.round(v) + 0.5;
+
+  // Tags on the value axis, pushed apart (and kept inside [min, max]) so none overlaps.
+  const spreadTags = (tags, min, max, h) => {
+    tags.sort((a, b) => a.y - b.y);
+    for (let pass = 0; pass < 3; pass++) {
+      for (let i = 1; i < tags.length; i++) {
+        const overlap = tags[i - 1].y + h - tags[i].y;
+        if (overlap > 0) { tags[i - 1].y -= overlap / 2; tags[i].y += overlap / 2; }
+      }
+      tags.forEach((tag) => { tag.y = clampTo(tag.y, min, max); });
+      for (let i = 1; i < tags.length; i++) tags[i].y = Math.max(tags[i].y, tags[i - 1].y + h);
+      for (let i = tags.length - 2; i >= 0; i--) tags[i].y = Math.min(tags[i].y, tags[i + 1].y - h);
+    }
+    return tags;
+  };
+
+  // Hover card next to the cursor, on its left; on the right when the left
+  // edge leaves no room. Vertically centered on `cy`, kept inside the plot.
+  const CHART_TIP_GAP = 14;
+  const placeChartTip = (tip, x, cy, right, floor) => {
+    const w = tip.offsetWidth;
+    const h = tip.offsetHeight;
+    const left = x - CHART_TIP_GAP - w >= 4 ? x - CHART_TIP_GAP - w : Math.min(x + CHART_TIP_GAP, right - w - 4);
+    tip.style.left = `${Math.round(left)}px`;
+    tip.style.top = `${Math.round(clampTo(cy - h / 2, 4, Math.max(4, floor - h)))}px`;
   };
 
   /* ---- Bull vs. Bear chart --------------------------------------------------
@@ -5526,13 +5570,9 @@
     const windowBtns = [...view.querySelectorAll("[data-bb-window]")];
     const intro = detail.textContent;
 
-    // Tokens → canvas colors (the canvas normalizes any CSS color to hex).
+    // Tokens → canvas colors
     const rootCss = getComputedStyle(document.documentElement);
-    const color = (name, fallback) => {
-      ctx.fillStyle = fallback;
-      ctx.fillStyle = rootCss.getPropertyValue(name).trim() || fallback;
-      return ctx.fillStyle;
-    };
+    const color = (name, fallback) => chartColor(ctx, rootCss, name, fallback);
     const C = {
       bg: color("--chart-bg", "#08090b"),
       grid: color("--chart-grid", "#14181e"),
@@ -5553,10 +5593,8 @@
     };
     const SANS = rootCss.getPropertyValue("--font-sans").trim() || "sans-serif";
     const MONO = rootCss.getPropertyValue("--font-mono").trim() || "monospace";
-    const rgb = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
-    const alpha = (hex, a) => `rgba(${rgb(hex).join(",")},${a})`;
-    const crisp = (v) => Math.round(v) + 0.5;
-    const TONE = { bull: C.bull, bear: C.bear, warn: C.warn, neutral: C.neutral };
+    const alpha = chartAlpha;
+    const TONE ={ bull: C.bull, bear: C.bear, warn: C.warn, neutral: C.neutral };
     const stateColor = (s) => (s ? alpha(s.key === "halted" ? C.neutral : TONE[bbTone(s.key, s.side)], BB_STATE_ALPHA[s.key] ?? 0.3) : null);
     const sideColor = (c) => (c >= 0.5 ? C.bull : c <= -0.5 ? C.bear : C.neutral);
 
@@ -5655,21 +5693,6 @@
         x: (t) => ((t - start) / (end - start)) * usable,
         y: (c) => mid - (clampTo(c, -100, 100) / 100) * half,
       };
-    };
-
-    // Tags on the value axis, pushed apart (and kept inside [min, max]) so none overlaps.
-    const spread = (tags, min, max, h) => {
-      tags.sort((a, b) => a.y - b.y);
-      for (let pass = 0; pass < 3; pass++) {
-        for (let i = 1; i < tags.length; i++) {
-          const overlap = tags[i - 1].y + h - tags[i].y;
-          if (overlap > 0) { tags[i - 1].y -= overlap / 2; tags[i].y += overlap / 2; }
-        }
-        tags.forEach((tag) => { tag.y = clampTo(tag.y, min, max); });
-        for (let i = 1; i < tags.length; i++) tags[i].y = Math.max(tags[i].y, tags[i - 1].y + h);
-        for (let i = tags.length - 2; i >= 0; i--) tags[i].y = Math.min(tags[i].y, tags[i + 1].y - h);
-      }
-      return tags;
     };
 
     const axisTag = (g, y, text, bg, ink) => {
@@ -5966,7 +5989,7 @@
       ctx.lineTo(W, crisp(timeTop));
       ctx.stroke();
 
-      const tags = spread([{ y: ly, text: fmtScore(last.c), bg: tone }, ...(priceTag ? [priceTag] : [])], top - G.pad + G.tag / 2, floor - G.tag / 2, G.tag + 2);
+      const tags = spreadTags([{ y: ly, text: fmtScore(last.c), bg: tone }, ...(priceTag ? [priceTag] : [])], top - G.pad + G.tag / 2, floor - G.tag / 2, G.tag + 2);
       const blocked = [...tags.map((tag) => tag.y), ...(hp ? [y(hp.c)] : [])];
       let lastLabel = -Infinity;
       BB_AXIS.forEach(([v, text]) => {
@@ -6029,19 +6052,8 @@
       canvas.setAttribute("aria-label", `${ticker()} Bull vs. Bear: ${status.label}, control ${fmtScore(last.c)}. ${status.detail}`);
     };
 
-    // Hover card: next to the cursor, on its left; on the right when the
-    // left edge leaves no room. Vertically centered on the cursor (on the
-    // point, from the keyboard), kept inside the plot.
-    const TIP_GAP = 14;
-    const placeTip = (g, p) => {
-      const w = tip.offsetWidth;
-      const h = tip.offsetHeight;
-      const px = g.x(p.t);
-      const left = px - TIP_GAP - w >= 4 ? px - TIP_GAP - w : Math.min(px + TIP_GAP, g.right - w - 4);
-      const cy = pointerY ?? g.y(p.c);
-      tip.style.left = `${Math.round(left)}px`;
-      tip.style.top = `${Math.round(clampTo(cy - h / 2, 4, Math.max(4, g.floor - h)))}px`;
-    };
+    // Hover card beside the cursor (on the point, from the keyboard)
+    const placeTip = (g, p) => placeChartTip(tip, g.x(p.t), pointerY ?? g.y(p.c), g.right, g.floor);
 
     const showTip = (g, p) => {
       const row = (label, value, sign = "") => `<dt>${label}</dt><dd${sign ? ` data-sign="${sign}"` : ""}>${value}</dd>`;
@@ -6172,6 +6184,1396 @@
         loadBbPrefs();
         syncControls();
         schedule();
+      },
+    };
+  };
+
+  /* ---- Key levels: support and resistance ----------------------------------
+     The monitor's algorithm (see KEY_LEVELS.md) run in the browser on the
+     mock GXAI day. Up to 3 resistances above the last price and 3 supports
+     below: the strongest and closest, each on a round (psychological) price.
+     1. Grid: the first rung of 0.01 · 0.05 · 0.10 · 0.25 · 0.50 · 1 · 5 …
+        at or above max(1.5 % of the price, the day's range / 15).
+     2. Volume profile: each update's volume at the price it traded, in bins
+        of ¼ grid smoothed with a Gaussian (σ = 1.5 bins): the POC and the
+        high-volume nodes (peaks of 15 % prominence). Time at price when
+        there is no volume.
+     3. Swing highs and lows: peaks of the price with a prominence of
+        max(0.6 grid, 4 % of the range), 8 updates apart.
+     4. References: day High / Low, each session's High / Low (once the day
+        has more than one), Prev Close, Open, the regular Close (after
+        hours) and the Buying / Selling Pressure alerts' prices.
+     Each candidate snaps to the roundest price within half a grid. Score:
+     volume share × 3, POC 1.5, HVN 1, 1 per touch (≤ 4), the references,
+     0.6 per alert (≤ 3) and 0.35 per round rung; a level needs 1.2 without
+     the roundness. Ranked by score × e^(−1.5 × distance), 1.5 grids apart;
+     strength 1–3 against the strongest one picked. Needs 20 updates. */
+
+  const KL_LADDER = [0.01, 0.05, 0.1, 0.25, 0.5, 1, 5, 10, 25, 50, 100, 250, 500];
+  const KL_MIN_SAMPLES = 20;
+  const KL_GAP = 120e3;              // longer without an update: no volume attributed, line breaks
+  const KL_PER_SIDE = 3;
+  const KL_SEPARATION = 1.5;         // grids between two levels of the same side
+  const KL_WEIGHTS = { volume: 3, poc: 1.5, hvn: 1, touch: 1, day: 1.5, session: 1.2, prevClose: 1, open: 0.8, close: 1, alert: 0.6, round: 0.35 };
+  const KL_MIN_EVIDENCE = 1.2;
+  const KL_SESSIONS = { pre: "premarket", rm: "regular", post: "postmarket" };
+
+  const klGrid = (price, range) => KL_LADDER.find((s) => s >= Math.max(price * 0.015, range / 15) - 1e-12) ?? KL_LADDER[KL_LADDER.length - 1];
+  const isMultiple = (v, step) => Math.abs(v / step - Math.round(v / step)) < 1e-6;
+  const klRoundness = (level, step) => KL_LADDER.filter((r) => r >= step - 1e-12 && isMultiple(level, r)).length;
+  // The roundest price within half a grid; else the nearest grid multiple (grid 0.05: 1.52 → 1.50, 1.62 → 1.60).
+  const klSnap = (v, step) => {
+    for (let i = KL_LADDER.length - 1; i >= 0 && KL_LADDER[i] > step + 1e-12; i--) {
+      const c = Math.round(v / KL_LADDER[i]) * KL_LADDER[i];
+      if (c > 0 && Math.abs(c - v) <= step * 0.5 + 1e-12) return round(c, 4);
+    }
+    return round(Math.max(step, Math.round(v / step) * step), 4);
+  };
+
+  // scipy.signal.find_peaks: local maxima (a flat top counts once, at its
+  // middle); of two closer than `distance`, the higher stays; then the
+  // ones that stand out by `prominence`.
+  const findPeaks = (x, prominence, distance = 1) => {
+    const n = x.length;
+    let peaks = [];
+    for (let i = 1; i < n - 1; i++) {
+      if (!(x[i - 1] < x[i])) continue;
+      let ahead = i + 1;
+      while (ahead < n - 1 && x[ahead] === x[i]) ahead++;
+      if (x[ahead] < x[i]) { peaks.push((i + ahead - 1) >> 1); i = ahead; }
+    }
+    if (distance > 1 && peaks.length > 1) {
+      const keep = peaks.map(() => true);
+      const order = peaks.map((_, k) => k).sort((a, b) => x[peaks[b]] - x[peaks[a]]);
+      order.forEach((j) => {
+        if (!keep[j]) return;
+        for (let k = j - 1; k >= 0 && peaks[j] - peaks[k] < distance; k--) keep[k] = false;
+        for (let k = j + 1; k < peaks.length && peaks[k] - peaks[j] < distance; k++) keep[k] = false;
+      });
+      peaks = peaks.filter((_, k) => keep[k]);
+    }
+    return peaks.filter((p) => {
+      let left = x[p];
+      for (let i = p; i >= 0 && x[i] <= x[p]; i--) left = Math.min(left, x[i]);
+      let right = x[p];
+      for (let i = p; i < n && x[i] <= x[p]; i++) right = Math.min(right, x[i]);
+      return x[p] - Math.max(left, right) >= prominence;
+    });
+  };
+
+  // scipy.ndimage.gaussian_filter1d (mode "constant", truncated at 4 σ)
+  const gaussianSmooth = (values, sigma) => {
+    const radius = Math.floor(4 * sigma + 0.5);
+    const kernel = Array.from({ length: 2 * radius + 1 }, (_, k) => Math.exp(-0.5 * ((k - radius) / sigma) ** 2));
+    const norm = kernel.reduce((a, b) => a + b, 0);
+    return values.map((_, i) => kernel.reduce((sum, w, k) => sum + w * (values[i + k - radius] ?? 0), 0) / norm);
+  };
+
+  // samples: Top List updates { t, p, v (its volume), s: "pre" | "rm" | "post" };
+  // refs: { prevClose, open, close }; alerts: Pressure alerts { price, side }.
+  const computeKeyLevels = (samples, refs, alerts) => {
+    const n = samples.length;
+    if (n < KL_MIN_SAMPLES) return { price: n ? samples[n - 1].p : null, step: null, levels: [] };
+    const prices = samples.map((s) => s.p);
+    const last = prices[n - 1];
+    const high = Math.max(...prices);
+    const low = Math.min(...prices);
+    const step = klGrid(last, high - low);
+    const tol = step / 2; // each pivot, alert or volume bin counts for one level only
+
+    // Volume between two updates, at the price in between; none across a
+    // session change or a gap. Without volume: time at price.
+    let volume = samples.map((s, i) => (i && s.v != null && s.s === samples[i - 1].s && s.t - samples[i - 1].t <= KL_GAP ? Math.max(0, s.v) : 0));
+    let total = volume.reduce((a, b) => a + b, 0);
+    if (total <= 0) { volume = volume.map(() => 1); total = n; }
+    const traded = prices.map((p, i) => (i ? (p + prices[i - 1]) / 2 : p));
+    const bw = step / 4;
+    const start = low - step;
+    const bins = Math.max(1, Math.ceil((high - low + 2 * step + bw) / bw - 1e-9) - 1);
+    const center = (i) => start + (i + 0.5) * bw;
+    const hist = new Array(bins).fill(0);
+    traded.forEach((p, i) => { hist[clampTo(Math.floor((p - start) / bw), 0, bins - 1)] += volume[i]; });
+    const smooth = gaussianSmooth(hist, 1.5);
+    let top = 0;
+    smooth.forEach((v, i) => { if (v > smooth[top]) top = i; });
+    const hvns = findPeaks(smooth, smooth[top] * 0.15).map(center);
+    const prominence = Math.max(step * 0.6, (high - low) * 0.04);
+    const swings = [...findPeaks(prices, prominence, 8), ...findPeaks(prices.map((p) => -p), prominence, 8)].map((i) => prices[i]);
+
+    const candidates = new Map(); // level → { sources, evidence }
+    const add = (value, source, weight = 0) => {
+      if (!(value > 0) || !Number.isFinite(value)) return;
+      const level = klSnap(value, step);
+      if (!candidates.has(level)) candidates.set(level, { sources: new Set(), evidence: 0 });
+      const c = candidates.get(level);
+      if (!c.sources.has(source)) { c.sources.add(source); c.evidence += weight; }
+    };
+    add(center(top), "poc", KL_WEIGHTS.poc);
+    hvns.forEach((v) => add(v, "hvn", KL_WEIGHTS.hvn));
+    swings.forEach((v) => add(v, "pivot"));
+    add(high, "day_high", KL_WEIGHTS.day);
+    add(low, "day_low", KL_WEIGHTS.day);
+    const present = Object.keys(KL_SESSIONS).filter((code) => samples.some((s) => s.s === code));
+    if (present.length > 1) present.forEach((code) => {
+      const ps = samples.filter((s) => s.s === code).map((s) => s.p);
+      add(Math.max(...ps), `${KL_SESSIONS[code]}_high`, KL_WEIGHTS.session);
+      add(Math.min(...ps), `${KL_SESSIONS[code]}_low`, KL_WEIGHTS.session);
+    });
+    add(refs.prevClose, "prev_close", KL_WEIGHTS.prevClose);
+    add(refs.open, "open", KL_WEIGHTS.open);
+    add(refs.close, "close", KL_WEIGHTS.close);
+    alerts.forEach((a) => add(a.price, a.side > 0 ? "buying_pressure" : "selling_pressure"));
+
+    const shares = new Map([...candidates.keys()].map((level) => [level, hist.reduce((sum, v, i) => sum + (Math.abs(center(i) - level) <= tol ? v : 0), 0) / total]));
+    const maxShare = Math.max(0, ...shares.values()) || 1;
+    const scale = Math.max(high - low, last * 0.03, step);
+    const levels = [];
+    candidates.forEach((c, level) => {
+      const near = (v) => Math.abs(v - level) <= tol;
+      const touches = swings.filter(near).length;
+      const buying = alerts.filter((a) => a.side > 0 && near(a.price)).length;
+      const selling = alerts.filter((a) => a.side < 0 && near(a.price)).length;
+      const share = shares.get(level);
+      const evidence = c.evidence + (KL_WEIGHTS.volume * share) / maxShare + KL_WEIGHTS.touch * Math.min(touches, 4) + KL_WEIGHTS.alert * Math.min(buying + selling, 3);
+      if (evidence < KL_MIN_EVIDENCE) return;
+      const score = evidence + KL_WEIGHTS.round * klRoundness(level, step);
+      levels.push({
+        price: level, type: level >= last ? "resistance" : "support", score: round(score, 3),
+        rank: score * Math.exp((-1.5 * Math.abs(level - last)) / scale),
+        touches, volumeShare: round(share, 4), buying, selling, sources: [...c.sources].sort(),
+      });
+    });
+
+    const picked = [];
+    ["resistance", "support"].forEach((type) => {
+      const chosen = [];
+      levels.filter((l) => l.type === type).sort((a, b) => b.rank - a.rank).forEach((l) => {
+        if (chosen.length < KL_PER_SIDE && chosen.every((o) => Math.abs(l.price - o.price) >= step * KL_SEPARATION - 1e-9)) chosen.push(l);
+      });
+      picked.push(...chosen);
+    });
+    const best = Math.max(...picked.map((l) => l.score));
+    picked.forEach((l) => {
+      l.strength = l.score / best >= 0.75 ? 3 : l.score / best >= 0.45 ? 2 : 1;
+      delete l.rank;
+    });
+    return { price: last, step, levels: picked.sort((a, b) => b.price - a.price) };
+  };
+
+  /* ---- Key levels chart -----------------------------------------------------
+     TradingView-style price chart on a canvas, one bar per 15 s, 1 or
+     5 minutes (the last price of each; the feed has no real OHLC):
+     - price as a line with an area fading down; VWAP dashed and neutral;
+       volume in a pane of its own, neutral (brighter when the bar rose);
+     - support (green) and resistance (red) as thin lines across the plot,
+       stronger the stronger the level, with their value on the line at the
+       right edge ("R 3.00"), not on the axis; the live bar never passes the
+       left edge of that column, so the history scrolls left from there;
+     - the nearest levels pull the scale in when within half the visible
+       range; farther ones never squash the curve;
+     - alerts on the curve (menu Alerts): New HoD amber triangle over it,
+       Buying / Selling Pressure dot on the price with a halo by Vol. 1m,
+       Halt / Resume gray square with an amber H / green R, stacked off the curve with a guide;
+     - High / Low of the visible bars, labeled with a short stem;
+     - Halts and gaps over 2 minutes: the line goes on in gray (the time
+       axis skips them); pre-market / after hours shaded;
+     - right axis: price labels, last price tag (green / red by the day's
+       change), VWAP tag, top volume of the pane.
+     Nothing overlaps: markers take their place first (Halt/Resume, New HoD,
+     Pressure by Vol. 1m), then the High / Low labels move away from them,
+     then the level values; whatever finds no room is left out. Axis labels
+     give way to the tags and chips, tags push each other apart, time labels
+     keep their width apart.
+     Crosshair: snaps to a bar, the horizontal line follows the cursor; chips
+     on both axes and the hover card beside the cursor. Wheel zooms around
+     the cursor, drag (or Shift + wheel) pans, double-click goes back live.
+     Keyboard on the canvas: ←/→ bar by bar (Shift: 10), Home/End, +/− zoom,
+     Esc. The head says where the price stands against its levels.
+     Interval, S/R and alert types are saved in localStorage. */
+
+  const KL_KEY = "scanner:key-levels:v1";
+  const KL_INTERVALS = [15e3, 60e3, 300e3];
+  const KL_KINDS = ["hod", "buying", "selling", "halts"];
+  const KL_ZOOM = { min: 3, max: 42 };     // bar spacing (px)
+  const KL_ANCHOR_GAP = 14;                 // live bar ↔ level values
+  const KL_LABEL_H = 12;                    // box of a label drawn in the plot
+  const KL_MARK_GAP = 2;
+  const KL_PRIORITY = { halt: 4, resume: 4, hod: 3, buying: 2, selling: 2 };
+  const KL_ALERT_WINS = 15e3;               // an alert's price beats a later update this long (live bar)
+  const KL_HOD_EVERY = 180e3;               // mock New HoD: a new high, once every 3 minutes at most
+  const KL_BREAK_WINDOW = 300e3;            // a level crossed this recently: breakout / breakdown
+  const KL_TIME_STEPS = [15e3, 30e3, 60e3, 120e3, 300e3, 600e3, 900e3, 1800e3, 3600e3, 7200e3];
+  const KL_SOURCES = {
+    poc: "POC", hvn: "volume node", day_high: "day high", day_low: "day low", premarket_high: "pre-market high",
+    premarket_low: "pre-market low", regular_high: "regular high", regular_low: "regular low",
+    postmarket_high: "after-hours high", postmarket_low: "after-hours low", prev_close: "prev. close", open: "open", close: "close",
+  };
+  const KL_STATES = {
+    warming_up: ["Warming up", "neutral"], none: ["No clear levels", "neutral"], between: ["Between levels", "neutral"],
+    test_r: ["Testing resistance", "neutral"], test_s: ["Testing support", "neutral"],
+    breakout: ["Breaking out", "bull"], breakdown: ["Breaking down", "bear"],
+    no_r: ["No resistance above", "bull"], no_s: ["No support below", "bear"],
+  };
+  const KL_STAT_TITLES = {
+    vwap: "Volume-weighted average price of the day",
+    slope: "Linear regression of VWAP over the last 5 minutes, in % of VWAP per minute",
+    high: "High of the day (pre-market included)",
+    low: "Low of the day (pre-market included)",
+    open: "First price of the regular session",
+    prev: "Previous close",
+  };
+
+  const klPrefs = { interval: 60e3, levels: true, alerts: [...KL_KINDS] };
+  const loadKlPrefs = () => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(KL_KEY) || "{}");
+      klPrefs.interval = KL_INTERVALS.includes(saved.interval) ? saved.interval : 60e3;
+      klPrefs.levels = typeof saved.levels === "boolean" ? saved.levels : true;
+      klPrefs.alerts = Array.isArray(saved.alerts) ? KL_KINDS.filter((k) => saved.alerts.includes(k)) : [...KL_KINDS];
+    } catch { /* ignore */ }
+  };
+  const saveKlPrefs = () => {
+    try { localStorage.setItem(KL_KEY, JSON.stringify(klPrefs)); } catch { /* ignore */ }
+  };
+  loadKlPrefs();
+
+  const priceDp = (v) => (v >= 1 ? 2 : 4);
+  const fmtAt = (v, dp) => v.toFixed(dp);
+  const niceStep = (raw) => {
+    if (!(raw > 0)) return 1;
+    const mag = 10 ** Math.floor(Math.log10(raw));
+    const f = raw / mag;
+    return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * mag;
+  };
+
+  const mountKeyLevels = (view, root) => {
+    const box = view.querySelector(".chart-canvas");
+    const canvas = box.querySelector("canvas");
+    const tip = box.querySelector(".chart-tip");
+    const note = box.querySelector(".chart-message");
+    const ctx = canvas.getContext("2d");
+    const symbol = root.querySelector(".chart-symbol__input");
+    const pill = view.querySelector(".chart-state");
+    const since = view.querySelector(".chart-since");
+    const detail = view.querySelector(".chart-head__detail");
+    const meter = view.querySelector(".chart-meter");
+    const thumb = meter.querySelector(".chart-meter__thumb");
+    const score = meter.querySelector(".chart-meter__score");
+    const supportLabel = meter.querySelector(".chart-meter__label[data-side='bull']");
+    const resistanceLabel = meter.querySelector(".chart-meter__label[data-side='bear']");
+    const stats = view.querySelector(".chart-stats");
+    const legendLevels = [...view.querySelectorAll(".chart-key[data-key='support'], .chart-key[data-key='resistance']")].map((k) => k.parentElement);
+    const levelsBtn = view.querySelector("[data-kl-levels]");
+    const intervalBtns = [...view.querySelectorAll("[data-kl-interval]")];
+    const menuBtn = view.querySelector("[data-kl-alerts]");
+    const menuWrap = menuBtn.parentElement;
+    const menu = view.querySelector(".chart-menu-list");
+    const menuItems = [...menu.querySelectorAll("[data-kl-alert]")];
+    const intro = detail.textContent;
+
+    // Tokens → canvas colors
+    const rootCss = getComputedStyle(document.documentElement);
+    const color = (name, fallback) => chartColor(ctx, rootCss, name, fallback);
+    const C = {
+      bg: color("--chart-bg", "#08090b"),
+      grid: color("--chart-grid", "#14181e"),
+      bull: color("--chart-bull", "#c8ff38"),
+      bear: color("--chart-bear", "#ff4f6b"),
+      neutral: color("--chart-neutral", "#5d6673"),
+      price: color("--chart-price", "#4cc9ff"),
+      vwap: color("--chart-vwap", "#b4bbc6"),
+      volume: color("--chart-volume", "#7b8492"),
+      support: color("--chart-support", "#c8ff38"),
+      resistance: color("--chart-resistance", "#ff4f6b"),
+      hod: color("--chart-hod", "#ffb84d"),
+      haltInk: color("--chart-halt-ink", "#ffb84d"),
+      resumeInk: color("--chart-resume-ink", "#c8ff38"),
+      axis: color("--chart-axis-text", "#7b8492"),
+      cross: color("--chart-crosshair", "#7b8492"),
+      chip: color("--chart-chip", "#1f242c"),
+      chipText: color("--text", "#f2f4f7"),
+      ink: color("--chart-ink", "#0a0f00"),
+      mark: color("--chart-watermark", "#12151a"),
+      session: color("--chart-session", "#12151a"),
+      line: color("--line", "#23282f"),
+    };
+    const SANS = rootCss.getPropertyValue("--font-sans").trim() || "sans-serif";
+    const MONO = rootCss.getPropertyValue("--font-mono").trim() || "monospace";
+    const alpha = chartAlpha;
+    const levelColor = (l) => (l.type === "support" ? C.support : C.resistance);
+    const markColor = (kind) => ({ hod: C.hod, buying: C.bull, selling: C.bear }[kind] ?? C.chip);
+    const LEVEL_FONT = `700 10px ${MONO}`;
+
+    // Strengths and sizes, read from the box: a narrow stage may override them.
+    let A = {};
+    let G = {};
+    const readSizes = () => {
+      const css = getComputedStyle(box);
+      const num = (name, fallback) => {
+        const v = parseFloat(css.getPropertyValue(name));
+        return Number.isFinite(v) ? v : fallback;
+      };
+      A = {
+        area: num("--chart-price-area-a", 0.16), vwap: num("--chart-vwap-a", 0.7), level: num("--chart-level-a", 0.3),
+        levelStep: num("--chart-level-step-a", 0.15), volUp: num("--chart-volume-a", 0.4), volDown: num("--chart-volume-down-a", 0.2),
+        session: num("--chart-session-a", 0.6),
+      };
+      G = {
+        axisW: num("--chart-axis-w", 52), axisH: num("--chart-axis-h", 20), pad: num("--chart-pad", 10), live: num("--chart-live-pad", 28),
+        tag: num("--chart-tag-h", 18), bar: num("--chart-bar-space", 9), volShare: num("--chart-vol-share", 0.2), volMax: num("--chart-vol-max", 90),
+        paneGap: num("--chart-pane-sep", 10), labelRoom: num("--chart-label-room", 26), markRoom: num("--chart-marker-room", 20),
+      };
+    };
+    readSizes();
+
+    let samples = [];   // Top List updates { t, p, v, w, s }
+    let pressure = [];  // Buying / Selling Pressure alerts { t, side, vol, price }
+    let halts = [];
+    let marks = [];     // alerts on the curve { t, kind, price, vol, i }
+    let result = { price: null, step: null, levels: [] };
+    let head = null;    // state against the levels
+    let bars = [];
+    let W = 0;
+    let H = 0;
+    let frame = 0;
+    let geo = null;
+    let spacing = G.bar;
+    let offset = 0;     // bars between the last bar and the right edge (fractional)
+    let follow = true;  // live: the last bar stays at the anchor
+    let hover = null;   // { i, y } (y null: keyboard)
+    let drag = null;
+
+    const ticker = () => symbol.value.trim().toUpperCase();
+    const message = () => {
+      const sym = ticker();
+      if (!sym) return "Type a ticker to see its key levels.";
+      if (sym !== BB_SYM) return `Mock data covers ${BB_SYM} only for now: type ${BB_SYM} to see the chart.`;
+      if (!bars.length) return `Waiting for ${sym} in the Top List feed…`;
+      return "";
+    };
+    const shown = () => (klPrefs.levels ? result.levels : []);
+    const enabled = (kind) => klPrefs.alerts.includes(kind === "halt" || kind === "resume" ? "halts" : kind);
+
+    /* Data: Top List updates, alerts on the curve, bars, levels, head state */
+    const sampleOf = (p) => ({ t: p.t, p: p.price, v: p.vol, w: p.vwap, s: p.session === "pre" ? "pre" : p.session === "post" ? "post" : "rm" });
+    const references = () => {
+      const open = samples.find((s) => s.s === "rm");
+      const lastRegular = samples.findLast((s) => s.s === "rm");
+      return { prevClose: BB_PREV_CLOSE, open: open?.p, close: samples[samples.length - 1]?.s === "post" ? lastRegular?.p : undefined };
+    };
+
+    // Bar of an instant: the one holding it. In a gap (Halt, off the Top
+    // List), a Resume goes to the next bar and the rest to the previous one,
+    // when close enough.
+    const barOf = (t, kind) => {
+      let lo = 0;
+      let hi = bars.length - 1;
+      let at = -1;
+      while (lo <= hi) {
+        const m = (lo + hi) >> 1;
+        if (bars[m].t <= t) { at = m; lo = m + 1; } else hi = m - 1;
+      }
+      const iv = klPrefs.interval;
+      if (bars[at] && t < bars[at].t + iv) return at;
+      if (kind === "resume") return bars[at + 1] && bars[at + 1].t - t <= KL_GAP ? at + 1 : -1;
+      return bars[at] && t - (bars[at].t + iv) <= KL_GAP ? at : -1;
+    };
+
+    // Bars: the last price in each interval. Short holes (≤ 2 min) repeat
+    // the last price so the time axis keeps its pace; a Halt or a longer
+    // gap starts a new run (`brk`). A bar holding an alert closes at the
+    // alert's price, so its marker sits on the curve; only the live bar
+    // lets a Top List update over 15 s later take over again.
+    const buildBars = () => {
+      const iv = klPrefs.interval;
+      const out = [];
+      let prev = null;
+      samples.forEach((s) => {
+        const bucket = Math.floor(s.t / iv) * iv;
+        const halted = prev && halts.some((h) => h.start >= prev.t && h.start < s.t);
+        const brk = prev && (halted || s.t - prev.t > KL_GAP) ? (halted ? "halt" : "gap") : null;
+        let bar = out[out.length - 1];
+        if (bar && !brk) for (let t = bar.t + iv; t < bucket; t += iv) out.push((bar = { t, c: bar.c, v: 0, w: bar.w, s: bar.s, lt: bar.lt }));
+        if (!bar || bar.t !== bucket) out.push((bar = { t: bucket, c: s.p, v: 0, w: s.w, s: s.s, brk }));
+        bar.c = s.p;
+        bar.lt = s.t;
+        bar.w = s.w;
+        bar.s = s.s;
+        bar.v += s.v || 0;
+        prev = s;
+      });
+      bars = out;
+      const lastBar = out[out.length - 1];
+      marks.forEach((m) => {
+        m.i = barOf(m.t, m.kind);
+        const bar = out[m.i];
+        if (!bar || m.t < bar.t || m.t >= bar.t + iv) return;
+        if (bar !== lastBar || bar.lt < m.t + KL_ALERT_WINS) bar.c = m.price;
+      });
+    };
+
+    // Alerts on the curve: Pressure from the feed; New HoD (a regular
+    // session high above the day's, every 3 minutes at most) and Halt /
+    // Resume derived from the updates.
+    const buildMarks = () => {
+      const out = pressure.map((a) => ({ t: a.t, kind: a.side > 0 ? "buying" : "selling", price: a.price, vol: a.vol }));
+      let high = -Infinity;
+      let lastHod = -Infinity;
+      samples.forEach((s) => {
+        if (s.s === "rm" && s.p > high && Number.isFinite(high) && s.t - lastHod >= KL_HOD_EVERY) {
+          out.push({ t: s.t, kind: "hod", price: s.p });
+          lastHod = s.t;
+        }
+        high = Math.max(high, s.p);
+      });
+      halts.forEach((h) => {
+        const before = samples[indexAt(samples, h.start)];
+        if (before && before.t <= h.start) out.push({ t: h.start, kind: "halt", price: before.p });
+        const after = h.end != null && samples.find((s) => s.t >= h.end);
+        if (after) out.push({ t: h.end, kind: "resume", price: after.p });
+      });
+      marks = out.sort((a, b) => a.t - b.t);
+    };
+
+    // Where the price stands against the levels at update `i`
+    const stateAt = (i, levels, step) => {
+      const p = samples[i].p;
+      let above = null;
+      let below = null;
+      levels.forEach((l) => {
+        if (l.price >= p) { if (!above || l.price < above.price) above = l; } else if (!below || l.price > below.price) below = l;
+      });
+      const crossed = (level, dir) => {
+        for (let j = i - 1; j >= 0 && samples[j].t >= samples[i].t - KL_BREAK_WINDOW; j--) {
+          if (dir > 0 ? samples[j].p < level : samples[j].p > level) return samples[j + 1].t;
+        }
+        return 0;
+      };
+      const base = { above, below, p };
+      if (below && p - below.price <= step) {
+        const at = crossed(below.price, 1);
+        if (at) return { ...base, key: "breakout", level: below, at };
+      }
+      if (above && above.price - p <= step) {
+        const at = crossed(above.price, -1);
+        if (at) return { ...base, key: "breakdown", level: above, at };
+      }
+      if (above && above.price - p <= step * 0.35 && (!below || above.price - p <= p - below.price)) return { ...base, key: "test_r", level: above };
+      if (below && p - below.price <= step * 0.35) return { ...base, key: "test_s", level: below };
+      if (!above && !below) return { ...base, key: "none" };
+      if (!above) return { ...base, key: "no_r" };
+      if (!below) return { ...base, key: "no_s" };
+      return { ...base, key: "between" };
+    };
+
+    // State of the last update and since when it holds (walking back with today's levels)
+    const evaluate = () => {
+      const n = samples.length;
+      if (!n) { head = null; return; }
+      if (n < KL_MIN_SAMPLES || !result.step) {
+        head = { key: n < KL_MIN_SAMPLES ? "warming_up" : "none", p: samples[n - 1].p, since: samples[0].t };
+        return;
+      }
+      const { levels, step } = result;
+      const now = stateAt(n - 1, levels, step);
+      const same = (s) => s.key === now.key && s.level?.price === now.level?.price;
+      let from = n - 1;
+      while (from > 0 && n - from < 1500 && same(stateAt(from - 1, levels, step))) from--;
+      head = { ...now, since: now.at ?? samples[from].t };
+    };
+
+    const refresh = ({ keepView = true } = {}) => {
+      const prevLast = keepView && bars.length ? bars[bars.length - 1].t : null;
+      buildMarks();
+      buildBars();
+      result = computeKeyLevels(samples, references(), pressure);
+      evaluate();
+      // Bars already on screen keep their place; new ones appear to their right.
+      const at = prevLast == null ? -1 : bars.findIndex((b) => b.t === prevLast);
+      if (at < 0 || !W) {
+        follow = true;
+        offset = liveOffset();
+      } else offset -= bars.length - 1 - at;
+      pin();
+    };
+
+    /* View: bar spacing and offset. Live, the series starts at the left
+       edge and grows right until the anchor (left of the level values);
+       from there the last bar stays put and the history moves left. */
+    const plotW = () => Math.max(0, W - G.axisW);
+    const anchorX = () => {
+      const levels = shown();
+      if (!levels.length || !bars.length) return plotW() - G.live;
+      const dp = priceDp(bars[bars.length - 1].c);
+      ctx.font = LEVEL_FONT;
+      const widest = Math.max(...[bars[bars.length - 1].c, ...levels.map((l) => l.price)].map((p) => ctx.measureText(`R ${fmtAt(p, dp)}`).width));
+      return plotW() - 6 - widest - KL_ANCHOR_GAP;
+    };
+    const anchorOffset = () => (plotW() - anchorX() - spacing / 2) / spacing;
+    const liveOffset = () => Math.max(anchorOffset(), plotW() / spacing - bars.length);
+    const clampOffset = () => {
+      const n = bars.length;
+      offset = clampTo(offset, -Math.max(0, n - 3), Math.max(anchorOffset(), plotW() / spacing - Math.min(3, Math.max(1, n))));
+    };
+    const pin = () => {
+      if (follow) offset = Math.max(offset, anchorOffset());
+      clampOffset();
+    };
+    const updateFollow = () => { follow = bars.length > 0 && offset >= anchorOffset() - 0.25; };
+    const resetView = () => {
+      spacing = G.bar;
+      follow = true;
+      offset = liveOffset();
+      clampOffset();
+      schedule();
+    };
+
+    /* Geometry: price pane on top, volume pane under it, time axis below */
+    const stackedIn = (first, last) => marks.some((m) => (m.kind === "hod" || m.kind === "halt" || m.kind === "resume") && enabled(m.kind) && m.i >= first && m.i <= last);
+    const geometry = () => {
+      const right = plotW();
+      const timeTop = H - G.axisH;
+      const volH = Math.round(Math.min(G.volMax, Math.max(24, timeTop - G.pad) * G.volShare));
+      const volTop = timeTop - volH;
+      const top = G.pad;
+      const bottom = Math.max(top + 30, volTop - G.paneGap);
+      const n = bars.length;
+      const x = (i) => right - (n - 1 - i + offset) * spacing - spacing / 2;
+      const first = clampTo(Math.floor(n - 1 + offset - right / spacing), 0, n - 1);
+      const last = clampTo(Math.ceil(n - 1 + offset), first, n - 1);
+      let lo = Infinity;
+      let hi = -Infinity;
+      let maxVol = 0;
+      for (let i = first; i <= last; i++) {
+        const b = bars[i];
+        lo = Math.min(lo, b.c, b.w ?? Infinity);
+        hi = Math.max(hi, b.c, b.w ?? -Infinity);
+        maxVol = Math.max(maxVol, b.v);
+      }
+      // The nearest resistance and support join the scale when within half
+      // the visible range; farther ones never squash the curve.
+      const range = hi - lo;
+      const levels = shown();
+      const nearR = Math.min(...levels.filter((l) => l.type === "resistance").map((l) => l.price));
+      const nearS = Math.max(...levels.filter((l) => l.type === "support").map((l) => l.price));
+      if (nearR > hi && nearR - hi <= range * 0.5) hi = nearR;
+      if (nearS < lo && lo - nearS <= range * 0.5) lo = nearS;
+      if (hi - lo < Math.max(Math.abs(hi) * 0.004, 0.0004)) {
+        const mid = (hi + lo) / 2;
+        const half = Math.max(Math.abs(mid) * 0.004, 0.0004);
+        lo = mid - half;
+        hi = mid + half;
+      }
+      // Room for the High / Low labels, plus the stacked markers when any is
+      // in view; never over 30 % of the pane, so a short chart keeps its curve.
+      const span = bottom - top;
+      const room = Math.min(G.labelRoom + (stackedIn(first, last) ? G.markRoom : 0), span * 0.3);
+      const padP = (hi - lo) * Math.max(0.08, room / Math.max(1, span - 2 * room));
+      lo -= padP;
+      hi += padP;
+      return {
+        right, timeTop, volTop, volH, top, bottom, first, last, lo, hi, maxVol, x,
+        y: (p) => bottom - ((p - lo) / (hi - lo)) * span,
+        priceAt: (py) => lo + ((bottom - py) / span) * (hi - lo),
+        yVol: (v) => timeTop - (maxVol > 0 ? (v / maxVol) * (volH - 2) : 0),
+        volAt: (py) => ((timeTop - py) / (volH - 2)) * maxVol,
+      };
+    };
+
+    const axisTag = (g, y, text, bg, ink) => {
+      ctx.fillStyle = bg;
+      ctx.beginPath();
+      ctx.roundRect(g.right + 3, y - G.tag / 2, G.axisW - 6, G.tag, 3);
+      ctx.fill();
+      ctx.fillStyle = ink;
+      ctx.font = `700 10.5px ${MONO}`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(text, g.right + G.axisW / 2, y + 0.5);
+    };
+    const overlaps = (a, b, gap = 4) => a.left < b.right + gap && b.left < a.right + gap && a.top < b.bottom + gap && b.top < a.bottom + gap;
+
+    // Top and bottom of the curve between two x: stacked markers go off the
+    // line, not only off their own point.
+    const curveBetween = (g, left, right) => {
+      let top = Infinity;
+      let bottom = -Infinity;
+      const take = (y) => { top = Math.min(top, y); bottom = Math.max(bottom, y); };
+      for (let i = g.first; i <= g.last; i++) {
+        const x0 = g.x(i);
+        const y0 = g.y(bars[i].c);
+        if (x0 >= left && x0 <= right) take(y0);
+        if (i === g.last) continue;
+        const x1 = g.x(i + 1);
+        const y1 = g.y(bars[i + 1].c);
+        [left, right].forEach((edge) => { if (edge > x0 && edge < x1) take(y0 + ((edge - x0) / (x1 - x0)) * (y1 - y0)); });
+      }
+      return { top, bottom };
+    };
+
+    // Alert markers (see the section comment). Returns their boxes.
+    const drawMarks = (g) => {
+      const groups = new Map();
+      marks.forEach((m) => {
+        if (!enabled(m.kind) || m.i < g.first || m.i > g.last) return;
+        const key = `${m.i}|${m.kind}`;
+        const group = groups.get(key);
+        // The latest sets the price; the halo takes the largest Vol. 1m
+        if (!group) groups.set(key, { i: m.i, kind: m.kind, price: m.price, vol: m.vol ?? 0 });
+        else { group.price = m.price; group.vol = Math.max(group.vol, m.vol ?? 0); }
+      });
+      if (!groups.size) return [];
+      // The halo's scale is the day's, so it does not change while panning
+      const maxVol = pressure.reduce((m, a) => Math.max(m, a.vol), 0);
+      const placed = [];
+      const drawn = [];
+      const fits = (b) => b.left >= 0 && b.right <= g.right && b.top >= g.top - 8 && b.bottom <= g.bottom + 8 && !placed.some((o) => overlaps(b, o, KL_MARK_GAP));
+      [...groups.values()]
+        .sort((a, b) => KL_PRIORITY[b.kind] - KL_PRIORITY[a.kind] || b.vol - a.vol || b.i - a.i)
+        .forEach((m) => {
+          const x = Math.round(g.x(m.i));
+          const y = g.y(m.price);
+          if (m.kind === "buying" || m.kind === "selling") {
+            // The dot marks the exact price: it never moves, and waits for a zoom if it does not fit
+            const r = 3.5;
+            const b = { left: x - r, right: x + r, top: y - r, bottom: y + r };
+            if (!fits(b)) return;
+            placed.push(b);
+            drawn.push({ ...m, x, y, r, glow: m.vol > 0 && maxVol > 0 ? 2 + 9 * Math.sqrt(m.vol / maxVol) : 3, box: b });
+            return;
+          }
+          const size = m.kind === "hod" ? { w: 10, h: 9 } : { w: 13, h: 13 };
+          const curve = curveBetween(g, x - size.w / 2 - 2, x + size.w / 2 + 2);
+          const lane = size.h + KL_MARK_GAP + 1;
+          let above = null;
+          let below = null;
+          for (let k = 0; k < 6 && !above; k++) {
+            const b = Math.min(y, curve.top) - 6 - k * lane;
+            const box = { left: x - size.w / 2, right: x + size.w / 2, top: b - size.h, bottom: b };
+            if (fits(box)) above = box;
+          }
+          for (let k = 0; k < 6 && !below; k++) {
+            const t = Math.max(y, curve.bottom) + 6 + k * lane;
+            const box = { left: x - size.w / 2, right: x + size.w / 2, top: t, bottom: t + size.h };
+            if (fits(box)) below = box;
+          }
+          // New HoD goes over the curve when it fits; Halt / Resume to the closer side
+          const up = Boolean(above) && (!below || m.kind === "hod" || y - above.bottom <= below.top - y + lane);
+          const box = up ? above : below;
+          if (!box) return;
+          placed.push(box);
+          drawn.push({ ...m, x, y, box, up });
+        });
+
+      // Three passes: dots, guides, then triangles and squares, so no guide crosses an icon
+      drawn.filter((m) => m.r).forEach((m) => {
+        const hue = markColor(m.kind);
+        ctx.fillStyle = alpha(hue, 0.14);
+        ctx.beginPath();
+        ctx.arc(m.x, m.y, m.r + m.glow, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = alpha(hue, 0.3);
+        ctx.beginPath();
+        ctx.arc(m.x, m.y, m.r + Math.min(3, m.glow), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = hue;
+        ctx.strokeStyle = C.bg;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(m.x, m.y, m.r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      });
+      const icons = drawn.filter((m) => !m.r);
+      ctx.lineWidth = 1;
+      icons.forEach((m) => {
+        const end = m.up ? m.box.bottom : m.box.top;
+        if (Math.abs(end - m.y) <= 3) return;
+        ctx.strokeStyle = alpha(m.kind === "hod" ? C.hod : C.axis, 0.45);
+        ctx.beginPath();
+        ctx.moveTo(m.x + 0.5, m.y + (m.up ? -2 : 2));
+        ctx.lineTo(m.x + 0.5, end + (m.up ? 1 : -1));
+        ctx.stroke();
+      });
+      icons.forEach((m) => {
+        const { box: b } = m;
+        ctx.strokeStyle = C.bg;
+        ctx.lineWidth = 2;
+        ctx.fillStyle = markColor(m.kind);
+        ctx.beginPath();
+        if (m.kind === "hod") {
+          ctx.moveTo(m.x, b.top);
+          ctx.lineTo(b.right, b.bottom);
+          ctx.lineTo(b.left, b.bottom);
+          ctx.closePath();
+          ctx.stroke();
+          ctx.fill();
+          return;
+        }
+        ctx.roundRect(b.left, b.top, b.right - b.left, b.bottom - b.top, 2.5);
+        ctx.stroke();
+        ctx.fill();
+        ctx.fillStyle = m.kind === "halt" ? C.haltInk : C.resumeInk;
+        ctx.font = `700 9px ${MONO}`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(m.kind === "halt" ? "H" : "R", m.x, (b.top + b.bottom) / 2 + 0.5);
+      });
+      return drawn.map((m) => m.box);
+    };
+
+    // High and Low of the visible bars, with a short stem off the curve that
+    // grows to clear the markers; left out when nothing is free.
+    const drawExtremes = (g, obstacles) => {
+      let hiI = null;
+      let loI = null;
+      for (let i = g.first; i <= g.last; i++) {
+        if (hiI === null || bars[i].c >= bars[hiI].c) hiI = i;
+        if (loI === null || bars[i].c <= bars[loI].c) loI = i;
+      }
+      if (hiI === null || bars[hiI].c === bars[loI].c) return [];
+      const dp = priceDp(bars[g.last].c);
+      const boxes = [];
+      ctx.font = `600 10px ${MONO}`;
+      ctx.fillStyle = C.axis;
+      ctx.strokeStyle = alpha(C.axis, 0.6);
+      ctx.lineWidth = 1;
+      ctx.textAlign = "left";
+      [[hiI, true], [loI, false]].forEach(([i, up]) => {
+        const x = g.x(i);
+        const y = g.y(bars[i].c);
+        const text = fmtAt(bars[i].c, dp);
+        const w = ctx.measureText(text).width;
+        const left = clampTo(x - w / 2, 4, g.right - w - 4);
+        for (let k = 0; k < 5; k++) {
+          const d = 12 + k * 14;
+          const label = up ? { left, right: left + w, top: y - d - KL_LABEL_H, bottom: y - d } : { left, right: left + w, top: y + d, bottom: y + d + KL_LABEL_H };
+          const stem = up ? { left: x - 1, right: x + 1, top: y - d + 2, bottom: y - 3 } : { left: x - 1, right: x + 1, top: y + 3, bottom: y + d - 2 };
+          const inside = label.top >= g.top - G.pad && label.bottom <= g.bottom + G.paneGap - 2;
+          if (!inside || obstacles.some((o) => overlaps(label, o, 2) || overlaps(stem, o, 1))) continue;
+          ctx.beginPath();
+          ctx.moveTo(crisp(x), y + (up ? -3 : 3));
+          ctx.lineTo(crisp(x), y + (up ? -(d - 2) : d - 2));
+          ctx.stroke();
+          ctx.textBaseline = up ? "bottom" : "top";
+          ctx.fillText(text, left, up ? y - d : y + d);
+          boxes.push({ left: Math.min(label.left, stem.left), right: Math.max(label.right, stem.right), top: Math.min(label.top, stem.top), bottom: Math.max(label.bottom, stem.bottom) });
+          break;
+        }
+      });
+      return boxes;
+    };
+
+    // Level values on their line at the right edge; a value that hits
+    // another label moves left of it, strongest first; none fits: no value.
+    const drawLevelLabels = (g, levels, obstacles) => {
+      const dp = priceDp(bars[bars.length - 1].c);
+      const placed = [...obstacles];
+      ctx.font = LEVEL_FONT;
+      ctx.textAlign = "right";
+      ctx.textBaseline = "bottom";
+      ctx.strokeStyle = C.bg;
+      ctx.lineWidth = 3;
+      [...levels].sort((a, b) => b.strength - a.strength).forEach((l) => {
+        const text = `${l.type === "support" ? "S" : "R"} ${fmtAt(l.price, dp)}`;
+        const w = ctx.measureText(text).width;
+        let right = g.right - 6;
+        let b = { left: right - w, right, top: l.y - 2 - KL_LABEL_H, bottom: l.y - 2 };
+        for (let hit = placed.find((o) => overlaps(b, o)); hit; hit = placed.find((o) => overlaps(b, o))) {
+          right = hit.left - 10;
+          b = { left: right - w, right, top: l.y - 2 - KL_LABEL_H, bottom: l.y - 2 };
+        }
+        if (b.left < 4) return;
+        placed.push(b);
+        ctx.strokeText(text, right, l.y - 2);
+        ctx.fillStyle = alpha(levelColor(l), 0.6 + l.strength * 0.13);
+        ctx.fillText(text, right, l.y - 2);
+      });
+    };
+
+    const draw = () => {
+      if (!W || !H) return;
+      const dpr = window.devicePixelRatio || 1;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.fillStyle = C.bg;
+      ctx.fillRect(0, 0, W, H);
+      const off = message();
+      note.textContent = off;
+      note.hidden = !off;
+      legendLevels.forEach((el) => { el.hidden = !klPrefs.levels; });
+      if (off) {
+        geo = null;
+        tip.hidden = true;
+        canvas.setAttribute("aria-label", `Key levels chart. ${off}`);
+        return;
+      }
+
+      pin();
+      const g = (geo = geometry());
+      const { right, timeTop, volTop, top, bottom, first, last, x, y, yVol } = g;
+      const lastBar = bars[bars.length - 1];
+      ctx.lineJoin = "round";
+      ctx.lineCap = "round";
+
+      // Price grid and labels; time ticks on round ET steps, their labels kept apart
+      const pStep = niceStep((g.hi - g.lo) / Math.max(2, (bottom - top) / 34));
+      const dp = Math.min(4, Math.max(priceDp(lastBar.c), pStep >= 1 ? 0 : Math.ceil(-Math.log10(pStep) - 1e-9)));
+      const pTicks = [];
+      for (let p = Math.ceil(g.lo / pStep) * pStep; p <= g.hi; p += pStep) {
+        const py = y(p);
+        if (py >= top - 4 && py <= bottom + 4) pTicks.push({ p, y: py });
+      }
+      const iv = klPrefs.interval;
+      ctx.font = `500 10.5px ${MONO}`;
+      const tickW = ctx.measureText("00:00:00").width + 18;
+      const tStep = KL_TIME_STEPS.find((s) => s >= iv && (s / iv) * spacing >= tickW) || KL_TIME_STEPS[KL_TIME_STEPS.length - 1];
+      const tFmt = tStep < 60e3 ? ET_HMS : ET_HM;
+      const tTicks = [];
+      for (let i = Math.max(1, first); i <= last; i++) {
+        if (Math.floor(bars[i].t / tStep) === Math.floor(bars[i - 1].t / tStep)) continue;
+        const tx = x(i);
+        if (tx < 0 || tx > right || (tTicks.length && tx - tTicks[tTicks.length - 1].x < tickW)) continue;
+        tTicks.push({ x: tx, t: bars[i].t });
+      }
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, right, timeTop);
+      ctx.clip();
+
+      // Pre-market / after hours, one band per run
+      for (let i = first; i <= last; i++) {
+        const s = bars[i].s;
+        if (s === "rm") continue;
+        let j = i;
+        while (j < last && bars[j + 1].s === s) j++;
+        ctx.fillStyle = alpha(C.session, A.session);
+        ctx.fillRect(x(i) - spacing / 2, 0, x(j) - x(i) + spacing, timeTop);
+        i = j;
+      }
+
+      // Ticker watermark, centered left of the level values
+      const markX = anchorX() / 2;
+      ctx.font = `800 ${Math.round(clampTo(W * 0.11, 28, 84))}px ${SANS}`;
+      ctx.fillStyle = C.mark;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(ticker(), markX, (top + bottom) / 2);
+
+      ctx.strokeStyle = C.grid;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      pTicks.forEach((tk) => { ctx.moveTo(0, crisp(tk.y)); ctx.lineTo(right, crisp(tk.y)); });
+      tTicks.forEach((tk) => { ctx.moveTo(crisp(tk.x), 0); ctx.lineTo(crisp(tk.x), timeTop); });
+      ctx.moveTo(0, crisp(volTop - G.paneGap / 2));
+      ctx.lineTo(right, crisp(volTop - G.paneGap / 2));
+      ctx.stroke();
+
+      // Volume: neutral, brighter when the bar closed up
+      const barW = Math.max(1, Math.min(Math.floor(spacing * 0.68), 18));
+      for (let i = first; i <= last; i++) {
+        const b = bars[i];
+        if (!b.v) continue;
+        const up = b.c >= (bars[i - 1]?.c ?? b.c);
+        const vt = yVol(b.v);
+        ctx.fillStyle = alpha(C.volume, up ? A.volUp : A.volDown);
+        ctx.fillRect(Math.round(x(i) - barW / 2), vt, barW, Math.max(1, timeTop - vt));
+      }
+
+      // Level lines across the plot, stronger the stronger the level
+      const levels = shown().map((l) => ({ ...l, y: crisp(y(l.price)) })).filter((l) => l.y >= top - 6 && l.y <= bottom + 6);
+      ctx.lineWidth = 1;
+      levels.forEach((l) => {
+        ctx.strokeStyle = alpha(levelColor(l), A.level + A.levelStep * (l.strength - 1));
+        ctx.beginPath();
+        ctx.moveTo(0, l.y);
+        ctx.lineTo(right, l.y);
+        ctx.stroke();
+      });
+
+      // Price: line and area; the step across a Halt or a gap is gray
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, top - G.pad, right, bottom - top + G.pad + G.paneGap / 2);
+      ctx.clip();
+      const line = new Path2D();
+      const area = new Path2D();
+      const joins = new Path2D();
+      for (let i = first; i <= last; i++) {
+        const px = x(i);
+        const py = y(bars[i].c);
+        if (i === first) { line.moveTo(px, py); area.moveTo(px, py); continue; }
+        area.lineTo(px, py);
+        if (!bars[i].brk) { line.lineTo(px, py); continue; }
+        joins.moveTo(x(i - 1), y(bars[i - 1].c));
+        joins.lineTo(px, py);
+        line.moveTo(px, py);
+      }
+      area.lineTo(x(last), bottom + G.paneGap / 2);
+      area.lineTo(x(first), bottom + G.paneGap / 2);
+      area.closePath();
+      const grad = ctx.createLinearGradient(0, top, 0, bottom);
+      grad.addColorStop(0, alpha(C.price, A.area));
+      grad.addColorStop(1, alpha(C.price, 0));
+      ctx.fillStyle = grad;
+      ctx.fill(area);
+      ctx.strokeStyle = C.price;
+      ctx.lineWidth = 2;
+      ctx.stroke(line);
+      ctx.strokeStyle = C.neutral;
+      ctx.stroke(joins);
+
+      // VWAP: dashed, neutral; broken with the price
+      ctx.setLineDash([5, 4]);
+      ctx.lineCap = "butt";
+      ctx.strokeStyle = alpha(C.vwap, A.vwap);
+      ctx.lineWidth = 1.25;
+      ctx.beginPath();
+      for (let i = first; i <= last; i++) {
+        if (bars[i].w == null) continue;
+        if (i === first || bars[i].brk || bars[i - 1].w == null) ctx.moveTo(x(i), y(bars[i].w));
+        else ctx.lineTo(x(i), y(bars[i].w));
+      }
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.lineCap = "round";
+      ctx.restore();
+
+      // Markers first, then High / Low away from them, then the level values away from both
+      const markBoxes = drawMarks(g);
+      const extremeBoxes = drawExtremes(g, markBoxes);
+      drawLevelLabels(g, levels, [...markBoxes, ...extremeBoxes]);
+
+      // Last price: dotted line across (green / red by the day's change), live dot
+      const trend = lastBar.c - BB_PREV_CLOSE;
+      const tone = trend >= 0 ? C.bull : C.bear;
+      const ly = y(lastBar.c);
+      ctx.setLineDash([1, 3]);
+      ctx.strokeStyle = alpha(tone, 0.55);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, crisp(ly));
+      ctx.lineTo(right, crisp(ly));
+      ctx.stroke();
+      ctx.setLineDash([]);
+      if (last === bars.length - 1) {
+        const lx = x(last);
+        ctx.fillStyle = alpha(C.price, 0.18);
+        ctx.beginPath();
+        ctx.arc(lx, ly, 8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = C.price;
+        ctx.strokeStyle = C.bg;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(lx, ly, 3.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+      ctx.restore();
+
+      // Crosshair target: a bar (magnet on x); y follows the cursor
+      const h = hover && clampTo(hover.i, first, last);
+      const hb = hover ? bars[h] : null;
+      const hy = hover ? (hover.y ?? y(hb.c)) : null;
+      ctx.font = `600 10.5px ${MONO}`;
+      const hoverTime = hb && (iv < 60e3 ? ET_HMS : ET_HM).format(hb.t);
+      const timeChip = hb && (() => {
+        const w = ctx.measureText(hoverTime).width + 14;
+        return { l: clampTo(x(h) - w / 2, 0, right - w), w };
+      })();
+
+      // Axes: background, borders, labels, tags
+      ctx.fillStyle = C.bg;
+      ctx.fillRect(right, 0, W - right, H);
+      ctx.fillRect(0, timeTop, W, H - timeTop);
+      ctx.strokeStyle = C.line;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(crisp(right), 0);
+      ctx.lineTo(crisp(right), timeTop);
+      ctx.moveTo(0, crisp(timeTop));
+      ctx.lineTo(W, crisp(timeTop));
+      ctx.stroke();
+
+      const lastW = [...bars].reverse().find((b) => b.w != null)?.w;
+      const tags = [{ y: ly, text: fmtAt(lastBar.c, dp), bg: tone }];
+      if (lastW != null && lastW >= g.lo && lastW <= g.hi && fmtAt(lastW, dp) !== tags[0].text) tags.push({ y: y(lastW), text: fmtAt(lastW, dp), bg: C.vwap });
+      spreadTags(tags, G.tag / 2, bottom, G.tag + 2);
+      const chipY = hy != null && hy <= bottom + G.paneGap / 2 ? clampTo(hy, G.tag / 2, bottom) : null;
+      const blocked = [...tags.map((t) => t.y), ...(chipY != null ? [chipY] : [])];
+      ctx.font = `500 10.5px ${MONO}`;
+      ctx.fillStyle = C.axis;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      pTicks.forEach((tk) => {
+        if (blocked.some((b) => Math.abs(b - tk.y) < G.tag / 2 + 7)) return;
+        ctx.fillText(fmtAt(tk.p, dp), right + G.axisW / 2, tk.y);
+      });
+      // Top of the volume pane, unless the crosshair chip is there
+      const volLabelY = volTop + 7;
+      if (g.maxVol > 0 && !(hy != null && hy > bottom + G.paneGap / 2 && Math.abs(hy - volLabelY) < G.tag)) {
+        ctx.font = `500 9.5px ${MONO}`;
+        ctx.fillText(fmtAbbr(g.maxVol), right + G.axisW / 2, volLabelY);
+      }
+      tags.slice(1).forEach((t) => axisTag(g, t.y, t.text, t.bg, C.ink));
+      axisTag(g, tags[0].y, tags[0].text, tags[0].bg, C.ink);
+
+      ctx.font = `500 10.5px ${MONO}`;
+      ctx.fillStyle = C.axis;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      tTicks.forEach((tk) => {
+        const text = tFmt.format(tk.t);
+        const w = ctx.measureText(text).width;
+        if (tk.x - w / 2 < 2 || tk.x + w / 2 > right - 2) return;
+        if (timeChip && tk.x + w / 2 > timeChip.l - 4 && tk.x - w / 2 < timeChip.l + timeChip.w + 4) return;
+        ctx.fillText(text, tk.x, timeTop + G.axisH / 2);
+      });
+
+      // Crosshair: dashed lines, the bar's point, chips on both axes, hover card
+      if (hb) {
+        const hx = x(h);
+        ctx.setLineDash([4, 4]);
+        ctx.strokeStyle = alpha(C.cross, 0.8);
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(crisp(hx), 0);
+        ctx.lineTo(crisp(hx), timeTop);
+        if (hy >= 0 && hy <= timeTop) { ctx.moveTo(0, crisp(hy)); ctx.lineTo(right, crisp(hy)); }
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = C.price;
+        ctx.strokeStyle = C.bg;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(hx, y(hb.c), 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        if (chipY != null) axisTag(g, chipY, fmtAt(g.priceAt(chipY), dp), C.chip, C.chipText);
+        else if (hy > volTop && hy <= timeTop) axisTag(g, clampTo(hy, volTop + G.tag / 2, timeTop - G.tag / 2), fmtAbbr(Math.max(0, g.volAt(hy))), C.chip, C.chipText);
+        ctx.fillStyle = C.chip;
+        ctx.beginPath();
+        ctx.roundRect(timeChip.l, timeTop + 2, timeChip.w, G.axisH - 4, 3);
+        ctx.fill();
+        ctx.fillStyle = C.chipText;
+        ctx.font = `600 10.5px ${MONO}`;
+        ctx.textAlign = "center";
+        ctx.fillText(hoverTime, timeChip.l + timeChip.w / 2, timeTop + G.axisH / 2 + 0.5);
+        showTip(g, h, hy);
+      } else tip.hidden = true;
+
+      const said = levels.map((l) => `${l.type === "support" ? "support" : "resistance"} ${fmtPrice(l.price)}`).join(", ");
+      canvas.setAttribute("aria-label", `${ticker()} price chart, ${bars.length} bars of ${iv / 1000 < 60 ? `${iv / 1000} s` : `${iv / 60e3} min`}. Last ${fmtPrice(lastBar.c)}${lastW != null ? `, VWAP ${fmtPrice(lastW)}` : ""}.${said ? ` Levels: ${said}.` : ""}`);
+    };
+
+    // Hover card: the bar's price, change, VWAP, volume and its alerts
+    const KIND_TEXT = { hod: ["▲", "New HoD", "warn"], buying: ["●", "Buying Pressure", "bull"], selling: ["●", "Selling Pressure", "bear"], halt: ["■", "Halt", ""], resume: ["■", "Resume", ""] };
+    const showTip = (g, i, cy) => {
+      const b = bars[i];
+      const prev = bars[i - 1];
+      const dp = priceDp(b.c);
+      const change = prev ? b.c - prev.c : 0;
+      const row = (label, value, sign = "") => `<dt>${label}</dt><dd${sign ? ` data-sign="${sign}"` : ""}>${value}</dd>`;
+      const session = b.s === "pre" ? "Pre-market" : b.s === "post" ? "After hours" : "";
+      const here = marks.filter((m) => m.i === i && enabled(m.kind));
+      const lines = Object.keys(KIND_TEXT).map((kind) => {
+        const of = here.filter((m) => m.kind === kind);
+        if (!of.length) return "";
+        const [glyph, name, tone] = KIND_TEXT[kind];
+        const vol = Math.max(0, ...of.map((m) => m.vol ?? 0));
+        return `<p class="chart-tip__alert"><b${tone ? ` data-tone="${tone}"` : ""}>${glyph}</b>${name}${of.length > 1 ? ` ×${of.length}` : ""} · ${fmtAt(of[of.length - 1].price, dp)}${vol ? ` · ${fmtMult(vol / 100)}` : ""}</p>`;
+      }).join("");
+      tip.innerHTML = `
+        <p class="chart-tip__time">${(klPrefs.interval < 60e3 ? ET_HMS : ET_HM).format(b.t)} ET${session ? `<span>${session}</span>` : ""}</p>
+        <dl>
+          ${row("Price", fmtAt(b.c, dp))}
+          ${prev ? row("Change", `${change >= 0 ? "+" : "−"}${fmtAt(Math.abs(change), dp)} (${fmtPct((change / prev.c) * 100, 2).replace("-", "−")})`, change > 0 ? "up" : change < 0 ? "down" : "") : ""}
+          ${b.w != null ? row("VWAP", fmtAt(b.w, dp)) : ""}
+          ${row("Volume", b.v ? fmtAbbr(b.v) : "0")}
+        </dl>
+        ${lines}`;
+      tip.hidden = false;
+      placeChartTip(tip, g.x(i), cy, g.right, g.timeTop);
+    };
+
+    /* Head: state against the levels, meter between the nearest support
+       and resistance, day stats */
+    const levelWhy = (l) => [
+      `strength ${l.strength}/3`,
+      ...(l.touches ? [`${l.touches} touch${l.touches > 1 ? "es" : ""}`] : []),
+      ...l.sources.filter((s) => KL_SOURCES[s]).slice(0, 2).map((s) => KL_SOURCES[s]),
+      ...(l.volumeShare >= 0.05 ? [`${Math.round(l.volumeShare * 100)}% of volume`] : []),
+      ...(l.buying + l.selling ? [`${l.buying + l.selling} pressure alert${l.buying + l.selling > 1 ? "s" : ""}`] : []),
+    ].join(" · ");
+    const describe = (s, dp) => {
+      const f = (v) => fmtAt(v, dp);
+      const gap = (a, b) => `${f(Math.abs(a - b))} (${((Math.abs(a - b) / s.p) * 100).toFixed(1)}%)`;
+      switch (s.key) {
+        case "warming_up": return `Levels need ${KL_MIN_SAMPLES} Top List updates: ${samples.length} so far.`;
+        case "none": return "No price has enough volume, touches or references to be a level yet.";
+        case "breakout": return `Broke above ${f(s.level.price)} at ${ET_HM.format(s.at)} ET and holds ${f(s.p - s.level.price)} over it${s.above ? `; next resistance ${f(s.above.price)}` : ""}.`;
+        case "breakdown": return `Lost ${f(s.level.price)} at ${ET_HM.format(s.at)} ET and sits ${f(s.level.price - s.p)} under it${s.below ? `; next support ${f(s.below.price)}` : ""}.`;
+        case "test_r": return `${gap(s.level.price, s.p)} under resistance ${f(s.level.price)}: ${levelWhy(s.level)}.`;
+        case "test_s": return `${gap(s.p, s.level.price)} over support ${f(s.level.price)}: ${levelWhy(s.level)}.`;
+        case "no_r": return `Above every level: the nearest support is ${f(s.below.price)}, ${gap(s.p, s.below.price)} below.`;
+        case "no_s": return `Below every level: the nearest resistance is ${f(s.above.price)}, ${gap(s.above.price, s.p)} above.`;
+        default: return `${gap(s.above.price, s.p)} to resistance ${f(s.above.price)} and ${gap(s.p, s.below.price)} to support ${f(s.below.price)}.`;
+      }
+    };
+    // VWAP slope: linear regression of the last 5 minutes of the same session, % of VWAP per minute
+    const vwapSlope = () => {
+      const lastS = samples[samples.length - 1];
+      const pts = [];
+      for (let i = samples.length - 1; i >= 0 && samples[i].t >= lastS.t - 300e3 && samples[i].s === lastS.s; i--) if (samples[i].w != null) pts.push(samples[i]);
+      if (pts.length < 2 || pts[0].t - pts[pts.length - 1].t < 60e3) return null;
+      const mx = pts.reduce((s, p) => s + p.t / 60e3, 0) / pts.length;
+      const my = pts.reduce((s, p) => s + p.w, 0) / pts.length;
+      const num = pts.reduce((s, p) => s + (p.t / 60e3 - mx) * (p.w - my), 0);
+      const den = pts.reduce((s, p) => s + (p.t / 60e3 - mx) ** 2, 0);
+      return den ? ((num / den) / pts[0].w) * 100 : null;
+    };
+
+    const renderHead = () => {
+      const off = message();
+      const s = off ? null : head;
+      const dp = s ? priceDp(s.p) : 2;
+      const [label, tone] = s ? KL_STATES[s.key] : ["Waiting for data", "neutral"];
+      pill.dataset.tone = tone;
+      pill.textContent = label;
+      since.textContent = s ? `since ${ET_HMS.format(s.since)} ET` : "since --:--:-- ET";
+      detail.textContent = s ? describe(s, dp) : intro;
+      detail.title = s ? detail.textContent : "";
+
+      // Meter: the price between the nearest support (left) and resistance (right)
+      const levels = s ? result.levels : [];
+      const r = levels.filter((l) => l.type === "resistance").sort((a, b) => a.price - b.price)[0];
+      const sup = levels.filter((l) => l.type === "support").sort((a, b) => b.price - a.price)[0];
+      const p = s?.p;
+      const pos = !s ? 0.5 : r && sup ? clampTo((p - sup.price) / (r.price - sup.price), 0, 1) : r ? 0 : sup ? 1 : 0.5;
+      const toR = r ? (r.price - p) / p : Infinity;
+      const toS = sup ? (p - sup.price) / p : Infinity;
+      const lead = !s || (!r && !sup) ? "" : toS < toR ? "bull" : "bear";
+      meter.dataset.lead = lead;
+      thumb.style.left = `${pos * 100}%`;
+      supportLabel.textContent = `S ${sup ? fmtAt(sup.price, dp) : "—"}`;
+      resistanceLabel.textContent = `R ${r ? fmtAt(r.price, dp) : "—"}`;
+      score.textContent = lead ? `${(Math.min(toR, toS) * 100).toFixed(1)}%` : "—";
+      meter.setAttribute("aria-valuenow", String(Math.round(pos * 100)));
+      meter.setAttribute("aria-valuetext", lead
+        ? [r && `${(toR * 100).toFixed(1)}% under resistance ${fmtAt(r.price, dp)}`, sup && `${(toS * 100).toFixed(1)}% over support ${fmtAt(sup.price, dp)}`].filter(Boolean).join(", ")
+        : "No levels");
+
+      const lastS = s && samples[samples.length - 1];
+      const slope = s ? vwapSlope() : null;
+      const prices = s ? samples.map((x) => x.p) : [];
+      const open = s && references().open;
+      const items = [
+        ["VWAP", lastS?.w != null ? fmtAt(lastS.w, dp) : null, "", KL_STAT_TITLES.vwap],
+        ["VWAP slope", slope != null ? `${slope > 0 ? "+" : slope < 0 ? "−" : ""}${Math.abs(slope).toFixed(3)}` : null, slope > 0.0005 ? "up" : slope < -0.0005 ? "down" : "", KL_STAT_TITLES.slope],
+        ["High", s ? fmtAt(Math.max(...prices), dp) : null, "", KL_STAT_TITLES.high],
+        ["Low", s ? fmtAt(Math.min(...prices), dp) : null, "", KL_STAT_TITLES.low],
+        ["Open", open != null ? fmtAt(open, dp) : null, "", KL_STAT_TITLES.open],
+        ["Prev. close", s ? fmtAt(BB_PREV_CLOSE, dp) : null, "", KL_STAT_TITLES.prev],
+      ];
+      stats.innerHTML = items.map(([name, value, sign, title]) => (
+        `<div title="${title}"><dt>${name}</dt><dd${sign ? ` data-sign="${sign}"` : ""}>${value ?? "—"}</dd></div>`
+      )).join("");
+    };
+
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(() => { frame = 0; draw(); });
+    };
+    const render = () => {
+      renderHead();
+      schedule();
+    };
+
+    const resize = () => {
+      const { width, height } = box.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      const wasEmpty = !W;
+      W = Math.floor(width);
+      H = Math.floor(height);
+      canvas.width = Math.max(1, Math.round(W * dpr));
+      canvas.height = Math.max(1, Math.round(H * dpr));
+      readSizes();
+      if (wasEmpty) spacing = G.bar;
+      if (follow || wasEmpty) { follow = true; offset = liveOffset(); }
+      clampOffset();
+      if (frame) cancelAnimationFrame(frame);
+      frame = 0;
+      draw();
+    };
+    new ResizeObserver(resize).observe(box);
+    const watchDpr = () => matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`).addEventListener("change", () => { resize(); watchDpr(); }, { once: true });
+    watchDpr();
+    document.fonts?.ready.then(schedule);
+
+    /* Pointer: crosshair, drag to pan, wheel to zoom, double-click to go live */
+    const barAt = (px) => clampTo(Math.round(bars.length - 1 + offset - (plotW() - px - spacing / 2) / spacing), 0, bars.length - 1);
+    const zoom = (factor, ax) => {
+      const next = clampTo(spacing * factor, KL_ZOOM.min, KL_ZOOM.max);
+      if (next === spacing) return;
+      const right = plotW();
+      const px = Number.isFinite(ax) ? ax : right - offset * spacing - spacing / 2;
+      const i = bars.length - 1 + offset - (right - px - spacing / 2) / spacing;
+      spacing = next;
+      offset = i - bars.length + 1 + (right - px - next / 2) / next;
+      clampOffset();
+      updateFollow();
+      schedule();
+    };
+    const pan = (n) => {
+      offset += n;
+      clampOffset();
+      updateFollow();
+      schedule();
+    };
+    const pointAt = (e) => {
+      const rect = canvas.getBoundingClientRect();
+      return { px: e.clientX - rect.left, py: e.clientY - rect.top };
+    };
+    canvas.addEventListener("pointermove", (e) => {
+      if (!geo) return;
+      const { px, py } = pointAt(e);
+      if (drag) {
+        offset = drag.offset - (e.clientX - drag.x) / spacing;
+        clampOffset();
+        updateFollow();
+      }
+      hover = px < geo.right && py < geo.timeTop ? { i: barAt(px), y: py } : null;
+      schedule();
+    });
+    canvas.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0 || !geo) return;
+      drag = { x: e.clientX, offset };
+      canvas.setPointerCapture(e.pointerId);
+      canvas.classList.add("is-dragging");
+    });
+    ["pointerup", "pointercancel"].forEach((type) => canvas.addEventListener(type, () => {
+      drag = null;
+      canvas.classList.remove("is-dragging");
+    }));
+    canvas.addEventListener("pointerleave", () => {
+      if (drag) return;
+      hover = null;
+      schedule();
+    });
+    canvas.addEventListener("blur", () => { hover = null; schedule(); });
+    canvas.addEventListener("wheel", (e) => {
+      if (!geo) return;
+      e.preventDefault();
+      if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) pan((e.shiftKey ? e.deltaY : e.deltaX) / spacing);
+      else zoom(e.deltaY < 0 ? 1.12 : 1 / 1.12, Math.min(plotW(), pointAt(e).px));
+    }, { passive: false });
+    canvas.addEventListener("dblclick", resetView);
+    canvas.addEventListener("keydown", (e) => {
+      if (!geo) return;
+      const lastIndex = bars.length - 1;
+      const from = hover?.i ?? lastIndex;
+      const step = e.shiftKey ? 10 : 1;
+      const moves = { ArrowLeft: from - step, ArrowRight: from + step, Home: geo.first, End: lastIndex };
+      if (e.key in moves) {
+        e.preventDefault();
+        const i = clampTo(moves[e.key], 0, lastIndex);
+        hover = { i, y: null };
+        // Keep the bar in view
+        if (e.key === "End") { follow = true; offset = liveOffset(); }
+        else if (i < geo.first + 1) pan(-(geo.first + 1 - i));
+        else if (i > geo.last - 1 && i < lastIndex) pan(i - geo.last + 1);
+        clampOffset();
+        schedule();
+      } else if (e.key === "+" || e.key === "=") { e.preventDefault(); zoom(1.2, hover ? geo.x(hover.i) : undefined); }
+      else if (e.key === "-") { e.preventDefault(); zoom(1 / 1.2, hover ? geo.x(hover.i) : undefined); }
+      else if (e.key === "Escape") { hover = null; schedule(); }
+    });
+
+    /* Controls: Alerts menu, S/R, interval */
+    const syncControls = () => {
+      intervalBtns.forEach((b) => b.setAttribute("aria-pressed", String(Number(b.dataset.klInterval) === klPrefs.interval)));
+      levelsBtn.setAttribute("aria-pressed", String(klPrefs.levels));
+      menuItems.forEach((item) => {
+        const kind = item.dataset.klAlert;
+        item.setAttribute("aria-checked", String(kind === "all" ? klPrefs.alerts.length === KL_KINDS.length : klPrefs.alerts.includes(kind)));
+      });
+      menuBtn.dataset.count = klPrefs.alerts.length === KL_KINDS.length ? "" : String(klPrefs.alerts.length);
+    };
+    const setMenu = (open, { focus = false } = {}) => {
+      menu.hidden = !open;
+      menuBtn.setAttribute("aria-expanded", String(open));
+      if (open) menuItems[0].focus();
+      else if (focus) menuBtn.focus();
+    };
+    menuBtn.addEventListener("click", () => setMenu(menu.hidden));
+    menu.addEventListener("click", (e) => {
+      const item = e.target.closest("[data-kl-alert]");
+      if (!item) return;
+      const kind = item.dataset.klAlert;
+      if (kind === "all") klPrefs.alerts = klPrefs.alerts.length === KL_KINDS.length ? [] : [...KL_KINDS];
+      else klPrefs.alerts = klPrefs.alerts.includes(kind) ? klPrefs.alerts.filter((k) => k !== kind) : KL_KINDS.filter((k) => k === kind || klPrefs.alerts.includes(k));
+      saveKlPrefs();
+      syncControls();
+      schedule();
+    });
+    menu.addEventListener("keydown", (e) => {
+      const at = menuItems.indexOf(document.activeElement);
+      const moves = { ArrowDown: at + 1, ArrowUp: at - 1, Home: 0, End: menuItems.length - 1 };
+      if (e.key in moves) {
+        e.preventDefault();
+        menuItems[(moves[e.key] + menuItems.length) % menuItems.length].focus();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        setMenu(false, { focus: true });
+      } else if (e.key === "Tab") setMenu(false);
+    });
+    document.addEventListener("pointerdown", (e) => { if (!menu.hidden && !menuWrap.contains(e.target)) setMenu(false); });
+    levelsBtn.addEventListener("click", () => {
+      klPrefs.levels = !klPrefs.levels;
+      saveKlPrefs();
+      syncControls();
+      schedule();
+    });
+    intervalBtns.forEach((b) => b.addEventListener("click", () => {
+      klPrefs.interval = Number(b.dataset.klInterval);
+      saveKlPrefs();
+      syncControls();
+      hover = null;
+      refresh({ keepView: false });
+      render();
+    }));
+    symbol.addEventListener("input", () => {
+      hover = null;
+      render();
+    });
+    syncControls();
+    render();
+
+    return {
+      // The whole day (a new page, or a copy's snapshot)
+      load: (dump) => {
+        samples = dump ? dump.points.filter((p) => p.vol != null).map(sampleOf) : [];
+        pressure = dump ? dump.alerts.slice() : [];
+        halts = dump ? dump.halts : [];
+        hover = null;
+        refresh({ keepView: false });
+        render();
+      },
+      // One live update: new points and alerts, the Halts
+      push: (u) => {
+        samples.push(...u.points.filter((p) => p.vol != null).map(sampleOf));
+        pressure.push(...u.alerts);
+        halts = u.halts;
+        refresh();
+        render();
+      },
+      // Interval, S/R or alerts saved in another window
+      reload: () => {
+        const interval = klPrefs.interval;
+        loadKlPrefs();
+        syncControls();
+        if (interval !== klPrefs.interval) refresh({ keepView: false });
+        render();
       },
     };
   };
@@ -6360,6 +7762,8 @@
   const chart = chartRoot && mountChartPanel(chartRoot, { persist: !DETACHED, adaptive: Boolean(DETACHED) });
   const bbView = chartRoot?.querySelector("#chart-view-bull-bear");
   const bullBear = bbView && mountBullBear(bbView, chartRoot);
+  const klView = chartRoot?.querySelector("#chart-view-key-levels");
+  const keyLevels = klView && mountKeyLevels(klView, chartRoot);
   const heatRoot = document.querySelector("[data-constellation]");
   const constellation = heatRoot && mountConstellation(heatRoot);
 
@@ -6379,13 +7783,18 @@
 
   if (DETACHED === "chart") {
     // The main window's ticker to start with; later tickers are this copy's own.
-    // Bull vs. Bear: the day's series in every snapshot, then each live update.
+    // Bull vs. Bear and Key levels: the day's series in every snapshot, then each live update.
     linkCopy(chartRoot, {
       snapshot: (m, first) => {
         if (first) chart.setSymbol(m.sym);
         bullBear.load(m.bb);
+        keyLevels.load(m.bb);
       },
-      relay: (m) => { if (m.type === "bb") bullBear.push(m); },
+      relay: (m) => {
+        if (m.type !== "bb") return;
+        bullBear.push(m);
+        keyLevels.push(m);
+      },
     });
   } else if (DETACHED) {
     // No feed of its own: the rows come from the main window.
@@ -6409,11 +7818,13 @@
     for (const [id, { seed, ...setup }] of Object.entries(TABLE_SETUP)) {
       mountTable(panel(id), seed, { ...setup, relay: hub ? (msg) => post({ ...msg, panel: id }) : undefined });
     }
-    // Bull vs. Bear runs here only; every update goes to the copies too.
+    // The GXAI day runs here only (Bull vs. Bear, Key levels); every update goes to the copies too.
     const bbFeed = createBullBearFeed();
     bullBear?.load(bbFeed.dump());
+    keyLevels?.load(bbFeed.dump());
     bbFeed.onUpdate((u) => {
       bullBear?.push(u);
+      keyLevels?.push(u);
       post({ type: "bb", ...u });
     });
     serveCopies(constellation, chart, bbFeed);
@@ -6476,6 +7887,7 @@
     else if (key === SOUND_KEY) { loadSoundPrefs(); syncSoundButtons(); }
     else if (key === SOUND_FILES_KEY) loadSoundFiles();
     else if (key === BB_KEY) bullBear?.reload();
+    else if (key === KL_KEY) keyLevels?.reload();
   });
 
   setInterval(() => {

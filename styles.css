@@ -156,11 +156,14 @@
   --chart-bear: var(--red);
   --chart-warn: var(--amber);        /* divergence · decelerating */
   --chart-neutral: #5d6673;          /* no clear side · pullback */
-  --chart-price: var(--cyan);
-  --chart-vwap: var(--amber);
-  --chart-support: var(--violet);
-  --chart-resistance: var(--red);
-  --chart-volume: var(--line-strong);
+  --chart-price: var(--cyan);        /* Key levels: the one colored series */
+  --chart-vwap: var(--text-2);       /* dashed and neutral: never competes with the levels */
+  --chart-support: var(--chart-bull);    /* where buyers defended */
+  --chart-resistance: var(--chart-bear); /* where sellers defended */
+  --chart-hod: var(--amber);         /* New HoD triangle */
+  --chart-halt-ink: var(--amber);    /* H on the Halt square */
+  --chart-resume-ink: var(--chart-bull); /* R on the Resume square */
+  --chart-volume: var(--text-3);     /* volume bars: neutral */
   --chart-accel: var(--green);
   --chart-steady: var(--green-dim);
   --chart-decel: var(--amber);
@@ -180,6 +183,12 @@
   --chart-overlay-a: 0.5;            /* price line */
   --chart-session-a: 0.6;
   --chart-halt-a: 0.12;
+  --chart-price-area-a: 0.16;        /* Key levels price area, fading down */
+  --chart-vwap-a: 0.7;
+  --chart-level-a: 0.3;              /* weakest level line (strength 1) … */
+  --chart-level-step-a: 0.15;        /* … plus this per strength step (3: 0.6) */
+  --chart-volume-a: 0.4;             /* volume bar that closed up … */
+  --chart-volume-down-a: 0.2;        /* … and down */
   /* Canvas geometry */
   --chart-pad: 10px;                 /* room above +100 / below −100 for the tags */
   --chart-live-pad: 28px;            /* space right of the live point */
@@ -187,6 +196,12 @@
   --chart-band-h: 6px;               /* state ribbon (canvas) */
   --chart-band-gap: 6px;             /* ribbon ↔ plot and ↔ time axis */
   --chart-tip-w: 184px;              /* hover card */
+  --chart-bar-space: 9px;            /* Key levels: px per bar before zooming */
+  --chart-vol-share: 0.2;            /* volume pane: share of the plot height … */
+  --chart-vol-max: 90px;             /* … up to this */
+  --chart-pane-sep: 10px;            /* price pane ↔ volume pane */
+  --chart-label-room: 26px;          /* above / below the curve for the High / Low labels */
+  --chart-marker-room: 20px;         /* more, when a New HoD or Halt marker is in view */
   /* Geometry shared by the three views */
   --chart-axis-w: 52px;              /* value axis on the right */
   --chart-axis-h: 20px;              /* time axis at the bottom */
@@ -1177,6 +1192,12 @@ html:has(.settings-modal[open]) { overflow: hidden; }
 .chart-meter__fill { position: absolute; top: 0; bottom: 0; left: 50%; width: 0; border-radius: inherit; background: var(--lead, transparent); transition: left var(--t-base), width var(--t-base); }
 .chart-meter__thumb { position: absolute; top: -4px; left: 0; width: 4px; height: 14px; border-radius: 2px; background: var(--text); box-shadow: 0 0 0 2px var(--chart-bg); transform: translateX(-50%); }
 .chart-meter--split .chart-meter__thumb { left: 50%; transition: left var(--t-base); }
+/* Range meter (Key levels): the price between the nearest support (left)
+   and resistance (right); the closer one takes its color. */
+.chart-meter--range .chart-meter__label { min-width: 6.5ch; letter-spacing: 0.04em; font-variant-numeric: tabular-nums; }
+.chart-meter--range .chart-meter__label[data-side="bull"] { text-align: right; }
+.chart-meter--range .chart-meter__thumb { left: 50%; transition: left var(--t-base); }
+.chart-meter--range .chart-meter__score { min-width: 5ch; }
 .chart-meter__score { min-width: 3ch; color: var(--lead, var(--text)); font-family: var(--font-mono); font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
 
 /* Rally tracker: fade signals as chips (amber when active) */
@@ -1215,8 +1236,8 @@ html:has(.settings-modal[open]) { overflow: hidden; }
 .chart-key[data-key="overlay"] { --key: var(--chart-overlay); opacity: 0.7; }
 .chart-key[data-key="buying"] { --key: var(--chart-bull); }
 .chart-key[data-key="selling"] { --key: var(--chart-bear); }
-.chart-key[data-key="vwap"] { --key: var(--chart-vwap); }
-.chart-key[data-key="volume"] { --key: var(--chart-volume); }
+.chart-key[data-key="vwap"] { --key: var(--chart-vwap); opacity: 0.8; }
+.chart-key[data-key="volume"] { --key: var(--chart-volume); opacity: 0.6; }
 .chart-key[data-key="support"] { --key: var(--chart-support); }
 .chart-key[data-key="resistance"] { --key: var(--chart-resistance); }
 .chart-key[data-key="accel"] { --key: var(--chart-accel); }
@@ -1237,7 +1258,33 @@ html:has(.settings-modal[open]) { overflow: hidden; }
 .chart-seg button:focus-visible { outline: none; box-shadow: var(--ring); }
 .chart-toggle::before { content: ""; width: 6px; height: 6px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px currentColor; }
 .chart-toggle[aria-pressed="true"]::before { background: var(--green); box-shadow: 0 0 6px var(--green-a32); }
-.chart-menu__chevron { width: 5px; height: 5px; margin-top: -3px; border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); }
+.chart-menu__chevron { order: 1; width: 5px; height: 5px; margin-top: -3px; border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); transition: transform var(--t-fast); }
+.chart-menu[aria-expanded="true"] { background: var(--surface-3); color: var(--text); }
+.chart-menu[aria-expanded="true"] .chart-menu__chevron { margin-top: 3px; transform: rotate(225deg); }
+/* How many alert types are on, when not all */
+.chart-menu[data-count]:not([data-count=""])::after { content: attr(data-count); display: grid; place-items: center; min-width: 14px; height: 14px; padding: 0 3px; border-radius: var(--radius-pill); background: var(--surface-3); color: var(--text); font-size: 9.5px; }
+
+/* Alerts menu (Key levels): multi-select list under its button */
+.chart-pop { position: relative; }
+.chart-menu-list {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 20; display: flex; flex-direction: column; gap: 1px; min-width: 184px; padding: 5px;
+  border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--glass); backdrop-filter: blur(10px);
+  box-shadow: var(--shadow-pop); animation: popIn 180ms var(--ease);
+}
+.chart-menu-list[hidden] { display: none; }
+.chart-seg .chart-menu-list button { justify-content: flex-start; gap: 8px; height: 28px; padding: 0 8px; color: var(--text-2); font-family: var(--font-sans); font-size: 12px; font-weight: 600; }
+.chart-seg .chart-menu-list button:hover { background: var(--white-a04); color: var(--text); }
+.chart-menu-list button[data-kl-alert="all"] { position: relative; margin-bottom: 5px; }
+.chart-menu-list button[data-kl-alert="all"]::after { content: ""; position: absolute; left: 6px; right: 6px; bottom: -3px; height: 1px; background: var(--line); }
+.chart-check { flex: none; display: grid; place-items: center; width: 14px; height: 14px; border: 1.5px solid var(--line-strong); border-radius: 4px; transition: background var(--t-fast), border-color var(--t-fast); }
+[aria-checked="true"] > .chart-check { border-color: var(--green); background: var(--green); }
+[aria-checked="true"] > .chart-check::after { content: ""; width: 7px; height: 4px; margin-top: -2px; border: solid var(--ink); border-width: 0 0 1.5px 1.5px; transform: rotate(-45deg); }
+/* Marker samples, as drawn on the curve */
+.chart-mark { flex: none; display: grid; place-items: center; width: 12px; height: 12px; font-style: normal; }
+.chart-mark[data-mark="hod"] { width: 10px; height: 9px; background: var(--chart-hod); clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.chart-mark[data-mark="buying"], .chart-mark[data-mark="selling"] { --mark: var(--chart-bull); width: 7px; height: 7px; margin: 0 2.5px; border-radius: 50%; background: var(--mark); box-shadow: 0 0 0 3px color-mix(in srgb, var(--mark) 28%, transparent); }
+.chart-mark[data-mark="selling"] { --mark: var(--chart-bear); }
+.chart-mark[data-mark="halts"] { border-radius: 2.5px; background: var(--chart-chip); color: var(--chart-halt-ink); font-family: var(--font-mono); font-size: 8px; font-weight: 700; }
 
 /* Plot slots: where each canvas layer will draw. Main pane + value axis,
    optional sub pane (volume · speed), optional state ribbon, time axis
@@ -1277,12 +1324,13 @@ html:has(.settings-modal[open]) { overflow: hidden; }
 .plot-slot--axis[data-area="main-y"] { grid-area: main-y; }
 .plot-slot--axis[data-area="sub-y"] { grid-area: sub-y; }
 .plot-slot--axis[data-area="x"] { grid-area: x; justify-content: flex-end; padding-right: 7px; }
-/* Canvas chart (Bull vs. Bear): plot, ribbon and axes are drawn by
+/* Canvas charts (Bull vs. Bear, Key levels): plots and axes are drawn by
    scanner.js with the --chart-* tokens; the hover card and the empty
    note are HTML on top. */
 .chart-canvas { position: relative; flex: 1 1 0px; min-height: 0; }
 .chart-canvas canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; border-radius: 4px; outline: none; cursor: crosshair; touch-action: pan-y; }
 .chart-canvas canvas:focus-visible { box-shadow: var(--ring); }
+.chart-canvas canvas.is-dragging { cursor: grabbing; }
 .chart-message { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; padding: 0 var(--space-5); color: var(--text-3); font-size: 12px; text-align: center; pointer-events: none; }
 .chart-message[hidden], .chart-tip[hidden] { display: none; }
 .chart-tip {
@@ -1298,7 +1346,7 @@ html:has(.settings-modal[open]) { overflow: hidden; }
 .chart-tip__state[data-tone="neutral"] { color: var(--text-2); }
 .chart-tip__state[data-tone="bull"], .chart-tip__alert b[data-tone="bull"] { --state: var(--chart-bull); }
 .chart-tip__state[data-tone="bear"], .chart-tip__alert b[data-tone="bear"] { --state: var(--chart-bear); }
-.chart-tip__state[data-tone="warn"] { --state: var(--chart-warn); }
+.chart-tip__state[data-tone="warn"], .chart-tip__alert b[data-tone="warn"] { --state: var(--chart-warn); }
 .chart-tip dl { display: grid; grid-template-columns: 1fr auto; gap: 2px var(--space-3); margin: 0; }
 .chart-tip dd { margin: 0; color: var(--text); font-family: var(--font-mono); font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
 .chart-tip .chart-tip__alert { display: flex; gap: 6px; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); color: var(--text-2); font-weight: 600; }
@@ -1343,7 +1391,8 @@ html:has(.settings-modal[open]) { overflow: hidden; }
   .plot-slot--axis { padding: 0 2px; letter-spacing: 0.04em; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .chart-view:not([hidden]), .chart-layouts { animation: none; }
+  .chart-view:not([hidden]), .chart-layouts, .chart-menu-list { animation: none; }
+  .chart-menu__chevron, .chart-check { transition: none; }
   .chart-meter__fill, .chart-meter__thumb { transition: none !important; }
   .chart-layout-opt:hover { transform: none; }
 }

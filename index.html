@@ -118,8 +118,8 @@
           <div class="splitter splitter--col" data-split="col" role="separator" aria-orientation="vertical" aria-label="Resize Momentum and chart" aria-valuemin="0" aria-valuemax="100" tabindex="0"></div>
           <!-- Charts of the selected ticker: one bar, three views on one stage.
                scanner.js (mountChartPanel) drives the tabs, fullscreen and layouts;
-               Bull vs. Bear is drawn (mountBullBear, mock GXAI data); Key levels
-               and Rally tracker are still layout slots. -->
+               Bull vs. Bear (mountBullBear) and Key levels (mountKeyLevels) are drawn
+               on mock GXAI data; Rally tracker is still a layout slot. -->
           <section class="chart-panel" data-panel="chart" data-title="Charts" aria-label="Charts of the selected ticker">
             <div class="chart-bar">
               <label class="chart-symbol">
@@ -241,7 +241,20 @@
 
               <!-- Key levels: price with support / resistance and alert markers -->
               <div class="chart-view" id="chart-view-key-levels" role="tabpanel" aria-labelledby="chart-tab-key-levels" hidden>
-                <dl class="chart-stats" aria-label="Live ticker data">
+                <div class="chart-head">
+                  <div class="chart-head__state">
+                    <span class="chart-state" data-tone="neutral">Waiting for data</span>
+                    <span class="chart-since">since --:--:-- ET</span>
+                  </div>
+                  <div class="chart-meter chart-meter--range" role="meter" aria-label="Where the price sits between the nearest support and resistance" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50">
+                    <span class="chart-meter__label" data-side="bull" aria-hidden="true">S —</span>
+                    <span class="chart-meter__track" aria-hidden="true"><i class="chart-meter__thumb"></i></span>
+                    <span class="chart-meter__label" data-side="bear" aria-hidden="true">R —</span>
+                    <strong class="chart-meter__score">—</strong>
+                  </div>
+                  <p class="chart-head__detail">Volume, swings, references and pressure alerts mark where the price meets supply and demand.</p>
+                </div>
+                <dl class="chart-stats" aria-label="Day data">
                   <div><dt>VWAP</dt><dd>—</dd></div>
                   <div><dt>VWAP slope</dt><dd>—</dd></div>
                   <div><dt>High</dt><dd>—</dd></div>
@@ -255,29 +268,36 @@
                       <span><i class="chart-key" data-key="price"></i>Price</span>
                       <span><i class="chart-key chart-key--dash" data-key="vwap"></i>VWAP</span>
                       <span><i class="chart-key chart-key--bar" data-key="volume"></i>Volume</span>
-                      <span><i class="chart-key chart-key--dash" data-key="support"></i>S</span>
-                      <span><i class="chart-key chart-key--dash" data-key="resistance"></i>R</span>
+                      <span><i class="chart-key" data-key="support"></i>Support</span>
+                      <span><i class="chart-key" data-key="resistance"></i>Resistance</span>
                     </div>
                     <div class="chart-controls">
-                      <div class="chart-seg">
-                        <button type="button" class="chart-menu" aria-haspopup="true" aria-expanded="false" title="Choose which alerts to mark on the price curve">Alerts<i class="chart-menu__chevron" aria-hidden="true"></i></button>
+                      <div class="chart-seg chart-pop">
+                        <button type="button" class="chart-menu" data-kl-alerts aria-haspopup="menu" aria-expanded="false" aria-controls="kl-alerts-menu" title="Choose which alerts to mark on the price curve">Alerts<i class="chart-menu__chevron" aria-hidden="true"></i></button>
+                        <div class="chart-menu-list" id="kl-alerts-menu" role="menu" aria-label="Alerts on the chart" hidden>
+                          <button type="button" role="menuitemcheckbox" aria-checked="true" data-kl-alert="all" tabindex="-1"><i class="chart-check" aria-hidden="true"></i>Select all</button>
+                          <button type="button" role="menuitemcheckbox" aria-checked="true" data-kl-alert="hod" tabindex="-1"><i class="chart-check" aria-hidden="true"></i><i class="chart-mark" data-mark="hod" aria-hidden="true"></i>New HoD</button>
+                          <button type="button" role="menuitemcheckbox" aria-checked="true" data-kl-alert="buying" tabindex="-1"><i class="chart-check" aria-hidden="true"></i><i class="chart-mark" data-mark="buying" aria-hidden="true"></i>Buying Pressure</button>
+                          <button type="button" role="menuitemcheckbox" aria-checked="true" data-kl-alert="selling" tabindex="-1"><i class="chart-check" aria-hidden="true"></i><i class="chart-mark" data-mark="selling" aria-hidden="true"></i>Selling Pressure</button>
+                          <button type="button" role="menuitemcheckbox" aria-checked="true" data-kl-alert="halts" tabindex="-1"><i class="chart-check" aria-hidden="true"></i><i class="chart-mark" data-mark="halts" aria-hidden="true">H</i>Halt / Resume</button>
+                        </div>
                       </div>
                       <div class="chart-seg" role="group" aria-label="Chart overlays">
-                        <button type="button" class="chart-toggle" aria-pressed="true" aria-label="Support and resistance levels" title="Show or hide support and resistance levels">S/R</button>
+                        <button type="button" class="chart-toggle" data-kl-levels aria-pressed="true" aria-label="Support and resistance levels" title="Show or hide support and resistance levels">S/R</button>
                       </div>
-                      <div class="chart-seg" role="group" aria-label="Sampling interval">
-                        <button type="button" aria-pressed="false">15s</button>
-                        <button type="button" aria-pressed="true">1m</button>
-                        <button type="button" aria-pressed="false">5m</button>
+                      <div class="chart-seg" role="group" aria-label="Bar interval">
+                        <button type="button" data-kl-interval="15000" aria-pressed="false">15s</button>
+                        <button type="button" data-kl-interval="60000" aria-pressed="true">1m</button>
+                        <button type="button" data-kl-interval="300000" aria-pressed="false">5m</button>
                       </div>
                     </div>
                   </div>
-                  <div class="chart-slots" data-layout="sub" role="img" aria-label="Key levels chart (coming soon)">
-                    <div class="plot-slot plot-slot--main"><span>Price · VWAP · S/R levels · alerts</span><b class="plot-slot__mark" aria-hidden="true">GXAI</b></div>
-                    <div class="plot-slot plot-slot--axis" data-area="main-y"><span>Price</span></div>
-                    <div class="plot-slot plot-slot--sub"><span>Volume</span></div>
-                    <div class="plot-slot plot-slot--axis" data-area="sub-y"><span>Vol</span></div>
-                    <div class="plot-slot plot-slot--axis" data-area="x"><span>Time · live edge →</span></div>
+                  <!-- Drawn by scanner.js (Key levels chart): price and volume panes, axes.
+                       Wheel zooms, drag pans, double-click goes back live; focus it and use ←/→. -->
+                  <div class="chart-canvas">
+                    <canvas tabindex="0" role="img" aria-label="Key levels chart"></canvas>
+                    <div class="chart-tip" aria-live="polite" hidden></div>
+                    <p class="chart-message" role="status" hidden></p>
                   </div>
                 </div>
               </div>
