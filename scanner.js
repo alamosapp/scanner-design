@@ -1970,11 +1970,10 @@
   /* Account menu: the avatar opens it (click, Enter/Space or ↓ lands on the
      first item, ↑ on the last). ↑/↓/Home/End move between items; Esc, Tab,
      a click outside or picking an item closes it. Account and Subscriptions
-     have no screens yet; User Guide (phones only) opens the guide. Log out
-     asks first: the confirmation dialog fires `scanner:logout` for the
-     sign-in layer to handle. On phones the menu is a sheet under the nav
-     over a dark scrim; a tap on the scrim closes it. */
-  const mountProfile = () => {
+     open Account settings on that tab; User Guide (phones only) opens the
+     guide. Log out asks first (askLogout). On phones the menu is a sheet
+     under the nav over a dark scrim; a tap on the scrim closes it. */
+  const mountProfile = (account) => {
     const root = document.querySelector("[data-profile]");
     if (!root) return;
     const btn = root.querySelector("[data-profile-btn]");
@@ -1982,7 +1981,6 @@
     const scrim = root.querySelector("[data-profile-scrim]");
     // Only the items on screen (User Guide is for phones)
     const items = () => [...menu.querySelectorAll("[role=menuitem]")].filter((el) => el.getClientRects().length);
-    const confirm = document.getElementById("logout-confirm");
 
     const isOpen = () => !menu.hidden;
     const focusItem = (i) => {
@@ -2020,27 +2018,75 @@
     document.addEventListener("pointerdown", (e) => { if (isOpen() && !root.contains(e.target)) close(false); });
     scrim.addEventListener("click", () => close(false));
 
-    // Log out and User Guide open a dialog, which takes the focus.
+    // Every item but the plain ones opens a dialog, which takes the focus;
+    // closing it brings the focus back to the avatar.
     menu.querySelectorAll("[role=menuitem]").forEach((item) => item.addEventListener("click", () => {
       const action = item.dataset.profileAction;
-      close(action !== "logout" && action !== "guide");
-      if (action === "logout") confirm.showModal();
+      close(!["logout", "guide", "account", "subscriptions"].includes(action));
+      if (action === "logout") askLogout(btn);
+      else if (action === "account" || action === "subscriptions") account?.open(action, btn);
     }));
+  };
 
-    confirm.querySelector("[data-logout-cancel]").addEventListener("click", () => confirm.close());
-    confirm.querySelector("[data-logout-confirm]").addEventListener("click", () => {
-      confirm.close("logout");
+  // A click on a modal dialog's backdrop (outside its box) closes it.
+  const closeOnBackdrop = (dialog) => dialog.addEventListener("click", (e) => {
+    if (e.target !== dialog) return;
+    const r = dialog.getBoundingClientRect();
+    if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) dialog.close();
+  });
+
+  /* Confirm dialog: one for every decision that ends something (log out,
+     delete account, cancel plan, remove card). askConfirm sets its copy and
+     icon and opens it over whatever is open (native dialogs stack); OK runs
+     onConfirm. Cancel, Esc or the backdrop drop it. Either way the focus
+     goes back to `returnTo` (the button that asked, by default). */
+  const CONFIRM_GLYPHS = {
+    logout: '<path d="M14 4h3.5A2.5 2.5 0 0 1 20 6.5v11a2.5 2.5 0 0 1-2.5 2.5H14"/><path d="M10 16.5 5.5 12 10 7.5M5.5 12H15"/>',
+    warning: '<path d="M12 9v4.5M12 16.8v.2"/><path d="M10.3 3.9 2.6 17.2A2 2 0 0 0 4.3 20h15.4a2 2 0 0 0 1.7-2.8L13.7 3.9a2 2 0 0 0-3.4 0z"/>',
+    trash: '<path d="M4.5 7h15M10 11v6M14 11v6M6.5 7l1 12.5h9L17.5 7M9.5 7V4.5h5V7"/>',
+  };
+  const confirmEl = document.getElementById("confirm-dialog");
+  let confirmRun = null;
+  let confirmReturn = null;
+  const askConfirm = ({ title, text, action, cancel = "Cancel", icon = "warning", returnTo = document.activeElement, onConfirm }) => {
+    confirmEl.querySelector("[data-cm-title]").textContent = title;
+    confirmEl.querySelector("[data-cm-text]").textContent = text;
+    confirmEl.querySelector("[data-cm-ok-text]").textContent = action;
+    confirmEl.querySelector("[data-cm-cancel]").textContent = cancel;
+    confirmEl.querySelector("[data-cm-glyph]").innerHTML = CONFIRM_GLYPHS[icon];
+    confirmEl.querySelector("[data-cm-ok-glyph]").innerHTML = CONFIRM_GLYPHS[icon];
+    confirmRun = onConfirm;
+    confirmReturn = returnTo;
+    confirmEl.showModal();
+  };
+  confirmEl.querySelector("[data-cm-cancel]").addEventListener("click", () => confirmEl.close());
+  confirmEl.querySelector("[data-cm-ok]").addEventListener("click", () => {
+    const run = confirmRun;
+    confirmRun = null;
+    confirmEl.close("ok");
+    run?.();
+  });
+  closeOnBackdrop(confirmEl);
+  confirmEl.addEventListener("close", () => {
+    confirmRun = null;
+    if (confirmReturn?.isConnected) confirmReturn.focus();
+    confirmReturn = null;
+  });
+
+  // Log out (account menu, Account tab): fires `scanner:logout` for the
+  // sign-in layer to handle.
+  const askLogout = (returnTo, onLogout) => askConfirm({
+    title: "Log out of Pulse?",
+    text: "Live alerts stop on this device until you sign back in. Your layout, filters and sounds stay saved.",
+    action: "Log out",
+    icon: "logout",
+    returnTo,
+    onConfirm: () => {
+      onLogout?.();
       document.dispatchEvent(new CustomEvent("scanner:logout"));
       showToast("Logged out");
-    });
-    // A click on the backdrop cancels.
-    confirm.addEventListener("click", (e) => {
-      if (e.target !== confirm) return;
-      const r = confirm.getBoundingClientRect();
-      if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) confirm.close();
-    });
-    confirm.addEventListener("close", () => btn.focus());
-  };
+    },
+  });
 
   /* Toast: a short confirmation at the bottom of the screen. */
   const toastEl = document.querySelector("[data-toast]");
@@ -2063,6 +2109,653 @@
       toastEl.classList.add("is-leaving");
       toastTimer = setTimeout(() => setToast(false), reduceMotion.matches ? 0 : 220);
     }, 2600);
+  };
+
+  /* ---- Account settings -----------------------------------------------------
+     Account and Subscriptions in the account menu open one dialog on that
+     tab: side tabs on desktop (↑/↓), a segmented control on phones (←/→),
+     full screen there. Frontend only: ACCOUNT is mock data kept in memory
+     (a reload starts over); sign-in and payments will fill it later. Every
+     change repaints what shows it (nav avatar, account menu, both tabs) and
+     says so with a toast; anything that ends something asks first.
+     - Account: avatar (New design draws a new gradient from the palette
+       tokens), name (the email is the sign-in, read-only), log out, and
+       delete, locked while the plan renews.
+     - Subscriptions: plan, transactions, billing details (Edit), saved cards
+       (Add new; each card's ⋯ menu edits it, makes it the default or removes
+       it) and cancel / resume the plan.
+     The form dialogs open over it: Save stays off until something changes,
+     errors show under the fields, closing drops the draft. The card fields
+     are a stand-in for the payment provider's own; only the brand and the
+     last 4 digits are kept. */
+  const ACCOUNT = {
+    name: "Jordan Lee",
+    email: "jordan.lee@example.com",
+    avatar: 0, // 0: the default gradient; otherwise the seed of a new design
+    plan: { name: "Pulse Pro", price: "$39.00/month", renews: "2026-10-25", ending: false },
+    invoices: [
+      { name: "Pulse Pro", date: "2026-09-25", status: "Paid", amount: 39 },
+      { name: "Pulse Pro", date: "2026-08-25", status: "Paid", amount: 39 },
+      { name: "Pulse Pro", date: "2026-07-25", status: "Paid", amount: 39 },
+    ],
+    billing: {
+      email: "jordan.lee@example.com",
+      name: "Jordan Lee",
+      address: { country: "US", line1: "350 Fifth Avenue", line2: "Suite 4200", postalCode: "10118", city: "New York", state: "NY" },
+    },
+    cards: [
+      { id: "card-1", brand: "visa", last4: "4242", expMonth: 8, expYear: 2028, isDefault: true, name: "Jordan Lee", address: { country: "US", line1: "350 Fifth Avenue", line2: "Suite 4200", postalCode: "10118", city: "New York", state: "NY" } },
+      { id: "card-2", brand: "mastercard", last4: "5454", expMonth: 3, expYear: 2027, isDefault: false, name: "Jordan Lee", address: { country: "US", line1: "350 Fifth Avenue", line2: "", postalCode: "10118", city: "New York", state: "NY" } },
+    ],
+  };
+
+  const COUNTRIES = [
+    ["AR", "Argentina"], ["AU", "Australia"], ["BO", "Bolivia"], ["BR", "Brazil"], ["CA", "Canada"],
+    ["CL", "Chile"], ["CO", "Colombia"], ["CR", "Costa Rica"], ["DE", "Germany"], ["DO", "Dominican Republic"],
+    ["EC", "Ecuador"], ["ES", "Spain"], ["FR", "France"], ["GB", "United Kingdom"], ["GT", "Guatemala"],
+    ["HN", "Honduras"], ["IT", "Italy"], ["MX", "Mexico"], ["NI", "Nicaragua"], ["PA", "Panama"],
+    ["PE", "Peru"], ["PR", "Puerto Rico"], ["PT", "Portugal"], ["PY", "Paraguay"], ["SV", "El Salvador"],
+    ["US", "United States"], ["UY", "Uruguay"], ["VE", "Venezuela"],
+  ];
+  const AR_PROVINCES = [
+    "Buenos Aires", "Catamarca", "Chaco", "Chubut", "Ciudad Autónoma de Buenos Aires", "Córdoba", "Corrientes",
+    "Entre Ríos", "Formosa", "Jujuy", "La Pampa", "La Rioja", "Mendoza", "Misiones", "Neuquén", "Río Negro",
+    "Salta", "San Juan", "San Luis", "Santa Cruz", "Santa Fe", "Santiago del Estero", "Tierra del Fuego", "Tucumán",
+  ];
+  const CARD_BRANDS = { visa: ["Visa", "Visa"], mastercard: ["Mastercard", "MC"], amex: ["American Express", "Amex"], discover: ["Discover", "Disc"] };
+  // Gradient stops for New design, as palette tokens; neighbours read well together.
+  const AVATAR_STOPS = ["--green", "--teal", "--cyan", "--violet", "--pink", "--orange", "--amber"];
+
+  const countryName = (code) => COUNTRIES.find(([c]) => c === code)?.[1] || code;
+  const brandName = (brand) => CARD_BRANDS[brand]?.[0] || "Card";
+  const cardLabel = (card) => `${brandName(card.brand)} •••• ${card.last4}`;
+  // Noon, so no time zone moves the day.
+  const longDate = (iso) => new Date(`${iso}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  const shortDate = (iso) => new Date(`${iso}T12:00:00`).toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" });
+  const money = (n) => `$${n.toFixed(2)}`;
+  const initialsOf = (name) => {
+    const words = name.trim().split(/\s+/).map((w) => w.match(/\p{L}/u)?.[0]).filter(Boolean);
+    return (words.length > 1 ? words[0] + words[words.length - 1] : words[0] || "?").toLocaleUpperCase();
+  };
+  const cardBrandOf = (digits) =>
+    /^4/.test(digits) ? "visa" : /^(5[1-5]|2[2-7])/.test(digits) ? "mastercard" : /^3[47]/.test(digits) ? "amex" : /^6/.test(digits) ? "discover" : "";
+  const luhn = (digits) => [...digits].reverse().reduce((sum, d, i) => {
+    let n = Number(d) * (i % 2 ? 2 : 1);
+    return sum + (n > 9 ? n - 9 : n);
+  }, 0) % 10 === 0;
+  // Expiry not in the past (the card works through the end of its month).
+  const expired = (month, year) => {
+    const now = new Date();
+    return year < now.getFullYear() || (year === now.getFullYear() && month < now.getMonth() + 1);
+  };
+  const node = (tag, className, text) => {
+    const el = document.createElement(tag);
+    if (className) el.className = className;
+    if (text != null) el.textContent = text;
+    return el;
+  };
+
+  /* A form dialog (Edit billing, Edit card, Add card). `fill(form, ctx)`
+     loads it; `save(form, ctx)` returns an error ({ message, field }) or
+     nothing when it saved. The dialog handles Save's state, the error line,
+     Cancel / ✕ / Esc / backdrop and the focus afterwards. */
+  const mountFormDialog = (dialog, { fill, save }) => {
+    const form = dialog.querySelector("form");
+    const submit = form.querySelector("[type=submit]");
+    const error = form.querySelector("[data-form-error]");
+    let ctx = null;
+    let returnTo = null;
+    const showError = (message, field) => {
+      error.textContent = message || "";
+      error.hidden = !message;
+      form.querySelectorAll("[aria-invalid]").forEach((el) => el.removeAttribute("aria-invalid"));
+      if (field) {
+        field.setAttribute("aria-invalid", "true");
+        field.focus();
+      }
+    };
+    form.addEventListener("input", () => {
+      submit.disabled = false;
+      showError("");
+    });
+    form.addEventListener("change", () => { submit.disabled = false; });
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const problem = save(form, ctx);
+      if (problem) { showError(problem.message, problem.field); return; }
+      dialog.close();
+    });
+    dialog.querySelectorAll("[data-fm-close]").forEach((b) => b.addEventListener("click", () => dialog.close()));
+    closeOnBackdrop(dialog);
+    dialog.addEventListener("close", () => {
+      form.reset();
+      showError("");
+      // `returnTo` may be a function: the button it came from may have been repainted.
+      const back = typeof returnTo === "function" ? returnTo() : returnTo;
+      if (back?.isConnected) back.focus();
+      ctx = returnTo = null;
+    });
+    return {
+      open(context, from = document.activeElement) {
+        ctx = context;
+        returnTo = from;
+        form.reset();
+        fill(form, ctx);
+        submit.disabled = true;
+        showError("");
+        dialog.showModal();
+        dialog.querySelector(".fm-title").focus();
+      },
+    };
+  };
+
+  /* Address fields, built into a form's [data-address]: country, lines,
+     postal code + city, and state. Argentina gets its province list, any
+     other country a free-text state; only the visible one is enabled, so
+     only it is read. `data-address-short` (Add card): country + line 1. */
+  const buildAddress = (box) => {
+    const short = box.hasAttribute("data-address-short");
+    const field = (label, control) => {
+      const wrap = node("label", "field");
+      wrap.append(node("span", "field__label", label), control);
+      return wrap;
+    };
+    const input = (name, autocomplete, required = false) => {
+      const el = node("input", "field__input");
+      Object.assign(el, { type: "text", name, autocomplete, required });
+      return el;
+    };
+    const chevron = () => {
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("class", "field__icon");
+      svg.setAttribute("viewBox", "0 0 24 24");
+      svg.setAttribute("aria-hidden", "true");
+      svg.innerHTML = '<path d="m6 9 6 6 6-6"/>';
+      return svg;
+    };
+    const country = node("select", "field__input");
+    Object.assign(country, { name: "country", autocomplete: "country" });
+    country.append(...COUNTRIES.map(([code, name]) => new Option(name, code)));
+    const countryField = field("Country or region", country);
+    countryField.append(chevron());
+    box.append(countryField, field("Address line 1", input("line1", "address-line1", true)));
+    if (short) return;
+
+    box.append(field("Address line 2", input("line2", "address-line2")));
+    const pair = node("div", "field-pair");
+    pair.append(field("Postal code", input("postalCode", "postal-code")), field("City", input("city", "address-level2")));
+    const province = node("select", "field__input");
+    Object.assign(province, { name: "state", autocomplete: "address-level1" });
+    province.append(new Option("Select a province", ""), ...AR_PROVINCES.map((p) => new Option(p, p)));
+    const state = input("state", "address-level1");
+    // Two controls share the field, so each is named on its own (a <label>
+    // would only name the first).
+    const stateField = node("div", "field");
+    const stateLabel = node("span", "field__label");
+    stateLabel.setAttribute("aria-hidden", "true");
+    province.setAttribute("aria-label", "Province");
+    state.setAttribute("aria-label", "State or region");
+    stateField.append(stateLabel, state, province, chevron());
+    box.append(pair, stateField);
+    const sync = () => {
+      const ar = country.value === "AR";
+      province.hidden = province.disabled = !ar;
+      state.hidden = state.disabled = ar;
+      stateLabel.textContent = ar ? "Province" : "State or region";
+      stateField.querySelector(".field__icon").hidden = !ar;
+    };
+    country.addEventListener("change", sync);
+    box.syncState = sync;
+  };
+  const setAddress = (form, a = {}) => {
+    const f = form.elements;
+    f.country.value = a.country || "US";
+    form.querySelector("[data-address]").syncState?.();
+    ["line1", "line2", "postalCode", "city"].forEach((k) => { if (f[k]) f[k].value = a[k] || ""; });
+    const state = form.querySelector("[name=state]:not([disabled])");
+    if (!state) return;
+    state.value = state.tagName === "SELECT" && !AR_PROVINCES.includes(a.state) ? "" : a.state || "";
+  };
+  const readAddress = (form) => {
+    const f = form.elements;
+    const value = (name) => form.querySelector(`[name=${name}]:not([disabled])`)?.value.trim() || "";
+    return { country: f.country.value, line1: value("line1"), line2: value("line2"), postalCode: value("postalCode"), city: value("city"), state: value("state") };
+  };
+
+  const mountAccount = () => {
+    const dialog = document.getElementById("account-settings");
+    if (!dialog) return null;
+    const $ = (sel) => dialog.querySelector(sel);
+    const tabs = [...dialog.querySelectorAll("[data-am-tab]")];
+    const tablist = $(".am-tabs");
+    const body = $(".am-body");
+    const title = $("[data-am-title]");
+    let returnTo = null;
+
+    /* Tabs */
+    const select = (name, focus = "title") => {
+      tabs.forEach((tab) => {
+        const on = tab.dataset.amTab === name;
+        tab.setAttribute("aria-selected", String(on));
+        tab.tabIndex = on ? 0 : -1;
+        dialog.querySelector(`[data-am-panel="${tab.dataset.amTab}"]`).hidden = !on;
+        if (on) title.textContent = tab.textContent.trim();
+      });
+      tablist.dataset.active = name;
+      body.scrollTop = 0;
+      if (focus === "tab") tabs.find((t) => t.dataset.amTab === name).focus();
+      else if (focus === "title") title.focus();
+    };
+    tabs.forEach((tab) => tab.addEventListener("click", () => select(tab.dataset.amTab, null)));
+    tablist.addEventListener("keydown", (e) => {
+      const at = tabs.indexOf(document.activeElement);
+      const to = { ArrowDown: at + 1, ArrowRight: at + 1, ArrowUp: at - 1, ArrowLeft: at - 1, Home: 0, End: tabs.length - 1 }[e.key];
+      if (to == null) return;
+      e.preventDefault();
+      select(tabs[(to + tabs.length) % tabs.length].dataset.amTab, "tab");
+    });
+
+    /* Everything that shows the account, painted from ACCOUNT */
+    const paintIdentity = () => {
+      const initials = initialsOf(ACCOUNT.name);
+      let stops = null;
+      if (ACCOUNT.avatar) {
+        const r = seeded(`avatar:${ACCOUNT.avatar}`); // the same seed always draws the same avatar
+        const from = Math.floor(r() * AVATAR_STOPS.length);
+        const to = (from + 1 + Math.floor(r() * 2)) % AVATAR_STOPS.length;
+        stops = [`var(${AVATAR_STOPS[from]})`, `var(${AVATAR_STOPS[to]})`, `${Math.round(r() * 360)}deg`];
+      }
+      document.querySelectorAll("[data-avatar]").forEach((el) => {
+        el.textContent = initials;
+        ["--avatar-from", "--avatar-to", "--avatar-angle"].forEach((prop, i) => {
+          if (stops) el.style.setProperty(prop, stops[i]);
+          else el.style.removeProperty(prop);
+        });
+      });
+      document.querySelectorAll("[data-profile-name]").forEach((el) => { el.textContent = ACCOUNT.name; });
+      document.querySelectorAll("[data-profile-email]").forEach((el) => {
+        el.textContent = ACCOUNT.email;
+        if (el.title) el.title = ACCOUNT.email;
+      });
+    };
+
+    const paintPlan = () => {
+      const { plan } = ACCOUNT;
+      const renews = longDate(plan.renews);
+      $("[data-am-plan-name]").textContent = plan.name;
+      $("[data-am-plan-text]").textContent = plan.ending
+        ? `Your plan won't renew. You keep full access to the scanner until ${renews}.`
+        : `Your plan is active and renews at ${plan.price} on ${renews}.`;
+      const badge = $("[data-am-plan-badge]");
+      badge.textContent = plan.ending ? "Ending" : "Active";
+      badge.dataset.tone = plan.ending ? "warn" : "live";
+      document.querySelectorAll("[data-profile-plan]").forEach((el) => { el.textContent = plan.ending ? `${plan.name} · Ending` : plan.name; });
+      $("[data-am-cancel-section]").hidden = plan.ending;
+      $("[data-am-resume-section]").hidden = !plan.ending;
+      $("[data-am-resume-text]").textContent = `Your plan ends on ${renews}. Resume it to keep the scanner after that.`;
+      // A plan that will charge again blocks deleting the account.
+      $("[data-am-delete]").disabled = !plan.ending;
+      $("[data-am-delete-lock]").hidden = plan.ending;
+    };
+
+    const paintInvoices = () => {
+      const box = $("[data-am-invoices]");
+      if (!ACCOUNT.invoices.length) { box.replaceChildren(node("p", "am-empty", "No transactions yet.")); return; }
+      box.replaceChildren(...ACCOUNT.invoices.map((inv) => {
+        const row = node("div", "am-txn");
+        const badge = node("span", "am-badge", inv.status);
+        row.append(node("span", "am-txn__name", inv.name), node("span", "am-txn__date", shortDate(inv.date)), badge, node("span", "am-txn__amount", money(inv.amount)));
+        return row;
+      }));
+    };
+
+    const paintBilling = () => {
+      const { billing } = ACCOUNT;
+      const a = billing.address;
+      $('[data-am-info="email"]').textContent = billing.email || "No email yet";
+      $('[data-am-info="name"]').textContent = billing.name || "No name yet";
+      const lines = [
+        [a.line1, a.line2].filter(Boolean).join(", "),
+        [a.city, a.state, a.postalCode].filter(Boolean).join(", "),
+        a.country ? countryName(a.country) : "",
+      ].filter(Boolean);
+      const dd = $('[data-am-info="address"]');
+      dd.replaceChildren();
+      if (!lines.length) dd.textContent = "No address yet";
+      lines.forEach((line, i) => { if (i) dd.append(document.createElement("br")); dd.append(line); });
+    };
+
+    /* Saved cards, each with a ⋯ menu (one open at a time) */
+    const DOTS = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg>';
+    const MENU_ICONS = {
+      edit: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM13.5 6.5l4 4"/></svg>',
+      check: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>',
+      trash: `<svg viewBox="0 0 24 24" aria-hidden="true">${CONFIRM_GLYPHS.trash}</svg>`,
+    };
+    let openMenu = null; // { toggle, list }
+    const closeMenu = (refocus = false) => {
+      if (!openMenu) return;
+      openMenu.list.hidden = true;
+      openMenu.toggle.setAttribute("aria-expanded", "false");
+      if (refocus) openMenu.toggle.focus();
+      openMenu = null;
+    };
+    const showMenu = (toggle, list) => {
+      closeMenu();
+      list.hidden = false;
+      toggle.setAttribute("aria-expanded", "true");
+      openMenu = { toggle, list };
+      // Near the bottom of the scroll area, it opens upward instead.
+      list.classList.remove("is-up");
+      const room = body.getBoundingClientRect();
+      const r = list.getBoundingClientRect();
+      list.classList.toggle("is-up", r.bottom > room.bottom - 8 && r.top - room.top > r.height + 40);
+      list.querySelector("[role=menuitem]").focus();
+    };
+    const menuItem = (icon, label, action, danger = false) => {
+      const item = node("button", `am-menu-item${danger ? " am-menu-item--danger" : ""}`);
+      item.type = "button";
+      item.setAttribute("role", "menuitem");
+      item.dataset.cardAction = action;
+      item.innerHTML = MENU_ICONS[icon];
+      item.append(node("span", "", label));
+      return item;
+    };
+    const paintCards = () => {
+      closeMenu();
+      const box = $("[data-am-methods]");
+      if (!ACCOUNT.cards.length) { box.replaceChildren(node("p", "am-card am-empty", "No payment methods yet.")); return; }
+      box.replaceChildren(...ACCOUNT.cards.map((card) => {
+        const row = node("div", "am-card am-method");
+        row.dataset.card = card.id;
+        const brand = node("span", "am-method__brand", CARD_BRANDS[card.brand]?.[1] || "Card");
+        brand.setAttribute("aria-hidden", "true");
+        const text = node("div", "am-method__text");
+        const exp = `${String(card.expMonth).padStart(2, "0")}/${String(card.expYear).slice(-2)}`;
+        const name = node("div", "am-method__name");
+        name.append(node("strong", "", brandName(card.brand)));
+        if (card.isDefault) name.append(node("span", "am-badge", "Default"));
+        text.append(name, node("span", "am-method__number", `•••• ${card.last4} · ${exp}`));
+        row.append(brand, text);
+
+        const toggle = node("button", "icon-btn");
+        toggle.type = "button";
+        toggle.innerHTML = DOTS;
+        toggle.setAttribute("aria-label", `Options for ${brandName(card.brand)} ending in ${card.last4}`);
+        toggle.setAttribute("aria-haspopup", "menu");
+        toggle.setAttribute("aria-expanded", "false");
+        toggle.setAttribute("aria-controls", `am-menu-${card.id}`);
+        const list = node("div", "am-menu");
+        list.id = `am-menu-${card.id}`;
+        list.setAttribute("role", "menu");
+        list.setAttribute("aria-label", `${brandName(card.brand)} ending in ${card.last4}`);
+        list.hidden = true;
+        list.append(menuItem("edit", "Edit card", "edit"));
+        if (!card.isDefault) list.append(menuItem("check", "Set as default", "default"));
+        list.append(menuItem("trash", "Remove card", "remove", true));
+        toggle.addEventListener("click", () => (openMenu?.list === list ? closeMenu() : showMenu(toggle, list)));
+        list.addEventListener("keydown", (e) => {
+          const items = [...list.querySelectorAll("[role=menuitem]")];
+          const at = items.indexOf(document.activeElement);
+          const to = { ArrowDown: at + 1, ArrowUp: at - 1, Home: 0, End: -1 }[e.key];
+          if (to != null) { e.preventDefault(); items[(to + items.length) % items.length].focus(); }
+          else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeMenu(true); }
+          else if (e.key === "Tab") closeMenu();
+        });
+        list.addEventListener("click", (e) => {
+          const action = e.target.closest("[data-card-action]")?.dataset.cardAction;
+          if (!action) return;
+          closeMenu();
+          cardAction(action, card, toggle);
+        });
+        row.append(toggle, list);
+        return row;
+      }));
+    };
+    // A card's ⋯ button after a repaint (or Add new if the card is gone).
+    const cardButton = (id) => dialog.querySelector(`[data-card="${id}"] .icon-btn`) || $('[data-am-open="add-payment"]');
+    const focusCard = (id) => cardButton(id).focus();
+    const planRenews = () => !ACCOUNT.plan.ending;
+
+    const cardAction = (action, card, toggle) => {
+      if (action === "edit") editCard.open(card, () => cardButton(card.id));
+      else if (action === "default") {
+        ACCOUNT.cards.forEach((c) => { c.isDefault = c === card; });
+        paintCards();
+        focusCard(card.id);
+        showToast(`${cardLabel(card)} is now your default card`);
+      } else if (action === "remove") {
+        const last = ACCOUNT.cards.length === 1;
+        askConfirm({
+          title: "Remove this card?",
+          text: last && planRenews()
+            ? `${cardLabel(card)} will be removed from your account. Add another payment method before your next charge to keep the scanner on.`
+            : `${cardLabel(card)} will be removed from your account.`,
+          action: "Remove card",
+          cancel: "Keep card",
+          icon: "trash",
+          returnTo: toggle,
+          onConfirm: () => {
+            ACCOUNT.cards = ACCOUNT.cards.filter((c) => c !== card);
+            if (card.isDefault && ACCOUNT.cards.length) ACCOUNT.cards[0].isDefault = true;
+            paintCards();
+            $('[data-am-open="add-payment"]').focus();
+            showToast(`${cardLabel(card)} removed`);
+          },
+        });
+      }
+    };
+    document.addEventListener("pointerdown", (e) => {
+      if (openMenu && !openMenu.list.contains(e.target) && !openMenu.toggle.contains(e.target)) closeMenu();
+    });
+
+    /* Account tab */
+    const nameForm = $("[data-am-name-form]");
+    const nameInput = nameForm.elements.name;
+    const nameSubmit = nameForm.querySelector("[type=submit]");
+    const nameError = nameForm.querySelector("[data-form-error]");
+    const nameProblem = (message) => {
+      nameError.textContent = message || "";
+      nameError.hidden = !message;
+      if (message) nameInput.setAttribute("aria-invalid", "true");
+      else nameInput.removeAttribute("aria-invalid");
+    };
+    const fillName = () => {
+      nameInput.value = ACCOUNT.name;
+      nameForm.elements.email.value = ACCOUNT.email;
+      nameSubmit.disabled = true;
+      nameProblem("");
+    };
+    nameForm.addEventListener("input", () => {
+      nameSubmit.disabled = nameInput.value.trim() === ACCOUNT.name;
+      nameProblem("");
+    });
+    nameForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const name = nameInput.value.trim().replace(/\s+/g, " ");
+      if (!name) { nameProblem("Enter your name."); nameInput.focus(); return; }
+      if (name === ACCOUNT.name) return;
+      ACCOUNT.name = name;
+      paintIdentity();
+      fillName();
+      showToast("Name updated");
+    });
+
+    // New design: each click draws another gradient at once.
+    dialog.querySelectorAll("[data-am-shuffle]").forEach((b) => b.addEventListener("click", () => {
+      let seed;
+      do seed = crypto.getRandomValues(new Uint32Array(1))[0]; while (!seed || seed === ACCOUNT.avatar);
+      ACCOUNT.avatar = seed;
+      paintIdentity();
+      const big = $(".avatar--xl");
+      big.classList.remove("is-new");
+      void big.offsetWidth; // restart the pop
+      big.classList.add("is-new");
+    }));
+
+    $("[data-am-logout]").addEventListener("click", (e) => askLogout(e.currentTarget, () => dialog.close()));
+    $("[data-am-delete]").addEventListener("click", (e) => askConfirm({
+      title: "Delete your account?",
+      text: "This permanently deletes your Pulse account, your profile and your saved cards. It can't be undone.",
+      action: "Delete account",
+      cancel: "Keep account",
+      icon: "trash",
+      returnTo: e.currentTarget,
+      onConfirm: () => {
+        dialog.close();
+        document.dispatchEvent(new CustomEvent("scanner:delete-account"));
+        showToast("Account deleted");
+      },
+    }));
+    // "Cancel your plan in Subscriptions" (under a locked Delete)
+    $("[data-am-goto]").addEventListener("click", () => {
+      select("subscriptions", null);
+      $("[data-am-cancel-plan]").focus();
+    });
+
+    /* Subscriptions tab */
+    $("[data-am-cancel-plan]").addEventListener("click", (e) => askConfirm({
+      title: "Cancel your plan?",
+      text: `You'll keep full access to your scanner until ${longDate(ACCOUNT.plan.renews)}. After that, the scanner and its alerts stop.`,
+      action: "Cancel plan",
+      cancel: "Keep plan",
+      returnTo: e.currentTarget,
+      onConfirm: () => {
+        ACCOUNT.plan.ending = true;
+        paintPlan();
+        $("[data-am-resume-plan]").focus();
+        showToast(`Plan canceled · access until ${longDate(ACCOUNT.plan.renews)}`);
+      },
+    }));
+    $("[data-am-resume-plan]").addEventListener("click", () => {
+      ACCOUNT.plan.ending = false;
+      paintPlan();
+      $("[data-am-cancel-plan]").focus();
+      showToast("Your plan will renew as usual");
+    });
+
+    /* Form dialogs */
+    document.querySelectorAll("[data-address]").forEach(buildAddress);
+    document.querySelectorAll(".form-modal [data-digits]").forEach((input) =>
+      input.addEventListener("input", () => { input.value = input.value.replace(/\D/g, ""); }));
+
+    const editBilling = mountFormDialog(document.getElementById("edit-billing"), {
+      fill: (form) => {
+        form.elements.email.value = ACCOUNT.billing.email;
+        form.elements.name.value = ACCOUNT.billing.name;
+        setAddress(form, ACCOUNT.billing.address);
+      },
+      save: (form) => {
+        const f = form.elements;
+        const email = f.email.value.trim();
+        if (!email || !f.email.checkValidity()) return { message: "Enter a valid billing email.", field: f.email };
+        if (!f.name.value.trim()) return { message: "Enter the name for your invoices.", field: f.name };
+        ACCOUNT.billing = { email, name: f.name.value.trim(), address: readAddress(form) };
+        paintBilling();
+        showToast("Billing information updated");
+      },
+    });
+
+    const editCard = mountFormDialog(document.getElementById("edit-card"), {
+      fill: (form, card) => {
+        const id = form.querySelector("[data-fm-card]");
+        const brand = node("span", "am-method__brand", CARD_BRANDS[card.brand]?.[1] || "Card");
+        brand.setAttribute("aria-hidden", "true");
+        id.replaceChildren(brand, `${brandName(card.brand)} ending in ${card.last4}`);
+        form.elements.expMonth.value = String(card.expMonth).padStart(2, "0");
+        form.elements.expYear.value = String(card.expYear);
+        form.elements.name.value = card.name || "";
+        setAddress(form, card.address);
+      },
+      save: (form, card) => {
+        const f = form.elements;
+        const month = Number(f.expMonth.value);
+        const year = Number(f.expYear.value);
+        if (!(month >= 1 && month <= 12)) return { message: "Enter the month as 01 to 12.", field: f.expMonth };
+        if (f.expYear.value.length !== 4) return { message: "Enter the year with 4 digits.", field: f.expYear };
+        if (expired(month, year)) return { message: "That date has passed. Check the card's expiration date.", field: f.expMonth };
+        Object.assign(card, { expMonth: month, expYear: year, name: f.name.value.trim(), address: readAddress(form) });
+        paintCards();
+        showToast(`${cardLabel(card)} updated`);
+      },
+    });
+
+    const addPayment = mountFormDialog(document.getElementById("add-payment"), {
+      fill: (form) => {
+        form.elements.name.value = ACCOUNT.billing.name;
+        setAddress(form, ACCOUNT.billing.address);
+        form.querySelector("[data-card-brand]").textContent = "";
+      },
+      save: (form) => {
+        const f = form.elements;
+        const digits = f.number.value.replace(/\D/g, "");
+        const [mm, yy] = f.exp.value.split("/");
+        const month = Number(mm);
+        const year = 2000 + Number(yy);
+        if (digits.length < 13 || !luhn(digits)) return { message: "Check the card number.", field: f.number };
+        if (!(month >= 1 && month <= 12) || !yy || yy.length !== 2) return { message: "Enter the expiration as MM/YY.", field: f.exp };
+        if (expired(month, year)) return { message: "This card has expired.", field: f.exp };
+        if (!/^\d{3,4}$/.test(f.cvc.value)) return { message: "Enter the 3 or 4 digit security code.", field: f.cvc };
+        if (!f.name.value.trim()) return { message: "Enter the name on the card.", field: f.name };
+        if (!f.line1.value.trim()) return { message: "Enter the billing address.", field: f.line1 };
+        // Only the brand and the last 4 digits are kept; the form resets on close.
+        const card = {
+          id: `card-${Date.now()}`, brand: cardBrandOf(digits), last4: digits.slice(-4), expMonth: month, expYear: year,
+          isDefault: !ACCOUNT.cards.length, name: f.name.value.trim(), address: readAddress(form),
+        };
+        ACCOUNT.cards.push(card);
+        paintCards();
+        showToast(`${cardLabel(card)} added`);
+      },
+    });
+    // Card number in groups of 4, with its brand; expiry as MM/YY.
+    const numberInput = document.querySelector("[data-card-number]");
+    numberInput.addEventListener("input", () => {
+      const digits = numberInput.value.replace(/\D/g, "").slice(0, 19);
+      numberInput.value = digits.replace(/(\d{4})(?=\d)/g, "$1 ");
+      numberInput.form.querySelector("[data-card-brand]").textContent = CARD_BRANDS[cardBrandOf(digits)]?.[1] || "";
+    });
+    const expInput = document.querySelector("[data-card-exp]");
+    expInput.addEventListener("input", (e) => {
+      let digits = expInput.value.replace(/\D/g, "").slice(0, 4);
+      if (digits.length === 1 && Number(digits) > 1) digits = `0${digits}`;
+      // Backspace over the slash removes it instead of putting it back.
+      expInput.value = digits.length > 2 || (digits.length === 2 && e.inputType !== "deleteContentBackward") ? `${digits.slice(0, 2)}/${digits.slice(2)}` : digits;
+    });
+
+    dialog.querySelectorAll("[data-am-open]").forEach((b) => b.addEventListener("click", () => {
+      (b.dataset.amOpen === "edit-billing" ? editBilling : addPayment).open(null, b);
+    }));
+
+    /* Open / close */
+    dialog.querySelector("[data-am-close]").addEventListener("click", () => dialog.close());
+    closeOnBackdrop(dialog);
+    // Esc closes an open card menu first.
+    dialog.addEventListener("cancel", (e) => {
+      if (!openMenu) return;
+      e.preventDefault();
+      closeMenu(true);
+    });
+    dialog.addEventListener("close", () => {
+      closeMenu();
+      if (returnTo?.isConnected) returnTo.focus();
+      returnTo = null;
+    });
+
+    paintIdentity();
+    paintPlan();
+    return {
+      open(tab = "account", from = document.activeElement) {
+        returnTo = from;
+        fillName();
+        paintPlan();
+        paintInvoices();
+        paintBilling();
+        paintCards();
+        dialog.showModal();
+        select(tab);
+      },
+    };
   };
 
   /* ---- Table settings dialog ----------------------------------------------
@@ -9825,7 +10518,7 @@
     mountLayout();
     mountAppFullscreen();
     mountGuide();
-    mountProfile();
+    mountProfile(mountAccount());
   }
   const phone = DETACHED ? null : mountPhone();
   mountNavStatus(); // the filters follow the market session

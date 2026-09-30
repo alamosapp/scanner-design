@@ -58,7 +58,7 @@ Botón `[data-chart-rotate]` en la barra del panel Charts (solo móvil; las copi
 
 Hoja a todo el ancho bajo la nav: sin bordes curvos, letra más grande (`--m-menu-fs`, ítems de `--m-menu-item-h`) y fondo oscuro detrás (`.profile-scrim`, `--m-scrim`). Tocar el fondo lo cierra. Las flechas solo recorren los ítems visibles.
 
-**Log out** (`.confirm-modal`): hoja inferior a todo el ancho, con título, texto y botones más grandes (`--m-touch`). **User Guide**: pantalla completa respetando notch y barra de inicio, texto de 15 px, cerrar y buscador de 44 px.
+**Confirmación** (`.confirm-modal`, compartida por Log out, Delete account, Cancel plan y Remove card): hoja inferior a todo el ancho, con título, texto y botones más grandes (`--m-touch`). **User Guide**: pantalla completa respetando notch y barra de inicio, texto de 15 px, cerrar y buscador de 44 px. **Account** y **Subscriptions**: pantalla completa con un control segmentado, botones a todo el ancho y formularios en hoja inferior alta (ver `ACCOUNT.md`).
 
 Los campos de texto (buscador de la guía, ticker del chart) van a **16 px** en móvil: por debajo, iOS amplía la página al enfocarlos y la deja más ancha que la pantalla.
 
