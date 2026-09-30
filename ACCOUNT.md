@@ -21,12 +21,13 @@ Escritorio                                   Móvil (pantalla completa)
 | Perfil: avatar (tocarlo o **New design** dibuja un degradado nuevo), nombre y email | Plan: nombre, texto de estado y chip (**Active** verde / **Ending** ámbar) |
 | Personal information: nombre editable; el email es el inicio de sesión y es de solo lectura | Transaction history: los **5 últimos pagos** (`TXN_LIMIT`) con nombre, fecha, estado, monto y un chevron › (cada fila abrirá su factura del proveedor de pago cuando exista `url`) |
 | Session: **Log out** de este dispositivo | Billing information: email, nombre y dirección, con **Edit** |
-| Danger zone: **Delete**, bloqueado mientras el plan se renueva, con un enlace a *Cancel your plan in Subscriptions* | Payment methods: tarjetas con **Add new**; el menú ⋯ de cada una tiene *Edit card*, *Set as default* y *Remove card* |
+| Danger zone: **Delete**, bloqueado mientras el plan se renueva, con un enlace a *Cancel your plan in Subscriptions* | Payment methods: tarjetas con **Add new**; el menú ⋯ de cada una tiene *Edit card*, *Set as default* (estrella) y *Remove card* |
 | | **Cancel plan** o, si ya está cancelado, **Resume plan** |
 
 - **Escritorio**: pestañas laterales con ↑/↓ (también ←/→, Inicio y Fin). El título de la cabecera sigue a la pestaña.
 - **Móvil**: pantalla completa respetando notch y barra de inicio, con un control segmentado de pulgar deslizante (como Table settings). Las filas se apilan: el texto arriba y el botón a todo el ancho (`--m-touch`). Las transacciones pasan a dos líneas.
 - Cada apertura y cada cambio de pestaña empiezan arriba.
+- **Desde el menú de cuenta (móvil)** (`is-from-menu`, lo pone `mountProfile` en el diálogo de `aria-controls` de cada ítem y lo quita al cerrar; vale para Account, Subscriptions, Log out y User Guide): el fondo del modal aparece ya oscuro, sin fundido, porque toma el relevo del fondo del menú. La hoja es opaca desde el primer cuadro y solo sube 24 px (`sheetUp`). Así no se entrevé el scanner entre el cierre del menú y la apertura.
 
 ## Diálogos asociados
 

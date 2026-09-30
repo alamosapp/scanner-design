@@ -772,6 +772,13 @@ select.field__input { appearance: none; padding-right: 36px; cursor: pointer; }
     animation: sheetIn 360ms var(--ease);
   }
   .account-modal::before { display: none; }
+  /* From the account menu: its scrim hands over to the backdrop as is, and
+     the sheet is opaque from the first frame (only slides) */
+  .account-modal.is-from-menu[open], .confirm-modal.is-from-menu[open] { animation: sheetUp 280ms var(--ease); }
+  .guide-panel.is-from-menu[open] { animation: slideLeft 220ms var(--ease); }
+  dialog.is-from-menu::backdrop { animation: none; }
+  @keyframes slideLeft { from { transform: translateX(24px); } }
+  @keyframes sheetUp { from { transform: translateY(24px); } }
   .am-head {
     padding: calc(8px + env(safe-area-inset-top)) calc(6px + env(safe-area-inset-right)) 10px calc(var(--m-gutter) + env(safe-area-inset-left));
     border-bottom: 0;
@@ -834,7 +841,7 @@ select.field__input { appearance: none; padding-right: 36px; cursor: pointer; }
   .field__note { font-size: 13px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .account-modal[open], .form-modal[open], .account-modal::backdrop, .form-modal::backdrop, .am-panel:not([hidden]), .am-menu, .avatar.is-new { animation: none; }
+  .account-modal[open], .account-modal.is-from-menu[open], .confirm-modal.is-from-menu[open], .guide-panel.is-from-menu[open], .form-modal[open], .account-modal::backdrop, .form-modal::backdrop, .am-panel:not([hidden]), .am-menu, .avatar.is-new { animation: none; }
   .am-tabs__thumb { transition: none; }
 }
 
@@ -2100,6 +2107,8 @@ tr.is-new td, .alert-card.is-new { animation: rowIn 1.6s var(--ease); }
   .filter-btn, .app-tools > .guide-icon { display: none; }
   .app-tools > .fullscreen-icon { width: 40px; height: 40px; color: var(--text-2); }
   .app-tools > .fullscreen-icon svg { width: 20px; height: 20px; }
+  /* Touch keeps :hover after a tap (sticky hover): only hover-capable pointers get it */
+  @media (hover: none) { .app-tools > .fullscreen-icon:hover { color: var(--text-2); background: transparent; border-color: transparent; } }
   .app-tools { margin-left: auto; padding-left: 0; border-left: 0; }
   .user-avatar .avatar { --avatar: var(--m-avatar); font-size: 12px; box-shadow: 0 0 0 2px var(--bg); }
   /* Until scanner.js moves the status under the nav, it waits hidden and

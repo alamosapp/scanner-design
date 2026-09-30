@@ -2020,12 +2020,19 @@
     scrim.addEventListener("click", () => close(false));
 
     // Every item but the plain ones opens a dialog, which takes the focus;
-    // closing it brings the focus back to the avatar.
+    // closing it brings the focus back to the avatar. On phones the dialog
+    // takes over from the menu scrim without fading (is-from-menu): no
+    // glimpse of the scanner in between.
     menu.querySelectorAll("[role=menuitem]").forEach((item) => item.addEventListener("click", () => {
       const action = item.dataset.profileAction;
+      const target = document.getElementById(item.getAttribute("aria-controls"));
+      if (target?.showModal) {
+        target.classList.add("is-from-menu");
+        target.addEventListener("close", () => target.classList.remove("is-from-menu"), { once: true });
+      }
       close(!["logout", "guide", "account", "subscriptions"].includes(action));
       if (action === "logout") askLogout(btn);
-      else if (action === "account" || action === "subscriptions") account?.open(action, btn);
+      else if (action === "account" || action === "subscriptions") account?.open(action, btn, true);
     }));
   };
 
@@ -2469,7 +2476,7 @@
     const DOTS = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg>';
     const MENU_ICONS = {
       edit: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM13.5 6.5l4 4"/></svg>',
-      check: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>',
+      star: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3.5 2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"/></svg>',
       trash: `<svg viewBox="0 0 24 24" aria-hidden="true">${CONFIRM_GLYPHS.trash}</svg>`,
     };
     let openMenu = null; // { toggle, list }
@@ -2532,7 +2539,7 @@
         list.setAttribute("aria-label", `${brandName(card.brand)} ending in ${card.last4}`);
         list.hidden = true;
         list.append(menuItem("edit", "Edit card", "edit"));
-        if (!card.isDefault) list.append(menuItem("check", "Set as default", "default"));
+        if (!card.isDefault) list.append(menuItem("star", "Set as default", "default"));
         list.append(menuItem("trash", "Remove card", "remove", true));
         toggle.addEventListener("click", () => (openMenu?.list === list ? closeMenu() : showMenu(toggle, list)));
         list.addEventListener("keydown", (e) => {
@@ -2792,8 +2799,11 @@
     paintIdentity();
     paintPlan();
     return {
-      open(tab = "account", from = document.activeElement) {
+      // `fromMenu`: the phone menu's scrim is already dark, so the sheet
+      // takes over from it without fading (no glimpse of the scanner).
+      open(tab = "account", from = document.activeElement, fromMenu = false) {
         returnTo = from;
+        dialog.classList.toggle("is-from-menu", fromMenu);
         fillName();
         paintPlan();
         paintInvoices();
