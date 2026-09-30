@@ -158,6 +158,11 @@
                 <span class="chart-company__exchange">NASDAQ</span>
               </div>
               <div class="chart-tools">
+                <!-- Phones: turns the panel sideways over the whole screen (scanner.js) -->
+                <button type="button" class="icon-btn rotate-icon" data-chart-rotate aria-pressed="false" aria-label="Landscape view: Charts" title="Landscape view">
+                  <svg class="icon-rotate" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="9" width="18" height="11" rx="2"/><path d="M8 5.5a6 6 0 0 1 9.5 1.5"/><path d="M18 3.5V7h-3.5"/></svg>
+                  <svg class="icon-unrotate" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+                </button>
                 <!-- Layout setup: fullscreen only. Tiles are built by scanner.js -->
                 <button type="button" class="icon-btn layout-icon" data-chart-layout aria-haspopup="menu" aria-expanded="false" aria-controls="chart-layouts" aria-label="Chart layout" title="Chart layout" hidden>
                   <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4" width="17" height="16" rx="2"/><path d="M11 4v16M11 12h9.5"/></svg>
@@ -533,6 +538,7 @@
         <ul>
           <li><b>Toplists</b> keep a compact table: swipe it sideways for more columns.</li>
           <li><b>Alert tables</b> show their rows as cards. When new alerts arrive while you are scrolled down, tap the “new” pill to jump back to the top.</li>
+          <li><b>Charts</b> go landscape: tap the rotate button and turn your phone on its side, or just turn the phone sideways with the Charts tab open. Tap ✕ (or turn it upright again) to go back.</li>
         </ul>
         <p>Table settings, filters, alert sounds, fullscreen and detached copies are set up on desktop.</p>
       </details>

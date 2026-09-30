@@ -242,6 +242,7 @@
   --menu-w: 288px;
   --menu-item-h: 38px;
   --z-menu: 150;                         /* above the panes, below dialogs */
+  --z-landscape: 190;                    /* phones: Charts turned sideways, over the page, below dialogs */
   --shadow-menu: 0 24px 60px -18px var(--shadow-color), 0 0 0 1px var(--white-a04);
 
   /* ---- Country flags (the ticker's country in the chart bar) ---- */
@@ -270,6 +271,7 @@
   --m-fs-meta: 12.5px;
   --m-menu-fs: 16px;                 /* account menu: bigger type, square edges */
   --m-menu-item-h: 56px;
+  --m-touch: 48px;                   /* phone buttons: a full thumb target */
   --m-avatar: 34px;
   --m-scrim: color-mix(in srgb, var(--black) 84%, transparent); /* under the account menu */
 }
@@ -340,6 +342,7 @@ button { cursor: pointer; }
 
 /* Market session · clock · dashboard state */
 .app-status { display: flex; align-items: center; gap: var(--space-4); min-width: 0; padding-left: var(--space-4); border-left: 1px solid var(--line); }
+.app-status > * { flex: none; } /* session and clock never squeeze into each other */
 .nav-chip {
   --chip: var(--text-3);
   display: inline-flex; align-items: center; gap: 6px; height: 24px; padding-inline: 8px;
@@ -455,7 +458,7 @@ html:has(.confirm-modal[open]) { overflow: hidden; }
 /* The User Guide item is for phones: desktop has the nav icon */
 .pm-item--phone, .profile-scrim { display: none; }
 
-@media (max-width: 720px) {
+@media (max-width: 720px), (max-height: 480px) and (pointer: coarse) {
   /* Menu: a full-width sheet under the nav, square edges, bigger type; the
      page behind it goes dark (a tap there closes it) */
   .profile { position: static; }
@@ -486,7 +489,11 @@ html:has(.confirm-modal[open]) { overflow: hidden; }
   /* Confirm: bottom sheet */
   .confirm-modal { width: 100%; margin: auto 0 0; border-width: 1px 0 0; border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
   .confirm-modal[open] { animation: sheetIn 360ms var(--ease); }
-  .cm-foot { padding: 12px var(--space-4) calc(12px + env(safe-area-inset-bottom)); }
+  .cm-body { padding: var(--space-6) var(--m-gutter) var(--space-5); }
+  .cm-title { font-size: 21px; }
+  .cm-text { font-size: 15px; }
+  .cm-foot { gap: var(--space-3); padding: 12px var(--m-gutter) calc(12px + env(safe-area-inset-bottom)); }
+  .cm-foot .btn { height: var(--m-touch); font-size: var(--m-menu-fs); }
 }
 @media (prefers-reduced-motion: reduce) {
   .profile-menu:not([hidden]), .profile-scrim:not([hidden]), .confirm-modal[open], .confirm-modal::backdrop { animation: none; }
@@ -539,8 +546,19 @@ html:has(.confirm-modal[open]) { overflow: hidden; }
 .guide-item dd { margin: 2px 0 0; }
 .guide-empty { margin: var(--space-5) 0 0; text-align: center; color: var(--text-3); }
 
-@media (max-width: 720px) {
-  .guide-panel { width: 100%; border-left: 0; }
+@media (max-width: 720px), (max-height: 480px) and (pointer: coarse) {
+  /* Full screen, clear of the notch and home bar; phone-sized type and
+     targets. Inputs at 16px: below that iOS zooms the page in on focus */
+  .guide-panel { width: 100%; border-left: 0; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+  .guide-head { padding: var(--space-2) var(--space-2) var(--space-2) var(--m-gutter); }
+  .guide-title { font-size: 16px; }
+  .guide-head .icon-btn { width: 44px; height: 44px; }
+  .guide-head .icon-btn svg { width: 20px; height: 20px; }
+  .guide-search { margin: var(--space-3) var(--m-gutter); }
+  .guide-search input { height: 44px; font-size: 16px; }
+  .guide-body { padding: 0 var(--m-gutter) var(--space-6); font-size: 15px; }
+  .guide-item summary { padding: var(--space-4) 0; }
+  .chart-symbol__input { font-size: 16px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -980,7 +998,7 @@ html:has(.settings-modal[open]) { overflow: hidden; }
 .fl-error[hidden] { display: none; }
 
 /* ---- Phones: bottom sheet ---- */
-@media (max-width: 720px) {
+@media (max-width: 720px), (max-height: 480px) and (pointer: coarse) {
   .settings-modal.settings-modal--float { height: fit-content; }
   .settings-modal--float .sm-shell { max-height: 90dvh; }
   .fl-tier [data-fl-swatch] { width: 26px; height: 26px; }
@@ -1699,10 +1717,15 @@ tr.is-new td, .alert-card.is-new { animation: rowIn 1.6s var(--ease); }
 
 .card-view, .m-bar { display: none; }
 
-@media (max-width: 720px) {
-  /* ---- Shell: fixed to the screen, safe areas respected ---- */
-  html:not(.is-detached) body { overscroll-behavior: none; }
+@media (max-width: 720px), (max-height: 480px) and (pointer: coarse) {
+  /* ---- Shell: fixed to the screen, safe areas respected ----
+     The page itself never scrolls or grows: .app clips anything that would
+     stick out (and is the box absolute helpers like .sr-only resolve
+     against), so a phone never zooms out to fit a wider page. */
+  html:not(.is-detached) { overflow: hidden; }
+  html:not(.is-detached) body { overflow: hidden; overscroll-behavior: none; }
   html:not(.is-detached) .app {
+    position: relative; overflow: clip;
     display: flex; flex-direction: column; height: 100vh; height: 100dvh;
     padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
   }
@@ -1714,13 +1737,19 @@ tr.is-new td, .alert-card.is-new { animation: rowIn 1.6s var(--ease); }
   .filter-btn, .app-tools > .icon-btn { display: none; }
   .app-tools { margin-left: auto; padding-left: 0; border-left: 0; }
   .user-avatar .avatar { --avatar: var(--m-avatar); font-size: 12px; box-shadow: 0 0 0 2px var(--bg); }
+  /* Until scanner.js moves the status under the nav, it waits hidden and
+     its row is kept, so nothing overlaps or jumps on load */
+  html:not(.is-detached) .app-nav > .app-status { display: none; }
+  html:not(.is-detached) .m-bar:not(:has(> .app-status))::before { content: ""; height: var(--m-status-h); }
 
   /* ---- Market status + tab strip ---- */
   html:not(.is-detached) .m-bar { flex: none; display: flex; flex-direction: column; background: var(--bg); border-bottom: 1px solid var(--line); }
   .m-bar .app-status { justify-content: space-between; height: var(--m-status-h); padding: 0 var(--m-gutter); border-left: 0; }
   .m-bar .market-clock { font-size: 13px; }
   .m-tabs {
+    position: relative; /* its tabs' absolute parts scroll and clip with it */
     display: flex; gap: var(--space-2); overflow-x: auto; overscroll-behavior-x: contain;
+    min-height: calc(var(--m-tab-h) + var(--space-2) + var(--space-3)); /* its row is kept before the tabs are built */
     padding: var(--space-2) var(--m-gutter) var(--space-3); scroll-padding-inline: var(--m-gutter); scrollbar-width: none;
   }
   .m-tabs::-webkit-scrollbar { display: none; }
@@ -1730,7 +1759,7 @@ tr.is-new td, .alert-card.is-new { animation: rowIn 1.6s var(--ease); }
   .m-tabs[data-more="both"] { mask-image: linear-gradient(to right, transparent, var(--black) var(--m-fade), var(--black) calc(100% - var(--m-fade)), transparent); }
   .m-tab {
     --tone: var(--green);
-    flex: none; display: inline-flex; align-items: center; gap: 7px; height: var(--m-tab-h); padding: 0 15px;
+    position: relative; flex: none; display: inline-flex; align-items: center; gap: 7px; height: var(--m-tab-h); padding: 0 15px;
     border: 0; border-radius: var(--radius-pill); background: var(--m-tab-bg); color: var(--m-tab-ink);
     font-size: 14px; font-weight: 700; line-height: 1; white-space: nowrap; -webkit-tap-highlight-color: transparent;
     transition: background var(--t-fast), color var(--t-fast), transform var(--t-fast);
@@ -1741,10 +1770,14 @@ tr.is-new td, .alert-card.is-new { animation: rowIn 1.6s var(--ease); }
   .m-tab:active { transform: scale(0.96); }
   .m-tab[aria-selected="true"] { background: var(--m-tab-on-bg); color: var(--m-tab-on-ink); }
   .m-tab:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
-  /* New alerts since the tab was last open, in the panel's tone */
+  /* New alerts since the tab was last open, in the panel's tone: a badge
+     on the pill's corner, so a count never changes the tab's width (the
+     strip never shifts under the finger or pushes the open tab away) */
   .m-tab__count {
-    display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: var(--radius-pill);
-    background: var(--tone); color: var(--m-badge-ink); font-family: var(--font-mono); font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums;
+    position: absolute; top: -6px; right: -4px;
+    display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: var(--radius-pill);
+    background: var(--tone); color: var(--m-badge-ink); box-shadow: 0 0 0 2px var(--bg);
+    font-family: var(--font-mono); font-size: 10.5px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums;
   }
   .m-tab__count[hidden] { display: none; }
   .m-tab__count.is-bump { animation: countBump 360ms var(--ease-spring); }
@@ -1841,10 +1874,40 @@ tr.is-new td, .alert-card.is-new { animation: rowIn 1.6s var(--ease); }
   html:not(.is-detached) .chart-tabs { flex: 1 1 100%; }
   html:not(.is-detached) .chart-tab { flex: 1 1 auto; justify-content: center; height: 32px; }
   html:not(.is-detached) .chart-metrics { margin-left: 0; }
+
+  /* Landscape view: the panel over the whole screen. Upright phone: turned
+     90° clockwise (top edge on the right), so it reads with the phone on
+     its side; the notch side pads its left edge. Phone already sideways:
+     it just fills the screen. */
+  html:not(.is-detached) .chart-panel .rotate-icon { display: inline-grid; width: 36px; height: 36px; }
+  .rotate-icon svg { width: 20px; height: 20px; }
+  .chart-panel.is-landscape .rotate-icon { color: var(--text); background: var(--m-tab-bg); }
+  html:not(.is-detached) .chart-panel.is-landscape {
+    position: fixed; inset: 0; z-index: var(--z-landscape);
+    padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    animation: fadeIn 220ms var(--ease);
+  }
+  @media (orientation: portrait) {
+    html:not(.is-detached) .chart-panel.is-landscape {
+      inset: 0 auto auto 100%; width: 100vh; width: 100dvh; height: 100vw;
+      padding: 0 env(safe-area-inset-bottom) 0 env(safe-area-inset-top);
+      transform-origin: top left; transform: rotate(90deg);
+    }
+  }
+  /* Room for the plot: bars on one line each */
+  .chart-panel.is-landscape .chart-bar, .chart-panel.is-landscape .chart-toolbar { padding-block: 6px; }
+  .chart-panel.is-landscape .chart-tabs { flex: 0 1 auto; }
+  .chart-panel.is-landscape .chart-metrics { margin-left: auto; }
+  /* Nothing to scroll here: every drag belongs to the chart */
+  .chart-panel.is-landscape .chart-canvas canvas { touch-action: none; }
 }
 
+/* Landscape button: phones only */
+.rotate-icon, .rotate-icon .icon-unrotate, .chart-panel.is-landscape .rotate-icon .icon-rotate { display: none; }
+.chart-panel.is-landscape .rotate-icon .icon-unrotate { display: block; }
+
 @media (prefers-reduced-motion: reduce) {
-  .m-tab, .m-tab__count.is-bump, .new-pill { transition: none; animation: none; }
+  .m-tab, .m-tab__count.is-bump, .new-pill, .chart-panel.is-landscape { transition: none; animation: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2044,7 +2107,7 @@ tr.is-new td, .alert-card.is-new { animation: rowIn 1.6s var(--ease); }
 .snd-status { flex: 1; min-width: 0; margin: 0; font-size: 12px; color: var(--text-3); }
 .snd-status.is-error { color: var(--red); }
 
-@media (max-width: 720px) {
+@media (max-width: 720px), (max-height: 480px) and (pointer: coarse) {
   .settings-modal.settings-modal--sound { width: 100%; height: fit-content; }
   .settings-modal--sound .sm-shell { max-height: 90dvh; }
   .snd-strip { margin-inline: var(--space-4); }
@@ -2323,7 +2386,7 @@ tr.is-new td, .alert-card.is-new { animation: rowIn 1.6s var(--ease); }
 .flt-note { flex: 1; min-width: 0; margin: 0; font-size: 12px; color: var(--text-3); }
 .flt-note b { color: var(--text-2); }
 
-@media (max-width: 720px) {
+@media (max-width: 720px), (max-height: 480px) and (pointer: coarse) {
   .settings-modal.settings-modal--filters { width: 100%; height: fit-content; margin: auto 0 0; }
   .settings-modal--filters .sm-shell { max-height: 92dvh; }
   /* The sheet grows from the bottom: while editing it takes its full height,

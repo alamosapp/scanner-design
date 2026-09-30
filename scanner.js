@@ -355,13 +355,15 @@
   const tables = new Map();
 
   /* ---- Phones -------------------------------------------------------------
-     At ≤ 720px (the CSS breakpoint) the main window shows one panel at a
-     time, picked from a tab strip (see mountPhone). Alert tables show their
-     rows as cards; toplists keep a table, trimmed to a few columns at phone
-     widths and never reordered or resized there. A detached copy always
-     stays the desktop table. */
+     At ≤ 720px, or a phone held sideways (short and touch; the same query
+     as the CSS), the main window shows one panel at a time, picked from a
+     tab strip (see mountPhone). Alert tables show their rows as cards;
+     toplists keep a table, trimmed to a few columns at phone widths and
+     never reordered or resized there. A detached copy always stays the
+     desktop table. */
 
-  const PHONE = window.matchMedia("(max-width: 720px)");
+  const PHONE = window.matchMedia("(max-width: 720px), (max-height: 480px) and (pointer: coarse)");
+  const PORTRAIT = window.matchMedia("(orientation: portrait)");
 
   // Alert card, two columns: ticker · time / volume · RVol on the left,
   // price / 1m change (or halt timers) on the right.
@@ -5215,6 +5217,47 @@
       if (e.key === "Escape" && root.classList.contains("is-maximized")) setFull(false);
     });
 
+    /* Landscape view (phones): the panel covers the screen, turned sideways
+       while the phone is upright (CSS rotate) or simply filling it when the
+       phone is held sideways. The same button, Esc, or leaving phone widths
+       turns it back; the page behind is inert meanwhile. Turning the phone
+       sideways with the Charts tab open enters it on its own, and turning
+       it upright again leaves (only when it came in that way). The charts
+       read their size and pointer in their own, unrotated frame (chartBox,
+       chartPoint). The copies have no phone shell: no button there. */
+    const rotateBtn = root.querySelector("[data-chart-rotate]");
+    let turnedIn = false; // entered by turning the phone, not by the button
+    const setLandscape = (on) => {
+      turnedIn = false;
+      if (on === root.classList.contains("is-landscape")) return;
+      root.classList.toggle("is-landscape", on);
+      document.documentElement.classList.toggle("has-landscape", on);
+      document.querySelectorAll(".app-nav, .m-bar").forEach((el) => { el.inert = on; });
+      rotateBtn.setAttribute("aria-pressed", String(on));
+      rotateBtn.title = on ? "Exit landscape view" : "Landscape view";
+      rotateBtn.setAttribute("aria-label", on ? "Exit landscape view: Charts" : "Landscape view: Charts");
+    };
+    if (DETACHED) rotateBtn.remove();
+    else {
+      rotateBtn.addEventListener("click", () => setLandscape(!root.classList.contains("is-landscape")));
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && root.classList.contains("is-landscape")) setLandscape(false);
+      });
+      PHONE.addEventListener("change", () => { if (!PHONE.matches) setLandscape(false); });
+      const followPhone = () => {
+        const sideways = PHONE.matches && !PORTRAIT.matches && root.hasAttribute("data-m-active");
+        if (sideways && !root.classList.contains("is-landscape")) {
+          setLandscape(true);
+          turnedIn = true;
+        } else if (!sideways && turnedIn) setLandscape(false);
+      };
+      PORTRAIT.addEventListener("change", followPhone);
+      // The Charts tab opened while the phone is already sideways
+      new MutationObserver(() => { if (root.hasAttribute("data-m-active")) followPhone(); })
+        .observe(root, { attributes: true, attributeFilter: ["data-m-active"] });
+      followPhone();
+    }
+
     // Detach: every click opens one more copy in its own window.
     const detachBtn = root.querySelector(".detach-icon");
     if (canDetach) detachBtn.addEventListener("click", () => openCopy(root));
@@ -5526,6 +5569,20 @@
       for (let i = tags.length - 2; i >= 0; i--) tags[i].y = Math.min(tags[i].y, tags[i + 1].y - h);
     }
     return tags;
+  };
+
+  // Phones can turn the Charts panel sideways (a CSS rotate of 90°
+  // clockwise, see mountChartPanel's landscape view). Screen boxes are then
+  // turned too, so the charts read their size and the pointer here, in
+  // their own frame: x runs down the screen and y from right to left.
+  const chartTurned = (el) => PORTRAIT.matches && Boolean(el.closest(".chart-panel.is-landscape"));
+  const chartBox = (el) => {
+    const r = el.getBoundingClientRect();
+    return chartTurned(el) ? { width: r.height, height: r.width } : r;
+  };
+  const chartPoint = (el, e) => {
+    const r = el.getBoundingClientRect();
+    return chartTurned(el) ? { x: e.clientY - r.top, y: r.right - e.clientX } : { x: e.clientX - r.left, y: e.clientY - r.top };
   };
 
   // Hover card next to the cursor, on its left; on the right when the left
@@ -6127,7 +6184,7 @@
     };
 
     const resize = () => {
-      const { width, height } = box.getBoundingClientRect();
+      const { width, height } = chartBox(box);
       const dpr = window.devicePixelRatio || 1;
       W = Math.floor(width);
       H = Math.floor(height);
@@ -6159,9 +6216,8 @@
     };
     const track = (e) => {
       if (!geo) return;
-      const rect = canvas.getBoundingClientRect();
-      const px = e.clientX - rect.left;
-      pointerY = e.clientY - rect.top;
+      const { x: px, y } = chartPoint(canvas, e);
+      pointerY = y;
       const next = px < geo.right ? nearest(px) : null;
       // Same point: only the card follows the cursor, no redraw
       if (next !== null && next === hover && !tip.hidden) placeTip(geo, data.points[next]);
@@ -7433,7 +7489,7 @@
     };
 
     const resize = () => {
-      const { width, height } = box.getBoundingClientRect();
+      const { width, height } = chartBox(box);
       const dpr = window.devicePixelRatio || 1;
       const wasEmpty = !W;
       W = Math.floor(width);
@@ -7474,14 +7530,14 @@
       schedule();
     };
     const pointAt = (e) => {
-      const rect = canvas.getBoundingClientRect();
-      return { px: e.clientX - rect.left, py: e.clientY - rect.top };
+      const { x, y } = chartPoint(canvas, e);
+      return { px: x, py: y };
     };
     canvas.addEventListener("pointermove", (e) => {
       if (!geo) return;
       const { px, py } = pointAt(e);
       if (drag) {
-        offset = drag.offset - (e.clientX - drag.x) / spacing;
+        offset = drag.offset - (px - drag.x) / spacing;
         clampOffset();
         updateFollow();
       }
@@ -7490,7 +7546,7 @@
     });
     canvas.addEventListener("pointerdown", (e) => {
       if (e.button !== 0 || !geo) return;
-      drag = { x: e.clientX, offset };
+      drag = { x: pointAt(e).px, offset };
       canvas.setPointerCapture(e.pointerId);
       canvas.classList.add("is-dragging");
     });
@@ -9286,7 +9342,7 @@
     };
 
     const resize = () => {
-      const { width, height } = box.getBoundingClientRect();
+      const { width, height } = chartBox(box);
       const dpr = window.devicePixelRatio || 1;
       W = Math.floor(width);
       H = Math.floor(height);
@@ -9319,9 +9375,8 @@
     };
     const track = (e) => {
       if (!geo) return;
-      const rect = canvas.getBoundingClientRect();
-      const px = e.clientX - rect.left;
-      pointerY = e.clientY - rect.top;
+      const { x: px, y } = chartPoint(canvas, e);
+      pointerY = y;
       const next = px < geo.right ? nearest(px) : null;
       if (next !== null && next === hover && !tip.hidden) placeTip(geo, data.points[next]);
       else setHover(next);
