@@ -5215,8 +5215,9 @@
      The day is scripted (pre-market, open drive, a Halt, a flush, a
      divergence, a tug of war, a data gap, buyers back) on a mock clock that
      reads 10:44 ET when the page opens; from there live regimes follow.
-     Key levels draws the same day: each Top List update's price, volume and
-     VWAP, the Pressure alerts and the Halts.
+     Key levels and Rally tracker draw the same day: each Top List update's
+     price, volume and VWAP, the Pressure alerts, the Halts (and, for Rally
+     tracker, each point's control and the participation).
      Only the main window runs it; copies get the series over the channel. */
 
   const BB_SYM = "GXAI";
@@ -5457,7 +5458,7 @@
   };
 
   /* ---- Chart canvas helpers ------------------------------------------------
-     Shared by the canvas charts (Bull vs. Bear, Key levels): tokens read as
+     Shared by the canvas charts (Bull vs. Bear, Key levels, Rally tracker): tokens read as
      canvas colors, crisp 1 px lines, value tags pushed apart on the axis
      and the hover card placed beside the cursor. */
 
@@ -6371,7 +6372,7 @@
        left edge of that column, so the history scrolls left from there;
      - the nearest levels pull the scale in when within half the visible
        range; farther ones never squash the curve;
-     - alerts on the curve (menu Alerts): New HoD amber triangle over it,
+     - alerts on the curve (menu Alerts): New HoD white triangle over it,
        Buying / Selling Pressure dot on the price with a halo by Vol. 1m,
        Halt / Resume gray square with an amber H / green R, stacked off the curve with a guide;
      - High / Low of the visible bars, labeled with a short stem;
@@ -6485,7 +6486,7 @@
       volume: color("--chart-volume", "#7b8492"),
       support: color("--chart-support", "#c8ff38"),
       resistance: color("--chart-resistance", "#ff4f6b"),
-      hod: color("--chart-hod", "#ffb84d"),
+      hod: color("--chart-hod", "#f2f4f7"),
       haltInk: color("--chart-halt-ink", "#ffb84d"),
       resumeInk: color("--chart-resume-ink", "#c8ff38"),
       axis: color("--chart-axis-text", "#7b8492"),
@@ -7268,7 +7269,7 @@
     };
 
     // Hover card: the bar's price, change, VWAP, volume and its alerts
-    const KIND_TEXT = { hod: ["▲", "New HoD", "warn"], buying: ["●", "Buying Pressure", "bull"], selling: ["●", "Selling Pressure", "bear"], halt: ["■", "Halt", ""], resume: ["■", "Resume", ""] };
+    const KIND_TEXT = { hod: ["▲", "New HoD", "hod"], buying: ["●", "Buying Pressure", "bull"], selling: ["●", "Selling Pressure", "bear"], halt: ["■", "Halt", ""], resume: ["■", "Resume", ""] };
     const showTip = (g, i, cy) => {
       const b = bars[i];
       const prev = bars[i - 1];
@@ -7578,6 +7579,1785 @@
     };
   };
 
+  /* ---- Rally tracker: rallies, legs and states -------------------------------
+     The monitor's algorithm (see RALLY_TRACKER.md) run in the browser on the
+     mock GXAI day: is a rally running, how far, speeding up or fading?
+     - Points: each Top List update plus each alert with a price (New HoD,
+       Buying / Selling Pressure), in time order; at the same instant the
+       alert's price wins. Halted time never counts (active time τ).
+     - σ: volatility per 15 s from the updates (exponential, ~10 min); each
+       update's volume split into buy and sell (Bulk Volume Classification).
+     - Thresholds (log returns): leg max(0.8 %, 2 ticks, 2σ); a rise that took
+       d starts a rally at max(1.5 %, 3 ticks, leg, 2.5σ·√(d / 15 s)), d ≥ 1
+       min; a major drop is max(3 %, 2 legs, 2σ·√(10 min / 15 s)).
+     - Start: of the successive lows of the last 10 active minutes, the lowest
+       whose rise meets the threshold of its duration is the base; the start
+       moves up to the launch (the last point within ¼ of the threshold).
+     - Legs: a minor zigzag with the leg threshold (a Resume that reopens at
+       or above the last price opens one too); each against the previous by
+       mean speed: accelerating ≥ 1.25×, decelerating ≤ 0.8×, else steady.
+     - End: a drop from the high of max(leg, min(61.8 % of the gain, major))
+       (pullback), or 10 active minutes without a new high (stall).
+     - Speed: least-squares slope of 100·ln(price) over the last 2 active
+       minutes, in %/min; it accelerates or slows against the speed of 2
+       minutes before by max(25 %, 1.5σ). Pace: Theil-Sen from start to high.
+     - States in priority order (Halted; with a rally Pullback, Stalling,
+       Accelerating, Decelerating, Sustained buying; without one Warming up,
+       Rally ended, Rally building, No rally); the state in force holds while
+       a point of the last 20 s backs it. Seven fade signals; the pullback
+       zone, the fail price and the nearest Key levels. */
+
+  const RT_BASE = 15e3;              // σ is per 15 s (the live CSV's pace)
+  const RT_SIGMA = 0.005;            // σ before the first updates …
+  const RT_SIGMA_MS = 600e3;         // … and its memory
+  const RT_GAP = 120e3;              // longer without an update: its volume is not classified
+  const RT_LOOKBACK = 600e3;
+  const RT_START = { gain: 0.015, ticks: 3, z: 2.5, min: 60e3, horizon: 180e3, launch: 0.25 };
+  const RT_LEG = { min: 0.008, ticks: 2, z: 2, accel: 1.25, decel: 0.8, minutes: 0.25 };
+  const RT_END = { retrace: 0.618, z: 2, horizon: 600e3, stall: 600e3 };
+  const RT_SPEED = { window: 2, points: 3, span: 0.75, lag: 2, relative: 0.25, noise: 1.5 };  // minutes
+  const RT_PACE_POINTS = 600;        // Theil-Sen is O(n²): longer rallies are subsampled
+  const RT_STATE = { warmup: 4, launch: 60e3, stallWarn: 180e3, fade: 0.5, build: 0.5, endedShow: 180e3, confirm: 20e3 };
+  const RT_SIGNAL = { alerts: 300e3, noHigh: 120e3, participation: 0.8, z: 2.5, horizon: 1800e3 };
+  const RT_ZONE = [0.382, 0.5];      // pullback zone of the leg in progress (Fibonacci)
+  const RT_PACE_MIN_ACTIVE = 120e3;  // the day's volume pace needs this much trading before the rally
+  const RT_LABELS = {
+    warming_up: "Warming up", idle: "No rally", building: "Rally building", accelerating: "Accelerating", sustained: "Sustained buying",
+    decelerating: "Decelerating", stalling: "Stalling", pullback: "Pullback", ended: "Rally ended", halted: "Halted",
+  };
+  const RT_SIGNALS = {
+    speed: "Speed fading", legs: "Weaker legs", pullbacks: "Deeper pullbacks", highs: "No new high",
+    sellers: "Sellers active", volume: "Volume drying up", extended: "Extended from VWAP",
+  };
+
+  const rtTick = (p) => (p < 1 ? 0.0001 : 0.01);
+  const rtPct = (log) => (Math.exp(log) - 1) * 100;
+  // [leg, major] thresholds as log returns
+  const rtThresholds = (p, sigma) => {
+    const leg = Math.max(RT_LEG.min, (RT_LEG.ticks * rtTick(p)) / p, RT_LEG.z * sigma);
+    return [leg, Math.max(2 * RT_START.gain, 2 * leg, RT_END.z * sigma * Math.sqrt(RT_END.horizon / RT_BASE))];
+  };
+  // Rise (log) that starts a rally which took `d` ms to rise
+  const rtStartAt = (p, sigma, d) => Math.max(
+    RT_START.gain, (RT_START.ticks * rtTick(p)) / p, rtThresholds(p, sigma)[0],
+    RT_START.z * sigma * Math.sqrt(Math.max(d, RT_START.min) / RT_BASE),
+  );
+
+  // +3.4 · −1.2 · 0.0 (true minus sign)
+  const fmtSigned = (v, dp = 1) => {
+    const text = Math.abs(v).toFixed(dp);
+    return Number(text) === 0 ? text : `${v > 0 ? "+" : "−"}${text}`;
+  };
+  // 45s · 16m 03s · 1h 05m
+  const fmtDuration = (ms) => {
+    const s = Math.max(0, Math.round(ms / 1000));
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    return m < 60 ? `${m}m ${pad(s % 60)}s` : `${Math.floor(m / 60)}h ${pad(m % 60)}m`;
+  };
+
+  // Theil-Sen slope: the median of the pairwise slopes. A finished rally
+  // keeps its pace, so it is computed once.
+  const rtPaceCache = new Map();
+  const theilSen = (xs, ys, key) => {
+    if (rtPaceCache.has(key)) return rtPaceCache.get(key);
+    let x = xs;
+    let y = ys;
+    if (x.length > RT_PACE_POINTS) {
+      const pick = Array.from({ length: RT_PACE_POINTS }, (_, k) => Math.round((k * (x.length - 1)) / (RT_PACE_POINTS - 1)));
+      x = pick.map((k) => xs[k]);
+      y = pick.map((k) => ys[k]);
+    }
+    const slopes = [];
+    for (let i = 0; i < x.length; i++) for (let j = i + 1; j < x.length; j++) if (x[j] > x[i]) slopes.push((y[j] - y[i]) / (x[j] - x[i]));
+    const sorted = Float64Array.from(slopes).sort();
+    const n = sorted.length;
+    const pace = n ? (n % 2 ? sorted[(n - 1) / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2) : null;
+    if (rtPaceCache.size > 64) rtPaceCache.clear();
+    rtPaceCache.set(key, pace);
+    return pace;
+  };
+
+  // One line on the state, with the numbers behind it
+  const rtDescribe = (key, c) => {
+    if (key === "warming_up" || !c) return "Collecting live alerts and Top List data.";
+    if (key === "halted") {
+      return c.rally != null
+        ? `Trading is halted with the rally at ${fmtSigned(c.gain)}%. The tracker is frozen until the stock reopens.`
+        : "Trading is halted. The tracker resumes when the stock reopens.";
+    }
+    const speed = c.speed != null ? `${c.speed.toFixed(1)}%/min` : "—";
+    if (key === "idle" || key === "building") {
+      const trigger = `a rally starts at +${c.start.toFixed(1)}%`;
+      return key === "building"
+        ? `Buyers are pushing: ${fmtSigned(c.rise)}% off the ${fmtPrice(c.low)} low at ${speed}; ${trigger}.`
+        : `No rally in progress: price is ${fmtSigned(c.rise)}% off its ${fmtPrice(c.low)} low; ${trigger}.`;
+    }
+    if (key === "ended") {
+      const e = c.ended || {};
+      const why = e.reason === "stall" ? "no new high in 10 min" : `it gave back ${Math.round((e.giveback ?? 0) * 100)}% of its gain`;
+      return `The rally ended at ${fmtPrice(e.high ?? 0)} after ${fmtSigned(e.gain ?? 0)}% in ${fmtDuration(e.duration ?? 0)}: ${why}.`;
+    }
+    const gain = fmtSigned(c.gain);
+    const age = fmtDuration(c.age);
+    if (key === "pullback") {
+      return `Pulling back ${c.drawdown.toFixed(1)}% from the ${fmtPrice(c.high)} high, giving back ${Math.round(c.giveback * 100)}% of the rally; it fails below ${fmtPrice(c.fail)}.`;
+    }
+    if (key === "stalling") return `No new high in ${fmtDuration(c.sinceHigh)}: the rally is stalling at ${fmtPrice(c.high)} (${fmtSigned(c.highGain)}%).`;
+    if (key === "accelerating") {
+      return c.previous != null && c.speed != null && c.speed > c.previous
+        ? `Rally ${gain}% in ${age} is speeding up: ${speed}, up from ${Math.max(0, c.previous).toFixed(1)}%/min 2 min ago.`
+        : `New rally: ${gain}% in ${age} at ${speed}.`;
+    }
+    if (key === "decelerating") {
+      if (c.control != null && c.control < 0) return `Rally ${gain}% is losing steam: sellers lead Bull vs. Bear at ${fmtSigned(c.control, 0)}.`;
+      if (c.speed != null && c.peak) return `Rally ${gain}% is slowing: ${speed}, ${Math.round((Math.max(0, c.speed) / c.peak) * 100)}% of its ${c.peak.toFixed(1)}%/min peak.`;
+      return `Rally ${gain}% is slowing: ${speed}, down from ${(c.previous || 0).toFixed(1)}%/min 2 min ago.`;
+    }
+    const evidence = [];
+    if (c.buying) evidence.push(`${c.buying} buy alert${c.buying === 1 ? "" : "s"}`);
+    if (c.buyShare != null) evidence.push(`${Math.round(c.buyShare * 100)}% buy volume`);
+    return `Rally ${gain}% in ${age} holds its pace at ${speed}${evidence.length ? `; ${evidence.join(" and ")}` : ""}.`;
+  };
+
+  /* samples: Top List updates { t, p, v, w (VWAP), s: "pre" | "rm" | "post" };
+     marks: alerts with a price { t, kind: "hod" | "buying" | "selling", price, vol };
+     halts: { start, end (null while halted) }; control: Bull vs. Bear points
+     { t, c }; participation: Bull vs. Bear's; levels: Key levels'. */
+  const computeRallies = ({ samples, marks, halts, control, participation, levels }) => {
+    const spans = halts.map((h) => ({ start: h.start, end: h.end ?? Infinity })).sort((a, b) => a.start - b.start);
+    const inHalt = (t) => spans.some((h) => t >= h.start && t < h.end);
+    const haltedBetween = (from, to) => spans.reduce((sum, h) => sum + Math.max(0, Math.min(h.end, to) - Math.max(h.start, from)), 0);
+    // The CSV repeats the frozen price during a Halt
+    const rows = samples.filter((s) => s.p > 0 && !inHalt(s.t));
+    const priced = marks.filter((m) => m.price > 0 && !inHalt(m.t));
+    const empty = {
+      points: [], rallies: [], alerts: [], halts: spans.map((h) => ({ start: h.start, end: Number.isFinite(h.end) ? h.end : null })), signals: [], summary: null,
+      status: { key: "warming_up", label: RT_LABELS.warming_up, detail: "Waiting for live alerts and Top List data.", since: null, rally: null },
+    };
+    if (!rows.length && !priced.length) return empty;
+
+    // Volatility and buy / sell volume per update
+    let variance = RT_SIGMA ** 2 / RT_BASE; // per ms
+    const flow = rows.map((s, i) => {
+      const prev = rows[i - 1];
+      const since = prev ? s.t - prev.t - haltedBetween(prev.t, s.t) : Infinity;
+      const out = { buy: 0, sell: 0, traded: 0, active: 0, sigma: 0 };
+      if (since > 0 && since <= RT_GAP) {
+        const r = Math.log(s.p / prev.p);
+        const f = ndtr(r / Math.sqrt(variance * since));
+        const v = Math.max(0, s.v || 0);
+        Object.assign(out, { buy: f * v, sell: (1 - f) * v, traded: v, active: since });
+        variance = Math.max(((0.5 * rtTick(s.p)) / s.p) ** 2 / RT_BASE, variance + (r * r / since - variance) * (1 - Math.exp(-since / RT_SIGMA_MS)));
+      }
+      out.sigma = Math.sqrt(variance * RT_BASE);
+      return out;
+    });
+
+    // One point per instant: updates and priced alerts, both in time order,
+    // merged; at the same instant the update goes first, so the alert's price wins.
+    const P = [];
+    let lastRow = -1;
+    for (let i = 0, j = 0; i < rows.length || j < priced.length;) {
+      const isRow = j >= priced.length || (i < rows.length && rows[i].t <= priced[j].t);
+      const t = isRow ? rows[i].t : priced[j].t;
+      let p = P[P.length - 1];
+      if (!p || p.t !== t) P.push((p = { t, price: 0, traded: 0, buy: 0, sell: 0, active: 0 }));
+      if (isRow) {
+        const f = flow[i];
+        lastRow = i;
+        p.traded += f.traded;
+        p.buy += f.buy;
+        p.sell += f.sell;
+        p.active += f.active;
+        p.price = rows[i++].p;
+      } else p.price = priced[j++].price;
+      const row = rows[Math.max(0, lastRow)];
+      p.session = row?.s ?? "rm";
+      p.vwap = lastRow >= 0 ? row.w ?? null : null;
+      p.sigma = lastRow >= 0 ? flow[lastRow].sigma : RT_SIGMA;
+    }
+    const n = P.length;
+    const times = P.map((p) => p.t);
+    const prices = P.map((p) => p.price);
+    const sig = P.map((p) => p.sigma);
+    const tau = times.map((t) => t - spans.reduce((sum, h) => sum + Math.min(Math.max(t, h.start), h.end) - h.start, 0));
+    const minutes = tau.map((v) => (v - tau[0]) / 60e3);
+    const logP = prices.map((p) => 100 * Math.log(p));
+
+    // Speed: least squares over the trailing 2 active minutes (past points
+    // only), with cumulative sums; y is centered on the day's first price.
+    const speed = new Array(n).fill(null);
+    const cx = [0];
+    const cy = [0];
+    const cxx = [0];
+    const cxy = [0];
+    for (let i = 0; i < n; i++) {
+      const xv = minutes[i];
+      const yv = logP[i] - logP[0];
+      cx.push(cx[i] + xv);
+      cy.push(cy[i] + yv);
+      cxx.push(cxx[i] + xv * xv);
+      cxy.push(cxy[i] + xv * yv);
+    }
+    for (let i = 0, from = 0; i < n; i++) {
+      while (minutes[from] <= minutes[i] - RT_SPEED.window) from++;
+      const k = i + 1 - from;
+      if (k < RT_SPEED.points || minutes[i] - minutes[from] < RT_SPEED.span) continue;
+      const sx = cx[i + 1] - cx[from];
+      const sy = cy[i + 1] - cy[from];
+      const den = k * (cxx[i + 1] - cxx[from]) - sx * sx;
+      if (den > 1e-9) speed[i] = (k * (cxy[i + 1] - cxy[from]) - sx * sy) / den;
+    }
+    // Acceleration: against the speed 2 minutes before, beyond max(25 %, noise)
+    const previous = new Array(n).fill(null);
+    const accel = new Array(n).fill(null);
+    const noise = sig.map((s) => RT_SPEED.noise * 100 * s);
+    for (let i = 0, lag = -1; i < n; i++) {
+      while (lag + 1 < n && minutes[lag + 1] <= minutes[i] - RT_SPEED.lag) lag++;
+      if (lag >= 0 && minutes[i] - minutes[lag] <= RT_SPEED.lag + 1) previous[i] = speed[lag];
+      const s = speed[i];
+      const pv = previous[i];
+      if (s == null || pv == null) continue;
+      const base = Math.max(pv, 0);
+      if (s > 0 && s - base >= Math.max(noise[i], RT_SPEED.relative * base)) accel[i] = 1;
+      else if (pv > 0 && pv - s >= Math.max(noise[i], RT_SPEED.relative * Math.abs(pv))) accel[i] = -1;
+      else accel[i] = 0;
+    }
+
+    const controlAt = (t) => {
+      if (!control.length || control[0].t > t) return null;
+      return control[indexAt(control, t)].c;
+    };
+    const markTimes = marks.map((m) => m.t);
+    const lowerBound = (arr, v) => {
+      let lo = 0;
+      let hi = arr.length;
+      while (lo < hi) { const m = (lo + hi) >> 1; if (arr[m] < v) lo = m + 1; else hi = m; }
+      return lo;
+    };
+    const countMarks = (kind, from, to) => {
+      let count = 0;
+      for (let i = lowerBound(markTimes, from); i < marks.length && marks[i].t <= to; i++) if (marks[i].kind === kind) count++;
+      return count;
+    };
+
+    /* State machine: each point sees only what was known at its time */
+    const rallyOf = new Array(n).fill(-1);
+    const gains = new Array(n).fill(0);
+    const stateOf = new Array(n).fill("warming_up");
+    const controlOf = new Array(n).fill(null);
+    const rallies = [];
+    let active = null;
+    let lows = [];
+    let lastEnd = null;
+    let current = null;
+    let currentSince = null;
+    let currentRally = null;
+    let confirmedAt = 0;
+    let confirmed = {};
+    let c = {};
+
+    const pushLow = (i) => {
+      while (lows.length && prices[lows[lows.length - 1]] >= prices[i]) lows.pop();
+      lows.push(i);
+    };
+    // The rally's high and legs with point i
+    const advance = (r, i) => {
+      const price = prices[i];
+      const legT = limits[i][0];
+      const leg = r.legs[r.legs.length - 1];
+      const resumed = times[i] - times[i - 1] > tau[i] - tau[i - 1] + 1;
+      if (resumed && r.mode === "up" && price >= prices[i - 1]) {
+        // Reopens after a Halt without losing ground: a new leg from the last price before it
+        r.legs.push({ startI: i - 1, base: prices[i - 1], high: price, highI: i, pullback: null, halt: true });
+      } else if (r.mode === "up") {
+        if (price > leg.high) { leg.high = price; leg.highI = i; }
+        else if (Math.log(leg.high / price) >= legT) { r.mode = "pullback"; r.pbLow = price; r.pbLowI = i; }
+      } else {
+        if (price < r.pbLow) { r.pbLow = price; r.pbLowI = i; }
+        if (price > r.high || Math.log(price / r.pbLow) >= legT) {
+          leg.pullback = Math.log(leg.high / r.pbLow);
+          r.legs.push({ startI: r.pbLowI, base: r.pbLow, high: price, highI: i, pullback: null, halt: false });
+          r.mode = "up";
+        }
+      }
+      if (price > r.high) { r.high = price; r.highI = i; }
+      if (speed[i] != null) r.peak = Math.max(r.peak, speed[i]);
+    };
+
+    // Per point: [leg, major] and the start threshold's parts (only √d varies)
+    const limits = prices.map((p, i) => rtThresholds(p, sig[i]));
+    const startFloor = prices.map((p, i) => Math.max(RT_START.gain, (RT_START.ticks * rtTick(p)) / p, limits[i][0]));
+    const startZ = sig.map((v) => RT_START.z * v / Math.sqrt(RT_BASE));
+    const startAt = (i, d) => Math.max(startFloor[i], startZ[i] * Math.sqrt(Math.max(d, RT_START.min)));
+
+    for (let i = 0; i < n; i++) {
+      const price = prices[i];
+      const t = times[i];
+      const [legT, majorT] = limits[i];
+      let structural = false;
+
+      if (active) {
+        advance(active, i);
+        const gainLog = Math.log(active.high / active.base);
+        const endT = Math.max(legT, Math.min(RT_END.retrace * gainLog, majorT));
+        const reason = Math.log(active.high / price) >= endT ? "pullback" : tau[i] - tau[active.highI] >= RT_END.stall ? "stall" : null;
+        if (reason) {
+          active.endI = i;
+          active.reason = reason;
+          rallyOf[i] = active.id;
+          gains[i] = rtPct(Math.log(price / active.base));
+          lastEnd = {
+            tau: tau[i], reason, high: active.high, gain: rtPct(gainLog),
+            duration: tau[active.highI] - tau[active.startI], giveback: (active.high - price) / (active.high - active.base),
+          };
+          // The next rally's low is looked for after this high
+          lows = [];
+          for (let j = active.highI + 1; j <= i; j++) if (tau[j] >= tau[i] - RT_LOOKBACK) pushLow(j);
+          active = null;
+          structural = true;
+        }
+      }
+
+      let rise = 0;
+      let lowI = i;
+      let needed = 0;
+      if (!active) {
+        if (!structural) pushLow(i);
+        while (lows.length && tau[lows[0]] < tau[i] - RT_LOOKBACK) lows.shift();
+        if (!lows.length) pushLow(i);
+        lowI = lows[0];
+        rise = Math.log(price / prices[lowI]);
+        if (rallyOf[i] < 0) gains[i] = rtPct(rise);
+        needed = startAt(i, tau[i] - tau[lowI]);
+        // Each successive low is the lowest since its time: the fastest rise
+        // starts at one of them. The lowest that meets its threshold wins.
+        // Lows go up along the list: once the rise misses the floor, all do.
+        let trigger = null;
+        for (const k of lows) {
+          const up = Math.log(price / prices[k]);
+          if (k === i || up < startFloor[i]) break;
+          const th = startAt(i, tau[i] - tau[k]);
+          if (up >= th) { trigger = { k, th }; break; }
+        }
+        if (trigger) {
+          const low = prices[trigger.k];
+          const band = low * Math.exp(RT_START.launch * trigger.th);
+          let launch = i - 1;
+          while (launch > trigger.k && prices[launch] > band) launch--;
+          const id = rallies.length;
+          active = {
+            id, startI: launch, triggerI: i, base: low, high: prices[launch], highI: launch, endI: null, reason: null,
+            mode: "up", pbLow: null, pbLowI: null, peak: 0,
+            legs: [{ startI: launch, base: low, high: prices[launch], highI: launch, pullback: null, halt: false }],
+          };
+          const before = rallies[rallies.length - 1];
+          // The launch falls in the previous rally's pullback: that one is cut there
+          if (before && before.endI != null && before.endI >= launch) before.endI = launch;
+          rallies.push(active);
+          for (let j = launch; j <= i; j++) {
+            if (j > launch) advance(active, j);
+            rallyOf[j] = id;
+            gains[j] = rtPct(Math.log(prices[j] / low));
+          }
+          lows = [];
+          structural = true;
+        }
+      }
+      if (active) {
+        rallyOf[i] = active.id;
+        gains[i] = rtPct(Math.log(price / active.base));
+      }
+
+      // Raw state with what is known at this point
+      const controlValue = (controlOf[i] = controlAt(t));
+      c = { speed: speed[i], previous: previous[i], control: controlValue };
+      let raw;
+      if (active) {
+        const gainLog = Math.log(active.high / active.base);
+        const drawdown = Math.log(active.high / price);
+        const sinceHigh = tau[i] - tau[active.highI];
+        const endT = Math.max(legT, Math.min(RT_END.retrace * gainLog, majorT));
+        const span = active.high - active.base;
+        Object.assign(c, {
+          rally: active.id, gain: gains[i], highGain: rtPct(gainLog), high: active.high, age: tau[i] - tau[active.startI], sinceHigh,
+          drawdown: (1 - price / active.high) * 100, giveback: span > 0 ? (active.high - price) / span : 0,
+          fail: active.high * Math.exp(-endT), peak: active.peak,
+          buying: countMarks("buying", Math.max(times[active.startI], t - RT_SIGNAL.alerts), t),
+        });
+        const s = speed[i];
+        const launching = tau[i] - tau[active.triggerI] < RT_STATE.launch;
+        if (drawdown >= legT) raw = "pullback";
+        else if (sinceHigh >= RT_STATE.stallWarn) raw = "stalling";
+        else if (accel[i] === 1 || (launching && (s == null || s > 0))) raw = "accelerating";
+        else if (accel[i] === -1 || (s != null && active.peak >= noise[i] && s <= RT_STATE.fade * active.peak) || (controlValue != null && controlValue < 0)) raw = "decelerating";
+        else raw = "sustained";
+      } else {
+        Object.assign(c, { low: prices[lowI], rise: rtPct(rise), start: rtPct(needed), ended: lastEnd });
+        if (i + 1 < RT_STATE.warmup && !lastEnd) raw = "warming_up";
+        else if (lastEnd && tau[i] - lastEnd.tau < RT_STATE.endedShow) raw = "ended";
+        else if (rise >= RT_STATE.build * needed && (speed[i] || 0) > 0) raw = "building";
+        else raw = "idle";
+      }
+
+      // Debounce: the state in force holds while a point of the last 20 s
+      // backs it; a rally's start or end is taken at once.
+      const rallyNow = active ? active.id : null;
+      if (raw === current && rallyNow === currentRally) { confirmedAt = t; confirmed = c; }
+      else if (current === null || structural || current === "warming_up" || rallyNow !== currentRally || t - confirmedAt >= RT_STATE.confirm) {
+        current = raw;
+        currentSince = t;
+        currentRally = rallyNow;
+        confirmedAt = t;
+        confirmed = c;
+      }
+      stateOf[i] = current;
+    }
+
+    /* Result */
+    const lastI = n - 1;
+    const lastPrice = prices[lastI];
+    const cumTraded = [0];
+    const cumActive = [0];
+    const cumBuy = [0];
+    const cumSell = [0];
+    P.forEach((p, i) => {
+      cumTraded.push(cumTraded[i] + p.traded);
+      cumActive.push(cumActive[i] + p.active);
+      cumBuy.push(cumBuy[i] + p.buy);
+      cumSell.push(cumSell[i] + p.sell);
+    });
+
+    const payload = (r) => {
+      const { startI, highI, base, high } = r;
+      const endI = r.endI ?? lastI;
+      let prevSpeed = null;
+      let top = 0;
+      const legs = r.legs.map((leg, k) => {
+        const mins = Math.max(RT_LEG.minutes, (tau[leg.highI] - tau[leg.startI]) / 60e3);
+        const legSpeed = (100 * Math.log(leg.high / leg.base)) / mins;
+        const cls = k === 0 ? "launch" : prevSpeed == null || prevSpeed <= 0 ? "steady"
+          : legSpeed >= RT_LEG.accel * prevSpeed ? "accelerating" : legSpeed <= RT_LEG.decel * prevSpeed ? "decelerating" : "steady";
+        const live = k === r.legs.length - 1 && r.mode === "pullback" && r.endI == null;
+        const pullback = live ? Math.log(leg.high / r.pbLow) : leg.pullback;
+        const out = {
+          start: times[leg.startI], highTime: times[leg.highI], base: leg.base, high: leg.high,
+          gain: rtPct(Math.log(leg.high / leg.base)), speed: legSpeed, cls, higherHigh: leg.high > top,
+          pullback: pullback == null ? null : (1 - Math.exp(-pullback)) * 100, pullbackLive: live, afterHalt: leg.halt,
+        };
+        prevSpeed = legSpeed;
+        top = Math.max(top, leg.high);
+        return out;
+      });
+      const volume = cumTraded[endI + 1] - cumTraded[startI + 1];
+      const buy = cumBuy[endI + 1] - cumBuy[startI + 1];
+      const sell = cumSell[endI + 1] - cumSell[startI + 1];
+      const rallyActive = cumActive[endI + 1] - cumActive[startI + 1];
+      let beforeVolume = cumTraded[startI + 1];
+      let beforeActive = cumActive[startI + 1];
+      if (beforeActive < RT_PACE_MIN_ACTIVE) { beforeVolume = cumTraded[n]; beforeActive = cumActive[n]; }
+      const startT = times[startI];
+      const endT = times[endI];
+      return {
+        id: r.id, start: startT, trigger: times[r.triggerI], highTime: times[highI], end: r.endI == null ? null : endT,
+        active: r.endI == null, endReason: r.reason, base, high, last: prices[endI],
+        gain: (high / base - 1) * 100, gainAbs: high - base, lastGain: (prices[endI] / base - 1) * 100,
+        giveback: high > base ? (high - prices[endI]) / (high - base) : 0,
+        durationMs: tau[highI] - tau[startI], ageMs: tau[endI] - tau[startI], peakSpeed: r.peak, legs,
+        alerts: Object.fromEntries(["hod", "buying", "selling"].map((kind) => [kind, countMarks(kind, startT, endT)])),
+        halts: spans.filter((h) => h.start <= endT && h.end >= startT).length,
+        volume, buyShare: buy + sell > 0 ? buy / (buy + sell) : null,
+        relativeVolume: rallyActive > 0 && beforeActive > 0 && beforeVolume > 0 ? (volume / rallyActive) / (beforeVolume / beforeActive) : null,
+        firstIndex: startI, lastIndex: endI,
+        // Pace (Theil-Sen, %/min) only when read: O(n²), and the active rally's changes with each high
+        get pace() {
+          return highI - startI >= 2 ? theilSen(minutes.slice(startI, highI + 1), logP.slice(startI, highI + 1), `${times[startI]}|${times[highI]}|${highI - startI}`) : null;
+        },
+      };
+    };
+    const out = rallies.map(payload);
+
+    // Points: the rally, its leg and the segment's class (the rise to the leg's high, else pullback)
+    const points = P.map((p, i) => ({
+      t: p.t, price: p.price, rally: rallyOf[i], gain: gains[i], speed: speed[i], accel: accel[i],
+      state: stateOf[i], session: p.session, control: controlOf[i], leg: -1, segment: "",
+    }));
+    out.forEach((r) => {
+      let k = 0;
+      for (let i = r.firstIndex; i <= r.lastIndex; i++) {
+        if (points[i].rally !== r.id) continue;
+        while (k < r.legs.length - 1 && points[i].t >= r.legs[k + 1].start) k++;
+        points[i].leg = k;
+        points[i].segment = points[i].t < r.legs[k].highTime ? r.legs[k].cls : "pullback";
+      }
+    });
+    const rallyAt = (t) => out.find((r) => t >= r.start && t <= (r.end ?? times[lastI]))?.id ?? -1;
+
+    let key = current;
+    let since = currentSince;
+    const lastHalt = spans[spans.length - 1];
+    if (lastHalt && lastHalt.end === Infinity) { key = "halted"; since = lastHalt.start; }
+
+    // Fade signals of the rally in progress (or of the one that just ended)
+    const activeOut = active ? out[active.id] : null;
+    const signalRally = activeOut ?? (current === "ended" && out.length ? out[out.length - 1] : null);
+    const speedNow = speed[lastI];
+    const controlNow = controlAt(times[lastI]);
+    const vwapNow = P[lastI].vwap;
+    const signals = [];
+    if (signalRally) {
+      const { legs, peakSpeed: peak } = signalRally;
+      const state = rallies[signalRally.id];
+      const add = (key2, on, detail) => signals.push({ key: key2, label: RT_SIGNALS[key2], active: Boolean(on), detail });
+      add("speed", speedNow != null && peak >= noise[lastI] && speedNow <= RT_STATE.fade * peak,
+        speedNow == null || peak <= 0 ? "Not enough data"
+          : speedNow <= 0 ? `Price falling at ${Math.abs(speedNow).toFixed(1)}%/min; peak was ${peak.toFixed(1)}%/min`
+            : `${speedNow.toFixed(1)}%/min, ${Math.round((speedNow / peak) * 100)}% of the ${peak.toFixed(1)}%/min peak`);
+      const [prevLeg, lastLeg] = legs.slice(-2);
+      add("legs", legs.length >= 2 && (lastLeg.cls === "decelerating" || !lastLeg.higherHigh),
+        legs.length >= 2 ? `Leg ${legs.length} at ${lastLeg.speed.toFixed(1)}%/min vs ${prevLeg.speed.toFixed(1)}%/min${lastLeg.higherHigh ? "" : ", lower high"}` : "Single leg so far");
+      const depths = legs.map((l) => l.pullback).filter((v) => v != null);
+      add("pullbacks", depths.length >= 2 && depths[depths.length - 1] > depths[depths.length - 2],
+        depths.length >= 2 ? `−${depths[depths.length - 1].toFixed(1)}% vs −${depths[depths.length - 2].toFixed(1)}% before`
+          : depths.length ? `One pullback of −${depths[0].toFixed(1)}%` : "No pullbacks yet");
+      const endI = state.endI ?? lastI;
+      const sinceHigh = tau[endI] - tau[state.highI];
+      add("highs", sinceHigh >= RT_SIGNAL.noHigh, `Last high ${fmtPrice(state.high)} ${fmtDuration(sinceHigh)} ago`);
+      const sellAlerts = countMarks("selling", Math.max(signalRally.start, times[endI] - RT_SIGNAL.alerts), times[endI]);
+      const parts = [];
+      if (sellAlerts) parts.push(`${sellAlerts} sell alert${sellAlerts === 1 ? "" : "s"} in 5 min`);
+      if (controlNow != null) parts.push(`Bull vs. Bear ${fmtSigned(controlNow, 0)}`);
+      add("sellers", sellAlerts > 0 || (controlNow != null && controlNow < 0), parts.join(", ") || "No sell alerts");
+      const part = Number.isFinite(participation) ? participation : null;
+      add("volume", part != null && part < RT_SIGNAL.participation, part != null ? `Recent volume ${part.toFixed(1)}x the session pace` : "No volume data");
+      let extended = false;
+      let extension = "No VWAP data";
+      if (vwapNow) {
+        extended = Math.log(lastPrice / vwapNow) >= RT_SIGNAL.z * sig[lastI] * Math.sqrt(RT_SIGNAL.horizon / RT_BASE);
+        extension = `${fmtSigned((lastPrice / vwapNow - 1) * 100)}% from VWAP ${fmtPrice(vwapNow)}`;
+      }
+      add("extended", extended, extension);
+    }
+
+    const near = levels.filter((l) => l.type === "support" || l.type === "resistance");
+    const above = near.filter((l) => l.price > lastPrice).map((l) => l.price);
+    const below = near.filter((l) => l.price < lastPrice).map((l) => l.price);
+    const summary = {
+      updated: times[lastI], price: lastPrice, rally: active ? active.id : null, lastRally: out.length ? out[out.length - 1].id : null,
+      rallies: out.length, speed: speedNow, previousSpeed: previous[lastI], accel: accel[lastI], control: controlNow,
+      participation: Number.isFinite(participation) ? participation : null, vwap: vwapNow,
+      resistance: above.length ? Math.min(...above) : null, support: below.length ? Math.max(...below) : null,
+      // c is the last point's: the low in force when there is no rally
+      startThreshold: c.start ?? rtPct(rtStartAt(lastPrice, sig[lastI], RT_START.horizon)),
+      legThreshold: rtPct(rtThresholds(lastPrice, sig[lastI])[0]),
+      low: active ? null : c.low, rise: active ? null : gains[lastI],
+    };
+    if (active) {
+      const leg = active.legs[active.legs.length - 1];
+      const [legT, majorT] = rtThresholds(lastPrice, sig[lastI]);
+      const endT = Math.max(legT, Math.min(RT_END.retrace * Math.log(active.high / active.base), majorT));
+      const legSpan = leg.high - leg.base;
+      const from = Math.max(times[active.startI], times[lastI] - RT_SIGNAL.alerts);
+      Object.assign(summary, {
+        gain: gains[lastI], failPrice: active.high * Math.exp(-endT),
+        pullbackZone: [leg.high - RT_ZONE[1] * legSpan, leg.high - RT_ZONE[0] * legSpan],
+        sinceHighMs: tau[lastI] - tau[active.highI],
+        buyingAlerts: countMarks("buying", from, times[lastI]), sellingAlerts: countMarks("selling", from, times[lastI]),
+      });
+    }
+
+    // The detail uses the last point that backed the state, so it never contradicts the label
+    const detailCtx = { ...confirmed };
+    if (key === "halted" && active) Object.assign(detailCtx, { rally: active.id, gain: gains[lastI] });
+    if (key === "sustained" && activeOut) detailCtx.buyShare = activeOut.buyShare;
+    return {
+      points,
+      rallies: out,
+      alerts: marks.map((m) => ({ ...m, rally: rallyAt(m.t) })),
+      halts: empty.halts,
+      status: { key, label: RT_LABELS[key], detail: rtDescribe(key, detailCtx), since, rally: active ? active.id : null },
+      signals,
+      summary,
+    };
+  };
+
+  /* ---- Rally tracker chart --------------------------------------------------
+     TradingView-style canvas, two panes on one time axis:
+     - blocks: each rally a step up from its base (0 %), as wide as it lasted
+       and as tall as its gain in %, so tickers of any price compare; colored
+       by leg (accelerating / launch, steady, decelerating, pullback between
+       legs); what was given back from the high shaded red. Over its high,
+       the gain and, above it, the move and the duration (+49¢ · 16m 03s);
+     - outside a rally, a thin neutral line: the rise off the 10-minute low
+       (brighter while a rally builds) and the dashed Rally trigger it needs;
+     - alerts on the curve: New HoD white triangle, Buying / Selling Pressure
+       dot; dimmer outside a rally;
+     - Levels of the active rally: pullback zone (neutral band), Fails < X
+       (red, dotted) and the next Key levels resistance (red; only when within
+       1.5× the visible top, so the blocks are never squashed);
+     - speed pane: one neutral line, red area under zero (the price falls),
+       the dotted Peak of the active rally; the gap between is the fade;
+     - Halts shaded (HALT in the speed pane; an open Halt runs the axis to
+       now), pre-market / after hours shaded, the state ribbon under both.
+     Nothing overlaps: markers go first, then the rally labels (the active
+     one first; over the high, else beside it) clear of markers, the curve,
+     level lines and the live point, then the level values (right edge,
+     moved left past whatever is there); whatever finds no room is left out.
+     Axis labels give way to the live tag and the chips; time labels keep
+     their width apart. Crosshair (magnet) and keyboard as in Bull vs. Bear.
+     The head: state, since, detail, the rally meter (RALLY / LAST / RISE),
+     fade signals in one line (+N) and the metrics. Window and Levels are
+     saved in localStorage; the data is computed only while in view. */
+
+  const RT_KEY = "scanner:rally-tracker:v1";
+  const RT_WINDOWS = [60e3, 300e3, 900e3, 1800e3, 3600e3, 0];
+  const RT_MIN_SPAN = 5 * 60e3;      // Day right after the first data still spans 5 minutes
+  const RT_STALE = 120e3;            // no update for this long (and no Halt): off the Top List
+  const RT_TONE = {
+    accelerating: "bull", sustained: "bull", building: "neutral", decelerating: "warn", stalling: "warn",
+    pullback: "bear", ended: "neutral", idle: "neutral", warming_up: "neutral", halted: "neutral",
+  };
+  // Ribbon: color and strength per state, stronger the harder the rally pushes
+  const RT_RIBBON = {
+    accelerating: ["accel", 0.95], sustained: ["steady", 0.7], building: ["steady", 0.28], decelerating: ["decel", 0.8], stalling: ["decel", 0.45],
+    pullback: ["giveback", 0.6], ended: ["neutral", 0.3], idle: ["neutral", 0.12], warming_up: ["neutral", 0.08], halted: ["neutral", 0.45],
+  };
+  const RT_LEG_NAMES = { launch: "launch", accelerating: "accelerating", steady: "steady", decelerating: "decelerating", pullback: "pullback" };
+  const RT_END_REASONS = { pullback: "gave back too much of its gain", stall: "no new high in 10 min" };
+  const RT_ALERT_TEXT = { hod: ["▲", "New HoD", "hod"], buying: ["●", "Buying Pressure", "bull"], selling: ["●", "Selling Pressure", "bear"] };
+  const RT_STAT_TITLES = {
+    gain: "Gain from the rally base (its low) to the current price",
+    duration: "Active time from the rally start to its high; halts do not count",
+    speed: "Slope of the price over the last 2 minutes, in % per minute; the arrow compares it with 2 minutes earlier",
+    fromHigh: "Distance from the rally high and share of the rally gain given back",
+    buyFlow: "Share of the rally volume on upticks (Bulk Volume Classification) and Buying / Selling Pressure alerts in the last 5 minutes",
+    volume: "Rally volume pace against the day's pace before the rally",
+    resistance: "Nearest Key levels resistance above the price",
+    support: "Nearest Key levels support below the price",
+    fail: "The tracker ends the rally if the price falls below this level",
+    rallies: "Rallies detected today",
+    lastRally: "Gain of the most recent rally and the time of its high",
+    rise: "Rise from the lowest price of the last 10 minutes and the rise that starts a rally",
+    control: "Bull vs. Bear control score (−100 sellers to +100 buyers)",
+  };
+  // +37.1% · −2.2%
+  const fmtGain = (v, dp = 1) => (Number.isFinite(v) ? `${fmtSigned(v, dp)}%` : "—");
+  // In cents below $1 (+32¢), in dollars from there (+$1.25)
+  const fmtMove = (v) => {
+    const sign = v > 0 ? "+" : v < 0 ? "−" : "";
+    const abs = Math.abs(v);
+    if (abs >= 1) return `${sign}$${abs.toFixed(2)}`;
+    const cents = abs * 100;
+    return `${sign}${cents.toFixed(cents < 1 ? 2 : cents < 10 ? 1 : 0)}¢`;
+  };
+  const fmtSpeed = (v) => (v == null ? "—" : `${v < 0 ? "−" : ""}${Math.abs(v).toFixed(1)}%/min`);
+  const accelArrow = (a) => (a === 1 ? "▲ " : a === -1 ? "▼ " : "");
+
+  const rtPrefs = { window: 3600e3, levels: true };
+  const loadRtPrefs = () => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(RT_KEY) || "{}");
+      rtPrefs.window = RT_WINDOWS.includes(saved.window) ? saved.window : 3600e3;
+      rtPrefs.levels = typeof saved.levels === "boolean" ? saved.levels : true;
+    } catch { /* ignore */ }
+  };
+  const saveRtPrefs = () => {
+    try { localStorage.setItem(RT_KEY, JSON.stringify(rtPrefs)); } catch { /* ignore */ }
+  };
+  loadRtPrefs();
+
+  const mountRallyTracker = (view, root) => {
+    const box = view.querySelector(".chart-canvas");
+    const canvas = box.querySelector("canvas");
+    const tip = box.querySelector(".chart-tip");
+    const note = box.querySelector(".chart-message");
+    const ctx = canvas.getContext("2d");
+    const symbol = root.querySelector(".chart-symbol__input");
+    const pill = view.querySelector(".chart-state");
+    const since = view.querySelector(".chart-since");
+    const detail = view.querySelector(".chart-head__detail");
+    const meter = view.querySelector(".chart-meter");
+    const meterLabel = meter.querySelector(".chart-meter__label");
+    const fill = meter.querySelector(".chart-meter__fill");
+    const thumb = meter.querySelector(".chart-meter__thumb");
+    const score = meter.querySelector(".chart-meter__score");
+    const signalsEl = view.querySelector(".chart-signals");
+    const stats = view.querySelector(".chart-stats");
+    const levelsBtn = view.querySelector("[data-rt-levels]");
+    const windowBtns = [...view.querySelectorAll("[data-rt-window]")];
+    const intro = detail.textContent;
+
+    // Tokens → canvas colors
+    const rootCss = getComputedStyle(document.documentElement);
+    const color = (name, fallback) => chartColor(ctx, rootCss, name, fallback);
+    const C = {
+      bg: color("--chart-bg", "#08090b"),
+      grid: color("--chart-grid", "#14181e"),
+      bull: color("--chart-bull", "#c8ff38"),
+      bear: color("--chart-bear", "#ff4f6b"),
+      warn: color("--chart-warn", "#ffb84d"),
+      neutral: color("--chart-neutral", "#5d6673"),
+      accel: color("--chart-accel", "#c8ff38"),
+      steady: color("--chart-steady", "#8fc21a"),
+      decel: color("--chart-decel", "#ffb84d"),
+      pullback: color("--chart-pullback", "#5d6673"),
+      giveback: color("--chart-giveback", "#ff4f6b"),
+      fail: color("--chart-fail", "#ff4f6b"),
+      zone: color("--chart-zone", "#b4bbc6"),
+      rise: color("--chart-rise", "#5d6673"),
+      building: color("--chart-building", "#b4bbc6"),
+      speed: color("--chart-speed", "#b4bbc6"),
+      resistance: color("--chart-resistance", "#ff4f6b"),
+      hod: color("--chart-hod", "#f2f4f7"),
+      axis: color("--chart-axis-text", "#7b8492"),
+      cross: color("--chart-crosshair", "#7b8492"),
+      chip: color("--chart-chip", "#1f242c"),
+      chipText: color("--text", "#f2f4f7"),
+      ink: color("--chart-ink", "#0a0f00"),
+      mark: color("--chart-watermark", "#12151a"),
+      session: color("--chart-session", "#12151a"),
+      line: color("--line", "#23282f"),
+    };
+    const SANS = rootCss.getPropertyValue("--font-sans").trim() || "sans-serif";
+    const MONO = rootCss.getPropertyValue("--font-mono").trim() || "monospace";
+    const alpha = chartAlpha;
+    const TONE = { bull: C.bull, bear: C.bear, warn: C.warn, neutral: C.neutral };
+    const segColor = (s) => ({ launch: C.accel, accelerating: C.accel, decelerating: C.decel, pullback: C.pullback }[s] ?? C.steady);
+    const ribbonColor = (key) => {
+      const [hue, a] = RT_RIBBON[key] ?? ["neutral", 0.1];
+      return alpha(C[hue], a);
+    };
+
+    // Strengths and sizes, read from the box: a narrow stage may override them.
+    let A = {};
+    let G = {};
+    const readSizes = () => {
+      const css = getComputedStyle(box);
+      const num = (name, fallback) => {
+        const v = parseFloat(css.getPropertyValue(name));
+        return Number.isFinite(v) ? v : fallback;
+      };
+      A = {
+        block: num("--chart-block-a", 0.3), steady: num("--chart-block-steady-a", 0.24), pull: num("--chart-block-pullback-a", 0.14),
+        giveback: num("--chart-giveback-a", 0.12), zone: num("--chart-pullzone-a", 0.08), speed: num("--chart-speed-a", 0.12),
+        speedDown: num("--chart-speed-down-a", 0.22), off: num("--chart-off-rally-a", 0.5), session: num("--chart-session-a", 0.6), halt: num("--chart-halt-a", 0.12),
+      };
+      G = {
+        axisW: num("--chart-axis-w", 52), axisH: num("--chart-axis-h", 20), pad: num("--chart-pad", 10), live: num("--chart-live-pad", 28),
+        tag: num("--chart-tag-h", 18), band: num("--chart-band-h", 6), bandGap: num("--chart-band-gap", 6), paneGap: num("--chart-pane-sep", 10),
+        room: num("--chart-rally-room", 30), speedShare: num("--chart-speed-share", 0.27), speedMax: num("--chart-speed-max", 96),
+      };
+    };
+
+    let feed = null;    // the Bull vs. Bear day: points, alerts, halts, summary
+    let data = null;    // computeRallies' result
+    let dirty = false;  // new feed data not computed yet (only computed while in view)
+    let clock = { t: 0, at: 0 };
+    let W = 0;
+    let H = 0;
+    let frame = 0;
+    let geo = null;
+    let hover = null;   // index into data.points
+    let pointerY = null;
+
+    const now = () => clock.t + (Date.now() - clock.at);
+    const inView = () => box.offsetWidth > 0;
+    const ticker = () => symbol.value.trim().toUpperCase();
+    const message = () => {
+      const sym = ticker();
+      if (!sym) return "Type a ticker to follow its rallies.";
+      if (sym !== BB_SYM) return `Mock data covers ${BB_SYM} only for now: type ${BB_SYM} to see the chart.`;
+      if (!data || !data.points.length) return `Waiting for ${sym} alerts and Top List data…`;
+      return "";
+    };
+
+    /* Data: the feed's Top List updates, Pressure alerts, New HoD (a regular
+       session high above the day's, every 3 minutes at most, as in Key
+       levels), Halts, Bull vs. Bear control and the Key levels. */
+    const refresh = () => {
+      dirty = false;
+      if (!feed || !feed.points.length) { data = null; return; }
+      const samples = feed.points.filter((p) => p.vol != null).map((p) => ({ t: p.t, p: p.price, v: p.vol, w: p.vwap, s: p.session === "pre" ? "pre" : p.session === "post" ? "post" : "rm" }));
+      const marks = feed.alerts.map((a) => ({ t: a.t, kind: a.side > 0 ? "buying" : "selling", price: a.price, vol: a.vol }));
+      let high = -Infinity;
+      let lastHod = -Infinity;
+      samples.forEach((s) => {
+        if (s.s === "rm" && s.p > high && Number.isFinite(high) && s.t - lastHod >= KL_HOD_EVERY) {
+          marks.push({ t: s.t, kind: "hod", price: s.p });
+          lastHod = s.t;
+        }
+        high = Math.max(high, s.p);
+      });
+      marks.sort((a, b) => a.t - b.t);
+      const open = samples.find((s) => s.s === "rm");
+      const close = samples[samples.length - 1]?.s === "post" ? samples.findLast((s) => s.s === "rm")?.p : undefined;
+      const { levels } = computeKeyLevels(samples, { prevClose: BB_PREV_CLOSE, open: open?.p, close }, feed.alerts);
+      data = computeRallies({ samples, marks, halts: feed.halts, control: feed.points, participation: feed.summary?.participation, levels });
+      if (!data.points.length) data = null;
+    };
+
+    const activeRally = () => (data?.summary && data.summary.rally != null ? data.rallies[data.summary.rally] : null);
+    // The rally of the meter and the metrics: the active one or, in Rally ended, the last
+    const shownRally = () => {
+      const s = data?.summary;
+      if (!s) return null;
+      if (s.rally != null) return data.rallies[s.rally];
+      return data.status.key === "ended" && s.lastRally != null ? data.rallies[s.lastRally] : null;
+    };
+
+    /* Head: state, since, detail, meter, fade signals, metrics */
+    const renderHead = () => {
+      const off = message();
+      const d = off ? null : data;
+      const s = d?.status;
+      const sum = d?.summary;
+      pill.dataset.tone = s ? RT_TONE[s.key] : "neutral";
+      pill.textContent = s ? s.label : "Waiting for data";
+      const parts = s?.since != null ? [`since ${ET_HMS.format(s.since)} ET`] : [];
+      if (sum && s.key !== "halted" && now() - sum.updated > RT_STALE) parts.push(`no new data since ${ET_HM.format(sum.updated)} ET`);
+      since.textContent = parts.length ? parts.join(" · ") : "since --:--:-- ET";
+      detail.textContent = s ? s.detail : intro;
+      detail.title = s ? s.detail : "";
+
+      // Levels exist only with an active rally; the saved choice stays.
+      const rally = shownRally();
+      levelsBtn.disabled = !activeRally();
+      levelsBtn.title = levelsBtn.disabled ? "Levels show while a rally is active" : "Show or hide the pullback zone, fail level and next resistance of the active rally";
+
+      // Meter. RALLY / LAST: the price from the base (left) to the high
+      // (right). RISE: off the 10-minute low up to the trigger (right edge).
+      let mode = "rise";
+      let pos = 0;
+      let text = "—";
+      let label = "Rise";
+      let lead = "";
+      let valueText = "No data";
+      if (sum && rally) {
+        const current = rally.active ? sum.price : rally.last;
+        const range = rally.high - rally.base;
+        pos = range > 0 ? (current - rally.base) / range : 1;
+        text = fmtGain((current / rally.base - 1) * 100);
+        mode = "rally";
+        label = rally.active ? "Rally" : "Last";
+        lead = rally.active ? (RT_TONE[s.key] === "bull" ? "bull" : "warn") : "";
+        valueText = `${text} from the ${fmtPrice(rally.base)} base, ${Math.round((1 - clampTo(pos, 0, 1)) * 100)}% of the gain given back from the ${fmtPrice(rally.high)} high`;
+      } else if (sum) {
+        const rise = sum.rise ?? 0;
+        pos = sum.startThreshold > 0 ? rise / sum.startThreshold : 0;
+        text = fmtGain(rise);
+        valueText = `${text} off the low; a rally starts at ${fmtGain(sum.startThreshold)}`;
+      }
+      pos = clampTo(pos, 0, 1);
+      meter.dataset.mode = mode;
+      meter.dataset.lead = lead;
+      meterLabel.textContent = label;
+      fill.style.width = `${pos * 100}%`;
+      thumb.style.left = `${pos * 100}%`;
+      score.textContent = text;
+      meter.title = valueText;
+      meter.setAttribute("aria-valuenow", String(Math.round(pos * 100)));
+      meter.setAttribute("aria-valuetext", valueText);
+
+      // Fade signals: the active ones as chips; the title lists all seven
+      const signals = d?.signals ?? [];
+      const on = signals.filter((x) => x.active);
+      const count = `<span class="chart-signals__count">Fade signals ${signals.length ? `${on.length}/${signals.length}` : "—"}</span>`;
+      signalsEl.innerHTML = count + (!signals.length ? '<span class="chart-signal is-empty">No rally to watch</span>'
+        : on.length ? on.map((x) => `<span class="chart-signal" title="${x.detail}">${x.label}</span>`).join("")
+          : '<span class="chart-signal is-empty">No signs of slowing</span>');
+      signalsEl.title = signals.map((x) => `${x.active ? "●" : "○"} ${x.label}: ${x.detail}`).join("\n");
+      fitSignals();
+
+      // Metrics
+      const sub = (v) => `<small>${v}</small>`;
+      const sign = (v) => (v > 0 ? "up" : v < 0 ? "down" : "");
+      const items = [];
+      if (sum && rally) {
+        const current = rally.active ? sum.price : rally.last;
+        const gain = (current / rally.base - 1) * 100;
+        const drawdown = (1 - current / rally.high) * 100;
+        const back = rally.high > rally.base ? (rally.high - current) / (rally.high - rally.base) : 0;
+        items.push(["Gain", `${fmtGain(gain)}${sub(fmtMove(current - rally.base))}`, sign(gain), RT_STAT_TITLES.gain]);
+        items.push(["Duration", fmtDuration(rally.durationMs), "", RT_STAT_TITLES.duration]);
+        if (rally.active) items.push(["Speed", `${accelArrow(sum.accel)}${fmtSpeed(sum.speed)}${sub(`peak ${rally.peakSpeed.toFixed(1)}`)}`, sum.accel === 1 ? "up" : sum.accel === -1 || sum.speed < 0 ? "down" : "", RT_STAT_TITLES.speed]);
+        // Under 0.05 % it rounds to 0.0 %: at the high
+        const below = drawdown >= 0.05;
+        items.push(["From high", below ? `${fmtGain(-drawdown)}${sub(`${Math.round(back * 100)}% back`)}` : "At high", below ? "down" : "up", RT_STAT_TITLES.fromHigh]);
+        items.push(["Buy flow", `${rally.buyShare == null ? "—" : `${Math.round(rally.buyShare * 100)}%`}${rally.active ? sub(`${sum.buyingAlerts}↑ ${sum.sellingAlerts}↓`) : ""}`,
+          rally.buyShare >= 0.55 ? "up" : rally.buyShare != null && rally.buyShare <= 0.45 ? "down" : "", RT_STAT_TITLES.buyFlow]);
+        items.push(["Volume", rally.relativeVolume == null ? "—" : `${rally.relativeVolume.toFixed(1)}x`, "", RT_STAT_TITLES.volume]);
+        if (rally.active) {
+          items.push(["Next R", sum.resistance != null ? `${fmtPrice(sum.resistance)}${sub(fmtGain((sum.resistance / sum.price - 1) * 100))}` : "—", "", RT_STAT_TITLES.resistance]);
+          items.push(["Fails <", fmtPrice(sum.failPrice), "", RT_STAT_TITLES.fail]);
+        }
+      } else if (sum) {
+        const lastR = sum.lastRally != null ? d.rallies[sum.lastRally] : null;
+        items.push(["Rallies", String(sum.rallies), "", RT_STAT_TITLES.rallies]);
+        items.push(["Last rally", lastR ? `${fmtGain(lastR.gain)}${sub(ET_HM.format(lastR.highTime))}` : "—", lastR ? "up" : "", RT_STAT_TITLES.lastRally]);
+        items.push(["Off the low", `${fmtGain(sum.rise)}${sub(`of ${fmtGain(sum.startThreshold)}`)}`, "", RT_STAT_TITLES.rise]);
+        items.push(["Speed", `${accelArrow(sum.accel)}${fmtSpeed(sum.speed)}`, sign(sum.speed ?? 0), RT_STAT_TITLES.speed]);
+        items.push(["Bull vs. Bear", sum.control == null ? "—" : fmtScore(sum.control), sign(Math.round(sum.control ?? 0)), RT_STAT_TITLES.control]);
+        items.push(["Next R", sum.resistance != null ? fmtPrice(sum.resistance) : "—", "", RT_STAT_TITLES.resistance]);
+        items.push(["Support", sum.support != null ? fmtPrice(sum.support) : "—", "", RT_STAT_TITLES.support]);
+      } else {
+        ["Rallies", "Last rally", "Off the low", "Speed", "Bull vs. Bear", "Next R", "Support"].forEach((name) => items.push([name, null, "", ""]));
+      }
+      stats.innerHTML = items.map(([name, value, sg, title]) => (
+        `<div${title ? ` title="${title}"` : ""}><dt>${name}</dt><dd${sg ? ` data-sign="${sg}"` : ""}>${value ?? "—"}</dd></div>`
+      )).join("");
+    };
+
+    // The signals keep one line: the ones that do not fit fold into "+N"
+    const fitSignals = () => {
+      const chips = [...signalsEl.querySelectorAll(".chart-signal:not(.is-empty)")];
+      chips.forEach((chip) => { chip.hidden = false; });
+      if (!chips.length || signalsEl.scrollWidth <= signalsEl.clientWidth) return;
+      const more = document.createElement("span");
+      more.className = "chart-signal chart-signal--more";
+      signalsEl.append(more);
+      let folded = 0;
+      for (let i = chips.length - 1; i > 0 && signalsEl.scrollWidth > signalsEl.clientWidth; i--) {
+        chips[i].hidden = true;
+        more.textContent = `+${++folded}`;
+      }
+      if (!folded) more.remove();
+    };
+
+    // Levels of the active rally, in % over its base
+    const overlaysOf = () => {
+      const r = activeRally();
+      const s = data.summary;
+      if (!rtPrefs.levels || !r) return [];
+      const gainOf = (p) => (p / r.base - 1) * 100;
+      const out = [];
+      const leg = r.legs[r.legs.length - 1];
+      if (s.pullbackZone && leg) out.push({ kind: "zone", from: leg.start, low: gainOf(s.pullbackZone[0]), high: gainOf(s.pullbackZone[1]), prices: s.pullbackZone });
+      if (s.failPrice > 0) out.push({ kind: "fail", from: r.start, gain: gainOf(s.failPrice), price: s.failPrice });
+      if (s.resistance > 0) out.push({ kind: "resistance", from: r.start, gain: gainOf(s.resistance), price: s.resistance });
+      return out;
+    };
+
+    /* Geometry: gain pane on top, speed pane under it, the ribbon and the
+       time axis below. The live point sits `live` px from the axis. */
+    const geometry = () => {
+      const { points, rallies, halts, summary } = data;
+      const right = W - G.axisW;
+      const timeTop = H - G.axisH;
+      const band = timeTop - G.bandGap - G.band;
+      const speedBottom = band - G.bandGap;
+      const top = G.pad;
+      const speedH = Math.round(clampTo(Math.max(80, speedBottom - top) * G.speedShare, 28, G.speedMax));
+      const speedTop = speedBottom - speedH;
+      const mainBottom = Math.max(top + G.room + 30, speedTop - G.paneGap);
+      const gainTop = top + G.room;
+      const lastT = points[points.length - 1].t;
+      // An open Halt runs the axis to now: the pause grows to the right
+      const end = Math.max(lastT, halts.some((h) => h.end == null) ? now() : 0);
+      let start = rtPrefs.window ? end - rtPrefs.window : points[0].t;
+      const minSpan = Math.min(RT_MIN_SPAN, rtPrefs.window || Infinity);
+      if (end - start < minSpan) start = end - minSpan;
+      const usable = Math.max(1, right - G.live);
+      const first = indexAt(points, start);
+      const overlays = overlaysOf();
+
+      // Gain: 0 at the bottom; on top the highest visible block, the trigger,
+      // and the levels within 1.5× of that; round steps
+      let high = 0;
+      let low = 0;
+      for (let i = first; i < points.length; i++) { high = Math.max(high, points[i].gain); low = Math.min(low, points[i].gain); }
+      rallies.forEach((r) => { if ((r.end ?? end) >= start && r.start <= end) high = Math.max(high, r.gain); });
+      if (summary.rally == null && Number.isFinite(summary.startThreshold)) high = Math.max(high, summary.startThreshold);
+      const reach = Math.max(high, 1);
+      overlays.forEach((o) => {
+        const v = o.kind === "zone" ? o.high : o.gain;
+        if (v <= reach * 1.5) high = Math.max(high, v);
+        if (o.kind !== "resistance") low = Math.min(low, o.kind === "zone" ? o.low : o.gain);
+      });
+      const gainPx = Math.max(1, mainBottom - gainTop);
+      const gainStep = niceStep(Math.max(Math.max(high, 1) / 4, ((high - low) / gainPx) * 18));
+      const gainMax = Math.max(gainStep, Math.ceil((high * 1.02) / gainStep) * gainStep);
+      const gainMin = low < 0 ? -Math.min(gainMax / 2, Math.ceil(-low / gainStep) * gainStep) : 0;
+
+      // Speed: 0 in the pane; the active rally's peak always fits
+      let sHigh = 0;
+      let sLow = 0;
+      for (let i = first; i < points.length; i++) {
+        const v = points[i].speed;
+        if (v != null) { sHigh = Math.max(sHigh, v); sLow = Math.min(sLow, v); }
+      }
+      const act = activeRally();
+      if (act) sHigh = Math.max(sHigh, act.peakSpeed);
+      const speedStep = niceStep(Math.max(sHigh, -sLow, 1) / 2);
+      const speedMax = Math.max(speedStep, Math.ceil(sHigh / speedStep) * speedStep);
+      const speedMin = sLow < 0 ? -Math.min(speedMax, Math.ceil(-sLow / speedStep) * speedStep) : 0;
+
+      return {
+        right, timeTop, band, top, gainTop, mainBottom, speedTop, speedBottom, start, end, usable, first, overlays,
+        gainStep, gainMin, gainMax, speedMin, speedMax, act,
+        x: (t) => ((t - start) / (end - start)) * usable,
+        y: (v) => mainBottom - ((v - gainMin) / (gainMax - gainMin)) * (mainBottom - gainTop),
+        yS: (v) => speedBottom - ((clampTo(v, speedMin, speedMax) - speedMin) / (speedMax - speedMin)) * (speedBottom - speedTop),
+      };
+    };
+
+    const axisTag = (g, y, text, bg, ink) => {
+      ctx.fillStyle = bg;
+      ctx.beginPath();
+      ctx.roundRect(g.right + 3, y - G.tag / 2, G.axisW - 6, G.tag, 3);
+      ctx.fill();
+      ctx.fillStyle = ink;
+      ctx.font = `700 10.5px ${MONO}`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(text, g.right + G.axisW / 2, y + 0.5);
+    };
+    // Text with a background outline, so a line under it never cuts it
+    const label = (text, x, y, hue, font, align = "center", baseline = "middle") => {
+      ctx.font = font;
+      ctx.textAlign = align;
+      ctx.textBaseline = baseline;
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = C.bg;
+      ctx.strokeText(text, x, y);
+      ctx.fillStyle = hue;
+      ctx.fillText(text, x, y);
+    };
+    const overlaps = (a, b, gap = 3) => a.left < b.right + gap && b.left < a.right + gap && a.top < b.bottom + gap && b.top < a.bottom + gap;
+    const dashed = (y, left, right, hue, dash) => {
+      ctx.setLineDash(dash);
+      ctx.strokeStyle = hue;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(left, crisp(y));
+      ctx.lineTo(right, crisp(y));
+      ctx.stroke();
+      ctx.setLineDash([]);
+    };
+
+    const draw = () => {
+      if (!W || !H) return;
+      const dpr = window.devicePixelRatio || 1;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.fillStyle = C.bg;
+      ctx.fillRect(0, 0, W, H);
+      const off = message();
+      note.textContent = off;
+      note.hidden = !off;
+      if (off) {
+        geo = null;
+        tip.hidden = true;
+        canvas.setAttribute("aria-label", `Rally tracker chart. ${off}`);
+        return;
+      }
+
+      const { points, rallies, alerts, halts, status, summary } = data;
+      const last = points[points.length - 1];
+      const g = (geo = geometry());
+      const { right, timeTop, top, gainTop, mainBottom, speedTop, speedBottom, start, end, usable, first, overlays, act, x, y, yS } = g;
+      const zeroY = y(0);
+      const liveX = x(end);
+      const liveY = y(last.gain);
+      ctx.lineJoin = "round";
+      ctx.lineCap = "butt";
+
+      // Time ticks: the smallest step whose labels keep their width apart
+      ctx.font = `500 10.5px ${MONO}`;
+      const span = end - start;
+      const labelW = (step) => ctx.measureText(step < 60e3 ? "00:00:00" : "00:00").width + 24;
+      const step = BB_TIME_STEPS.find((s) => (s / span) * usable >= labelW(s)) || BB_TIME_STEPS[BB_TIME_STEPS.length - 1];
+      const tickFmt = step < 60e3 ? ET_HMS : ET_HM;
+      const ticks = [];
+      for (let t = Math.ceil(start / step) * step; t <= end; t += step) ticks.push({ x: x(t), t });
+      const gainTicks = [];
+      for (let v = g.gainMin; v <= g.gainMax + 1e-9; v += g.gainStep) gainTicks.push(round(v, 6));
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, right, speedBottom);
+      ctx.clip();
+
+      // Pre-market / after hours, one band per run; Halts shaded
+      for (let i = first; i < points.length - 1; i++) {
+        const s = points[i].session;
+        if (s === "rm") continue;
+        let j = i;
+        while (j < points.length - 1 && points[j].session === s) j++;
+        ctx.fillStyle = alpha(C.session, A.session);
+        ctx.fillRect(x(points[i].t), 0, x(points[j].t) - x(points[i].t), speedBottom);
+        i = j - 1;
+      }
+      const haltSpans = halts
+        .map((h) => ({ l: Math.max(0, x(h.start)), r: Math.min(right, x(h.end ?? end)) }))
+        .filter((s) => s.r > s.l);
+      ctx.fillStyle = alpha(C.neutral, A.halt);
+      haltSpans.forEach((s) => ctx.fillRect(s.l, 0, s.r - s.l, speedBottom));
+
+      // Ticker watermark, grid, the line between the panes
+      ctx.font = `800 ${Math.round(clampTo(W * 0.11, 28, 84))}px ${SANS}`;
+      ctx.fillStyle = C.mark;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(ticker(), usable / 2, (gainTop + mainBottom) / 2);
+      ctx.strokeStyle = C.grid;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      gainTicks.forEach((v) => { if (v) { ctx.moveTo(0, crisp(y(v))); ctx.lineTo(right, crisp(y(v))); } });
+      ticks.forEach((tick) => { ctx.moveTo(crisp(tick.x), 0); ctx.lineTo(crisp(tick.x), speedBottom); });
+      ctx.moveTo(0, crisp(speedTop - G.paneGap / 2));
+      ctx.lineTo(right, crisp(speedTop - G.paneGap / 2));
+      ctx.stroke();
+
+      /* Gain pane */
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, right, speedTop - G.paneGap / 2);
+      ctx.clip();
+
+      // Outside the rallies: the rise off the 10-minute low (brighter while one builds)
+      const rise = new Path2D();
+      const building = new Path2D();
+      for (let i = first; i < points.length - 1; i++) {
+        const p = points[i];
+        const q = points[i + 1];
+        if (p.rally >= 0) continue;
+        const path = p.state === "building" ? building : rise;
+        path.moveTo(x(p.t), y(p.gain));
+        path.lineTo(x(q.t), y(p.gain));
+        if (q.rally < 0) path.lineTo(x(q.t), y(q.gain));
+      }
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = C.rise;
+      ctx.stroke(rise);
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = C.building;
+      ctx.stroke(building);
+
+      // Level lines: what labels must keep off, with the curve
+      const lines = [];
+      const tags = []; // level values, placed after the rally labels
+      if (!act && Number.isFinite(summary.startThreshold)) {
+        const before = rallies[rallies.length - 1];
+        const left = Math.max(0, before ? x(before.end ?? before.highTime) : 0);
+        const ty = y(summary.startThreshold);
+        dashed(ty, left, right, alpha(C.building, 0.6), [3, 4]);
+        lines.push({ left, right, top: ty - 1, bottom: ty + 1 });
+        tags.push({ y: ty, text: `Rally trigger ${fmtGain(summary.startThreshold)}`, hue: C.building });
+      }
+
+      // Blocks: a step per point from the base, colored by leg; given back shaded
+      const visible = rallies.filter((r) => (r.end ?? end) >= start && r.start <= end);
+      const outlines = new Map();
+      const outline = (hue) => {
+        if (!outlines.has(hue)) outlines.set(hue, new Path2D());
+        return outlines.get(hue);
+      };
+      visible.forEach((r) => {
+        let top2 = 0;
+        for (let i = r.firstIndex; i < r.lastIndex; i++) {
+          const p = points[i];
+          const q = points[i + 1];
+          // Whole-pixel edges: translucent fills never overlap into stripes
+          const l = Math.round(x(p.t));
+          const rr = Math.round(x(q.t));
+          top2 = Math.max(top2, p.gain);
+          if (rr <= l || rr < 0 || l > right) continue;
+          const py = y(p.gain);
+          const hue = segColor(p.segment);
+          ctx.fillStyle = alpha(hue, p.segment === "pullback" ? A.pull : p.segment === "steady" ? A.steady : A.block);
+          ctx.fillRect(l, Math.min(py, zeroY), rr - l, Math.abs(zeroY - py));
+          if (top2 > p.gain) {
+            ctx.fillStyle = alpha(C.giveback, A.giveback);
+            ctx.fillRect(l, y(top2), rr - l, py - y(top2));
+          }
+          const path = outline(hue);
+          if (i === r.firstIndex) { path.moveTo(x(p.t), zeroY); path.lineTo(x(p.t), py); } else path.moveTo(x(p.t), py);
+          path.lineTo(x(q.t), py);
+          path.lineTo(x(q.t), y(q.gain));
+        }
+        if (!r.active) {
+          const lp = points[r.lastIndex];
+          const path = outline(alpha(C.pullback, 0.6));
+          path.moveTo(x(lp.t), y(lp.gain));
+          path.lineTo(x(lp.t), zeroY);
+        }
+      });
+      // An open Halt: the last price stays frozen up to now
+      if (end > last.t) {
+        const l = x(last.t);
+        const hue = last.rally >= 0 ? segColor(last.segment) : C.rise;
+        if (last.rally >= 0) {
+          ctx.fillStyle = alpha(hue, A.pull);
+          ctx.fillRect(l, Math.min(liveY, zeroY), liveX - l, Math.abs(zeroY - liveY));
+        }
+        const path = outline(hue);
+        path.moveTo(l, liveY);
+        path.lineTo(liveX, liveY);
+      }
+      ctx.lineWidth = 1.75;
+      outlines.forEach((path, hue) => {
+        ctx.strokeStyle = hue;
+        ctx.stroke(path);
+      });
+      ctx.strokeStyle = alpha(C.neutral, 0.6);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, crisp(zeroY));
+      ctx.lineTo(right, crisp(zeroY));
+      ctx.stroke();
+
+      // The curve as boxes-free segments (axis-aligned steps)
+      const segs = [];
+      for (let i = first; i < points.length - 1; i++) {
+        const x0 = x(points[i].t);
+        const x1 = x(points[i + 1].t);
+        if (x1 < 0 || x0 > right) continue;
+        const y0 = y(points[i].gain);
+        segs.push({ left: x0, right: x1, top: y0, bottom: y0 });
+        segs.push({ left: x1, right: x1, top: Math.min(y0, y(points[i + 1].gain)), bottom: Math.max(y0, y(points[i + 1].gain)) });
+      }
+      if (end > last.t) segs.push({ left: x(last.t), right: liveX, top: liveY, bottom: liveY });
+
+      // Levels of the active rally
+      overlays.forEach((o) => {
+        const left = Math.max(0, x(o.from));
+        if (o.kind === "zone") {
+          const zt = y(o.high);
+          const zb = y(o.low);
+          if (zb < top || zt > mainBottom) return;
+          ctx.fillStyle = alpha(C.zone, A.zone);
+          ctx.fillRect(left, zt, right - left, Math.max(1, zb - zt));
+          const [lo, hi] = o.prices.map(fmtPrice);
+          tags.push({ y: (zt + zb) / 2, text: `Pullback zone ${lo === hi ? lo : `${lo}–${hi}`}`, hue: C.zone, zone: true });
+          return;
+        }
+        const ly = y(o.gain);
+        if (ly < top - 4 || ly > mainBottom + 4) return;
+        const hue = o.kind === "fail" ? C.fail : C.resistance;
+        if (o.kind === "fail") dashed(ly, left, right, alpha(hue, 0.85), [2, 3]);
+        else {
+          ctx.strokeStyle = alpha(hue, 0.6);
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(left, crisp(ly));
+          ctx.lineTo(right, crisp(ly));
+          ctx.stroke();
+        }
+        lines.push({ left, right, top: ly - 1, bottom: ly + 1 });
+        tags.push({ y: ly, text: o.kind === "fail" ? `Fails < ${fmtPrice(o.price)}` : `R ${fmtPrice(o.price)}`, hue });
+      });
+
+      // Markers: New HoD over the curve, Pressure dots on it; dimmer off a rally
+      const placed = [{ left: liveX - 8, right: liveX + 8, top: liveY - 8, bottom: liveY + 8 }];
+      const hitsCurve = (b) => segs.some((s) => overlaps(b, s, 1));
+      const marks = alerts
+        .filter((a) => a.t >= start && a.t <= end && RT_ALERT_TEXT[a.kind])
+        .map((a) => ({ ...a, x: x(a.t), y: y(points[indexAt(points, a.t)].gain) }))
+        .sort((a, b) => (b.kind === "hod") - (a.kind === "hod") || (b.vol ?? 0) - (a.vol ?? 0));
+      const drawn = [];
+      marks.forEach((m) => {
+        if (m.kind === "hod") {
+          for (let k = 0; k < 4; k++) {
+            const b = { left: m.x - 5, right: m.x + 5, top: m.y - 6 - 9 - k * 11, bottom: m.y - 6 - k * 11 };
+            if (b.top < 0 || placed.some((o) => overlaps(b, o, 1)) || hitsCurve(b)) continue;
+            placed.push(b);
+            drawn.push({ ...m, box: b });
+            return;
+          }
+          return;
+        }
+        const b = { left: m.x - 3, right: m.x + 3, top: m.y - 3, bottom: m.y + 3 };
+        if (placed.some((o) => overlaps(b, o, 1))) return;
+        placed.push(b);
+        drawn.push({ ...m, box: b });
+      });
+      drawn.forEach((m) => {
+        const a = m.rally >= 0 ? 1 : A.off;
+        ctx.strokeStyle = C.bg;
+        if (m.kind === "hod") {
+          const b = m.box;
+          if (b.bottom < m.y - 7) {
+            ctx.strokeStyle = alpha(C.hod, 0.45 * a);
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(crisp(m.x), m.y - 2);
+            ctx.lineTo(crisp(m.x), b.bottom + 1);
+            ctx.stroke();
+            ctx.strokeStyle = C.bg;
+          }
+          ctx.lineWidth = 2;
+          ctx.fillStyle = alpha(C.hod, a);
+          ctx.beginPath();
+          ctx.moveTo(m.x, b.top);
+          ctx.lineTo(b.right, b.bottom);
+          ctx.lineTo(b.left, b.bottom);
+          ctx.closePath();
+          ctx.stroke();
+          ctx.fill();
+          return;
+        }
+        const hue = m.kind === "buying" ? C.bull : C.bear;
+        ctx.fillStyle = alpha(hue, 0.28 * a);
+        ctx.beginPath();
+        ctx.arc(m.x, m.y, 6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = alpha(hue, a);
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(m.x, m.y, 3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      });
+
+      // Rally labels over their high: the gain, and above it the move and
+      // the duration. The active rally picks first; over the high, else beside it.
+      const free = (b) => b.left >= 2 && b.right <= right - 2 && b.top >= 0 && b.bottom <= mainBottom
+        && !placed.some((o) => overlaps(b, o, 2)) && !lines.some((o) => overlaps(b, o, 1)) && !hitsCurve(b);
+      const MAIN = `700 11px ${MONO}`;
+      const SUB = `500 10px ${MONO}`;
+      [...visible].sort((a, b) => Number(b.active) - Number(a.active) || b.gain - a.gain).forEach((r) => {
+        const hx = x(r.highTime);
+        const hy = y(r.gain);
+        const main = fmtGain(r.gain);
+        const sub = `${fmtMove(r.gainAbs)} · ${fmtDuration(r.durationMs)}`;
+        ctx.font = MAIN;
+        const mw = ctx.measureText(main).width;
+        ctx.font = SUB;
+        const w = Math.max(mw, ctx.measureText(sub).width) + 6;
+        const h = 27;
+        const cx = clampTo(hx, w / 2 + 2, right - w / 2 - 2);
+        const spots = [0, 1, 2, 3].map((k) => ({ left: cx - w / 2, right: cx + w / 2, top: hy - 6 - h - k * 12, bottom: hy - 6 - k * 12 }));
+        spots.push({ left: hx - 8 - w, right: hx - 8, top: hy + 4, bottom: hy + 4 + h }, { left: hx + 8, right: hx + 8 + w, top: hy + 4, bottom: hy + 4 + h });
+        const b = spots.find(free);
+        if (!b) return;
+        placed.push(b);
+        const mx = (b.left + b.right) / 2;
+        label(sub, mx, b.top + 6, C.axis, SUB);
+        label(main, mx, b.bottom - 6, segColor(r.active ? points[r.lastIndex].segment : "steady"), MAIN);
+      });
+
+      // Level values at the right edge, over (else under) their line; moved
+      // left past whatever is there; none fits: no value.
+      ctx.font = `600 10px ${MONO}`;
+      tags.forEach((tag) => {
+        const w = ctx.measureText(tag.text).width;
+        const rows = tag.zone ? [[tag.y - 6, tag.y + 6]] : [[tag.y - 14, tag.y - 2], [tag.y + 2, tag.y + 14]];
+        for (const [t0, t1] of rows) {
+          for (let r0 = right - 6; r0 - w >= 4; r0 -= 8) {
+            const b = { left: r0 - w, right: r0, top: t0, bottom: t1 };
+            if (b.top < 0 || b.bottom > mainBottom) break;
+            if (placed.some((o) => overlaps(b, o, 2)) || hitsCurve(b) || lines.some((o) => o.top !== tag.y - 1 && overlaps(b, o, 1))) continue;
+            placed.push(b);
+            label(tag.text, r0, (t0 + t1) / 2, tag.hue, `600 10px ${MONO}`, "right");
+            return;
+          }
+        }
+      });
+
+      // Live point: on the active rally's block or on the rise line
+      const tone = TONE[RT_TONE[status.key]] ?? C.neutral;
+      ctx.fillStyle = alpha(tone, 0.18);
+      ctx.beginPath();
+      ctx.arc(liveX, liveY, 8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = tone;
+      ctx.strokeStyle = C.bg;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(liveX, liveY, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+
+      /* Speed pane: one line, cut at Halts; red under zero; the active rally's peak */
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, speedTop, right, speedBottom - speedTop);
+      ctx.clip();
+      const sZero = yS(0);
+      const runs = [];
+      let run = [];
+      for (let i = first; i < points.length; i++) {
+        const p = points[i];
+        const prev = i > first ? points[i - 1] : null;
+        const cut = p.speed == null || (prev && halts.some((h) => h.start >= prev.t && h.start < p.t));
+        if (cut && run.length) runs.push(run);
+        if (cut) run = [];
+        if (p.speed != null) run.push(p);
+      }
+      if (run.length) runs.push(run);
+      const speedSegs = [];
+      runs.forEach((pts) => {
+        const path = new Path2D();
+        pts.forEach((p, k) => {
+          const px = x(p.t);
+          const py = yS(p.speed);
+          if (k) {
+            path.lineTo(px, py);
+            const q = pts[k - 1];
+            speedSegs.push({ left: Math.min(x(q.t), px), right: Math.max(x(q.t), px), top: Math.min(yS(q.speed), py), bottom: Math.max(yS(q.speed), py) });
+          } else path.moveTo(px, py);
+        });
+        const area = new Path2D(path);
+        area.lineTo(x(pts[pts.length - 1].t), sZero);
+        area.lineTo(x(pts[0].t), sZero);
+        area.closePath();
+        ctx.save();
+        ctx.clip(area);
+        ctx.fillStyle = alpha(C.speed, A.speed);
+        ctx.fillRect(0, speedTop, right, sZero - speedTop);
+        ctx.fillStyle = alpha(C.giveback, A.speedDown);
+        ctx.fillRect(0, sZero, right, speedBottom - sZero);
+        ctx.restore();
+        ctx.strokeStyle = alpha(C.speed, 0.9);
+        ctx.lineWidth = 1.5;
+        ctx.lineJoin = "round";
+        ctx.stroke(path);
+      });
+      ctx.strokeStyle = alpha(C.neutral, 0.6);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, crisp(sZero));
+      ctx.lineTo(right, crisp(sZero));
+      ctx.stroke();
+      const speedPlaced = [];
+      const speedFree = (b) => b.top >= speedTop + 1 && b.bottom <= speedBottom - 1 && b.left >= 2 && b.right <= right - 2
+        && !speedSegs.some((s) => overlaps(b, s, 1)) && !speedPlaced.some((o) => overlaps(b, o, 4));
+      // Pane title, top left (bottom left when the line passes there)
+      ctx.font = `700 9px ${MONO}`;
+      const titleW = ctx.measureText("SPEED %/MIN").width;
+      const title = [speedTop + 3, speedBottom - 14].map((t0) => ({ left: 6, right: 6 + titleW, top: t0, bottom: t0 + 11 })).find(speedFree);
+      if (title) {
+        speedPlaced.push(title);
+        label("SPEED %/MIN", title.left, (title.top + title.bottom) / 2, C.axis, `700 9px ${MONO}`, "left");
+      }
+      if (act && act.peakSpeed > 0) {
+        const py = yS(act.peakSpeed);
+        const left = Math.max(0, x(act.start));
+        dashed(py, left, right, alpha(C.speed, 0.6), [2, 3]);
+        // Its name on the line (the value is the axis tag): right end, else left end
+        ctx.font = `600 10px ${MONO}`;
+        const w = ctx.measureText("Peak").width;
+        const rows = [[py - 13, py - 2], [py + 2, py + 13]];
+        const spot = [right - 6 - w, left + 6].flatMap((l) => rows.map(([t0, t1]) => ({ left: l, right: l + w, top: t0, bottom: t1 }))).find(speedFree);
+        if (spot) {
+          speedPlaced.push(spot);
+          label("Peak", spot.left, (spot.top + spot.bottom) / 2, C.axis, `600 10px ${MONO}`, "left");
+        }
+      }
+      // HALT: centered in its pause when the pause is wide enough
+      ctx.font = `700 9.5px ${MONO}`;
+      const haltW = ctx.measureText("HALT").width + 12;
+      haltSpans.forEach((s) => {
+        if (s.r - s.l < haltW + 4) return;
+        const b = { left: (s.l + s.r - haltW) / 2, right: (s.l + s.r + haltW) / 2, top: (speedTop + speedBottom) / 2 - 8, bottom: (speedTop + speedBottom) / 2 + 8 };
+        if (speedPlaced.some((o) => overlaps(b, o, 2))) return;
+        ctx.fillStyle = C.chip;
+        ctx.beginPath();
+        ctx.roundRect(b.left, b.top, haltW, 16, 4);
+        ctx.fill();
+        ctx.fillStyle = C.axis;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("HALT", b.left + haltW / 2, b.top + 8.5);
+      });
+      ctx.restore();
+      ctx.restore();
+
+      // State ribbon: one run per state
+      ctx.save();
+      ctx.beginPath();
+      ctx.roundRect(0, g.band, right, G.band, G.band / 2);
+      ctx.clip();
+      ctx.fillStyle = alpha(C.neutral, 0.1);
+      ctx.fillRect(0, g.band, right, G.band);
+      for (let i = first; i < points.length - 1; i++) {
+        let j = i + 1;
+        while (j < points.length - 1 && points[j].state === points[i].state) j++;
+        const l = Math.max(0, x(points[i].t));
+        ctx.fillStyle = ribbonColor(points[i].state);
+        ctx.fillRect(l, g.band, x(points[j].t) - l, G.band);
+        i = j - 1;
+      }
+      if (end > last.t) {
+        ctx.fillStyle = ribbonColor(last.state);
+        ctx.fillRect(x(last.t), g.band, liveX - x(last.t), G.band);
+      }
+      haltSpans.forEach((s) => {
+        ctx.fillStyle = C.bg;
+        ctx.fillRect(s.l, g.band, s.r - s.l, G.band);
+        ctx.fillStyle = ribbonColor("halted");
+        ctx.fillRect(s.l, g.band, s.r - s.l, G.band);
+      });
+      ctx.restore();
+
+      // Crosshair target (magnet: the nearest point)
+      const h = hover == null ? null : clampTo(hover, first, points.length - 1);
+      const hp = h == null ? null : points[h];
+      ctx.font = `600 10.5px ${MONO}`;
+      const hoverTime = hp && ET_HMS.format(hp.t);
+      const timeChip = hp && (() => {
+        const w = ctx.measureText(hoverTime).width + 14;
+        return { l: clampTo(x(hp.t) - w / 2, 0, right - w), w };
+      })();
+
+      // Axes: background, borders, gain and speed labels, live tag, time labels
+      ctx.fillStyle = C.bg;
+      ctx.fillRect(right, 0, W - right, H);
+      ctx.fillRect(0, timeTop, W, H - timeTop);
+      ctx.strokeStyle = C.line;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(crisp(right), 0);
+      ctx.lineTo(crisp(right), timeTop);
+      ctx.moveTo(0, crisp(timeTop));
+      ctx.lineTo(W, crisp(timeTop));
+      ctx.stroke();
+
+      const tagY = clampTo(liveY, G.tag / 2, mainBottom);
+      const chipY = hp ? clampTo(y(hp.gain), G.tag / 2, mainBottom) : null;
+      const blocked = [tagY, ...(chipY != null ? [chipY] : [])];
+      const dp = g.gainStep < 1 ? 1 : 0;
+      ctx.font = `500 10.5px ${MONO}`;
+      ctx.fillStyle = C.axis;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      gainTicks.forEach((v) => {
+        const ly = y(v);
+        if (ly < gainTop - 4 || blocked.some((b) => Math.abs(b - ly) < G.tag / 2 + 7)) return;
+        ctx.fillText(`${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toFixed(dp)}%`, right + G.axisW / 2, ly);
+      });
+      // Speed tags: the live speed (neutral) and the active rally's peak
+      // (chip); the peak goes when the pane has no room for both.
+      const fmtS = (v) => `${v < 0 ? "−" : ""}${Math.abs(v).toFixed(1)}`;
+      const speedTags = [];
+      if (last.speed != null) speedTags.push({ y: yS(last.speed), text: fmtS(last.speed), bg: C.speed, ink: C.ink });
+      if (act && act.peakSpeed > 0 && speedBottom - speedTop >= 2 * (G.tag + 2)) speedTags.push({ y: yS(act.peakSpeed), text: fmtS(act.peakSpeed), bg: C.chip, ink: C.chipText });
+      spreadTags(speedTags, speedTop + G.tag / 2, speedBottom - G.tag / 2, G.tag + 2);
+      ctx.font = `500 9.5px ${MONO}`;
+      ctx.fillStyle = C.axis;
+      let lastSpeedLabel = -Infinity;
+      [[g.speedMax, speedTop + 6], [0, sZero], ...(g.speedMin < 0 ? [[g.speedMin, speedBottom - 6]] : [])].forEach(([v, ly]) => {
+        const at = clampTo(ly, speedTop + 6, speedBottom - 6);
+        if (at - lastSpeedLabel < 12 || speedTags.some((tag) => Math.abs(tag.y - at) < G.tag / 2 + 6)) return;
+        lastSpeedLabel = at;
+        ctx.fillText(`${v < 0 ? "−" : ""}${Math.abs(v).toFixed(Number.isInteger(v) ? 0 : 1)}`, right + G.axisW / 2, at);
+      });
+      speedTags.forEach((tag) => axisTag(g, tag.y, tag.text, tag.bg, tag.ink));
+      axisTag(g, tagY, fmtGain(last.gain), tone, C.ink);
+
+      ctx.font = `500 10.5px ${MONO}`;
+      ctx.fillStyle = C.axis;
+      ticks.forEach((tick) => {
+        const text = tickFmt.format(tick.t);
+        const w = ctx.measureText(text).width;
+        if (tick.x - w / 2 < 2 || tick.x + w / 2 > right - 2) return;
+        if (timeChip && tick.x + w / 2 > timeChip.l - 4 && tick.x - w / 2 < timeChip.l + timeChip.w + 4) return;
+        ctx.fillText(text, tick.x, timeTop + G.axisH / 2);
+      });
+
+      // Crosshair: dashed lines, the point (and its speed), chips, hover card
+      if (hp) {
+        const hx = x(hp.t);
+        const hy = y(hp.gain);
+        ctx.setLineDash([4, 4]);
+        ctx.strokeStyle = alpha(C.cross, 0.8);
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(crisp(hx), 0);
+        ctx.lineTo(crisp(hx), timeTop);
+        ctx.moveTo(0, crisp(hy));
+        ctx.lineTo(right, crisp(hy));
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.strokeStyle = C.bg;
+        ctx.lineWidth = 2;
+        ctx.fillStyle = hp.rally >= 0 ? segColor(hp.segment) : C.rise;
+        ctx.beginPath();
+        ctx.arc(hx, hy, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        if (hp.speed != null) {
+          ctx.fillStyle = C.speed;
+          ctx.beginPath();
+          ctx.arc(hx, yS(hp.speed), 3, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        }
+        axisTag(g, chipY, fmtGain(hp.gain), C.chip, C.chipText);
+        ctx.fillStyle = C.chip;
+        ctx.beginPath();
+        ctx.roundRect(timeChip.l, timeTop + 2, timeChip.w, G.axisH - 4, 3);
+        ctx.fill();
+        ctx.fillStyle = C.chipText;
+        ctx.font = `600 10.5px ${MONO}`;
+        ctx.textAlign = "center";
+        ctx.fillText(hoverTime, timeChip.l + timeChip.w / 2, timeTop + G.axisH / 2 + 0.5);
+        showTip(g, hp);
+      } else tip.hidden = true;
+
+      const said = act
+        ? `rally ${fmtGain(summary.gain)} from ${fmtPrice(act.base)}, ${act.legs.length} leg${act.legs.length === 1 ? "" : "s"}`
+        : `${summary.rallies} rall${summary.rallies === 1 ? "y" : "ies"} today`;
+      canvas.setAttribute("aria-label", `${ticker()} Rally tracker: ${status.label}, ${said}. ${status.detail}`);
+    };
+
+    // Hover card beside the cursor (on the point, from the keyboard)
+    const placeTip = (g, p) => placeChartTip(tip, g.x(p.t), pointerY ?? g.y(p.gain), g.right, g.timeTop);
+    const showTip = (g, p) => {
+      const row = (name, value, sg = "") => `<dt>${name}</dt><dd${sg ? ` data-sign="${sg}"` : ""}>${value}</dd>`;
+      const session = p.session === "pre" ? "Pre-market" : p.session === "post" ? "After hours" : "";
+      const r = p.rally >= 0 ? data.rallies[p.rally] : null;
+      const leg = r && p.leg >= 0 ? r.legs[p.leg] : null;
+      let rallyText = "";
+      if (r) {
+        const legText = leg ? ` · leg ${p.leg + 1}${leg.afterHalt ? " after halt" : ""}: ${RT_LEG_NAMES[p.segment] ?? p.segment}` : "";
+        const ending = r.active ? "in progress" : `ended ${ET_HM.format(r.end)}, ${RT_END_REASONS[r.endReason] ?? "over"}`;
+        rallyText = `<p class="chart-tip__rally"><b>Rally ${r.id + 1}</b>${legText}<br>${fmtGain(r.gain)} (${fmtMove(r.gainAbs)}) in ${fmtDuration(r.durationMs)}: ${fmtPrice(r.base)} → ${fmtPrice(r.high)}, ${ending}</p>`;
+      }
+      const here = data.alerts.filter((a) => a.t === p.t && RT_ALERT_TEXT[a.kind]);
+      tip.innerHTML = `
+        <p class="chart-tip__time">${ET_HMS.format(p.t)} ET${session ? `<span>${session}</span>` : ""}</p>
+        <p class="chart-tip__state" data-tone="${RT_TONE[p.state]}">${RT_LABELS[p.state]}</p>
+        <dl>
+          ${row("Price", fmtPrice(p.price))}
+          ${row(r ? "Gain" : "Off the low", fmtGain(p.gain), p.gain > 0 ? "up" : p.gain < 0 ? "down" : "")}
+          ${row("Speed", `${accelArrow(p.accel)}${fmtSpeed(p.speed)}`, p.accel === 1 ? "up" : p.accel === -1 || p.speed < 0 ? "down" : "")}
+          ${row("Bull vs. Bear", p.control == null ? "—" : fmtScore(p.control), p.control >= 0.5 ? "up" : p.control <= -0.5 ? "down" : "")}
+        </dl>
+        ${rallyText}
+        ${here.map((a) => {
+          const [glyph, name, tone] = RT_ALERT_TEXT[a.kind];
+          return `<p class="chart-tip__alert"><b data-tone="${tone}">${glyph}</b>${name} · ${fmtPrice(a.price)}${a.vol ? ` · ${fmtMult(a.vol / 100)}` : ""}</p>`;
+        }).join("")}`;
+      tip.hidden = false;
+      placeTip(g, p);
+    };
+
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(() => { frame = 0; draw(); });
+    };
+    const render = () => {
+      if (dirty) refresh();
+      renderHead();
+      schedule();
+    };
+
+    const resize = () => {
+      const { width, height } = box.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      W = Math.floor(width);
+      H = Math.floor(height);
+      canvas.width = Math.max(1, Math.round(W * dpr));
+      canvas.height = Math.max(1, Math.round(H * dpr));
+      readSizes();
+      // Back in view: compute what arrived meanwhile
+      if (dirty && W) { refresh(); renderHead(); } else fitSignals();
+      if (frame) cancelAnimationFrame(frame);
+      frame = 0;
+      draw();
+    };
+    new ResizeObserver(resize).observe(box);
+    const watchDpr = () => matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`).addEventListener("change", () => { resize(); watchDpr(); }, { once: true });
+    watchDpr();
+    document.fonts?.ready.then(schedule);
+
+    /* Crosshair: pointer or keyboard */
+    const setHover = (i) => {
+      if (i === hover) return;
+      hover = i;
+      schedule();
+    };
+    const nearest = (px) => {
+      const t = geo.start + (px / geo.usable) * (geo.end - geo.start);
+      const pts = data.points;
+      let i = indexAt(pts, t);
+      if (pts[i + 1] && pts[i + 1].t - t < t - pts[i].t) i += 1;
+      return Math.max(geo.first, i);
+    };
+    const track = (e) => {
+      if (!geo) return;
+      const rect = canvas.getBoundingClientRect();
+      const px = e.clientX - rect.left;
+      pointerY = e.clientY - rect.top;
+      const next = px < geo.right ? nearest(px) : null;
+      if (next !== null && next === hover && !tip.hidden) placeTip(geo, data.points[next]);
+      else setHover(next);
+    };
+    canvas.addEventListener("pointermove", track);
+    canvas.addEventListener("pointerdown", track);
+    canvas.addEventListener("pointerleave", () => setHover(null));
+    canvas.addEventListener("blur", () => setHover(null));
+    canvas.addEventListener("keydown", (e) => {
+      if (!geo) return;
+      pointerY = null;
+      const pts = data.points;
+      const lastIndex = pts.length - 1;
+      const from = hover ?? lastIndex;
+      let next = { ArrowLeft: from - 1, ArrowRight: from + 1, Home: geo.first, End: lastIndex, Escape: null }[e.key];
+      if (next === undefined) return;
+      e.preventDefault();
+      // Shift: a minute at a time
+      if (e.shiftKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+        next = indexAt(pts, pts[from].t + (e.key === "ArrowLeft" ? -60e3 : 60e3));
+        if (next === from) next += e.key === "ArrowLeft" ? -1 : 1;
+      }
+      setHover(next === null ? null : clampTo(next, geo.first, lastIndex));
+    });
+
+    /* Controls: Levels and the visible window (the live point stays at the right edge) */
+    const syncControls = () => {
+      windowBtns.forEach((b) => b.setAttribute("aria-pressed", String(Number(b.dataset.rtWindow) === rtPrefs.window)));
+      levelsBtn.setAttribute("aria-pressed", String(rtPrefs.levels));
+    };
+    windowBtns.forEach((b) => b.addEventListener("click", () => {
+      rtPrefs.window = Number(b.dataset.rtWindow);
+      saveRtPrefs();
+      syncControls();
+      schedule();
+    }));
+    levelsBtn.addEventListener("click", () => {
+      rtPrefs.levels = !rtPrefs.levels;
+      saveRtPrefs();
+      syncControls();
+      schedule();
+    });
+    symbol.addEventListener("input", () => {
+      hover = null;
+      render();
+    });
+    syncControls();
+    render();
+
+    const received = () => { clock = { t: feed?.points[feed.points.length - 1]?.t ?? 0, at: Date.now() }; };
+    return {
+      // The whole day (a new page, or a copy's snapshot)
+      load: (dump) => {
+        feed = dump && { points: dump.points.slice(), alerts: dump.alerts.slice(), halts: dump.halts, summary: dump.summary };
+        received();
+        hover = null;
+        dirty = true;
+        if (inView()) render();
+      },
+      // One live update: new points and alerts, the Halts and Bull vs. Bear's summary
+      push: (u) => {
+        if (!feed) return;
+        feed.points.push(...u.points);
+        feed.alerts.push(...u.alerts);
+        Object.assign(feed, { halts: u.halts, summary: u.summary });
+        received();
+        dirty = true;
+        if (inView()) render();
+      },
+      // Window / Levels saved in another window
+      reload: () => {
+        loadRtPrefs();
+        syncControls();
+        schedule();
+      },
+    };
+  };
+
   /* ---- Detached copies -----------------------------------------------------
      The detach button opens a live copy of its panel in a window of its own
      (one more per click), to place anywhere on this screen or another one.
@@ -7764,6 +9544,8 @@
   const bullBear = bbView && mountBullBear(bbView, chartRoot);
   const klView = chartRoot?.querySelector("#chart-view-key-levels");
   const keyLevels = klView && mountKeyLevels(klView, chartRoot);
+  const rtView = chartRoot?.querySelector("#chart-view-rally");
+  const rallyTracker = rtView && mountRallyTracker(rtView, chartRoot);
   const heatRoot = document.querySelector("[data-constellation]");
   const constellation = heatRoot && mountConstellation(heatRoot);
 
@@ -7783,17 +9565,19 @@
 
   if (DETACHED === "chart") {
     // The main window's ticker to start with; later tickers are this copy's own.
-    // Bull vs. Bear and Key levels: the day's series in every snapshot, then each live update.
+    // Bull vs. Bear, Key levels and Rally tracker: the day's series in every snapshot, then each live update.
     linkCopy(chartRoot, {
       snapshot: (m, first) => {
         if (first) chart.setSymbol(m.sym);
         bullBear.load(m.bb);
         keyLevels.load(m.bb);
+        rallyTracker.load(m.bb);
       },
       relay: (m) => {
         if (m.type !== "bb") return;
         bullBear.push(m);
         keyLevels.push(m);
+        rallyTracker.push(m);
       },
     });
   } else if (DETACHED) {
@@ -7818,13 +9602,15 @@
     for (const [id, { seed, ...setup }] of Object.entries(TABLE_SETUP)) {
       mountTable(panel(id), seed, { ...setup, relay: hub ? (msg) => post({ ...msg, panel: id }) : undefined });
     }
-    // The GXAI day runs here only (Bull vs. Bear, Key levels); every update goes to the copies too.
+    // The GXAI day runs here only (Bull vs. Bear, Key levels, Rally tracker); every update goes to the copies too.
     const bbFeed = createBullBearFeed();
     bullBear?.load(bbFeed.dump());
     keyLevels?.load(bbFeed.dump());
+    rallyTracker?.load(bbFeed.dump());
     bbFeed.onUpdate((u) => {
       bullBear?.push(u);
       keyLevels?.push(u);
+      rallyTracker?.push(u);
       post({ type: "bb", ...u });
     });
     serveCopies(constellation, chart, bbFeed);
@@ -7888,6 +9674,7 @@
     else if (key === SOUND_FILES_KEY) loadSoundFiles();
     else if (key === BB_KEY) bullBear?.reload();
     else if (key === KL_KEY) keyLevels?.reload();
+    else if (key === RT_KEY) rallyTracker?.reload();
   });
 
   setInterval(() => {

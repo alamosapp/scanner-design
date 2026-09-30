@@ -151,7 +151,6 @@
      var() to hex only: the canvases will read them. ---- */
   --chart-bg: var(--bg);             /* plot area */
   --chart-grid: #14181e;             /* TradingView-style grid */
-  --chart-slot: var(--line-strong);  /* outline of a planned slot */
   --chart-bull: var(--green);
   --chart-bear: var(--red);
   --chart-warn: var(--amber);        /* divergence · decelerating */
@@ -160,7 +159,7 @@
   --chart-vwap: var(--text-2);       /* dashed and neutral: never competes with the levels */
   --chart-support: var(--chart-bull);    /* where buyers defended */
   --chart-resistance: var(--chart-bear); /* where sellers defended */
-  --chart-hod: var(--amber);         /* New HoD triangle */
+  --chart-hod: var(--text);          /* New HoD triangle: white, apart from the amber of Halt and decelerating legs */
   --chart-halt-ink: var(--amber);    /* H on the Halt square */
   --chart-resume-ink: var(--chart-bull); /* R on the Resume square */
   --chart-volume: var(--text-3);     /* volume bars: neutral */
@@ -168,6 +167,12 @@
   --chart-steady: var(--green-dim);
   --chart-decel: var(--amber);
   --chart-pullback: var(--chart-neutral);
+  --chart-giveback: var(--chart-bear);   /* Rally tracker: gain given back from the high */
+  --chart-fail: var(--chart-bear);       /* the price that ends the rally (dotted) */
+  --chart-zone: var(--text-2);           /* pullback zone band: neutral */
+  --chart-rise: var(--chart-neutral);    /* rise off the 10-minute low, outside rallies … */
+  --chart-building: var(--text-2);       /* … brighter while a rally builds; the trigger line */
+  --chart-speed: var(--text-2);          /* speed pane line: one neutral tone */
   --chart-overlay: var(--text-2);    /* secondary series (Bull vs. Bear price): neutral, never a signal color */
   --chart-zero: var(--text-3);       /* zero line */
   --chart-axis-text: var(--text-3);
@@ -189,6 +194,14 @@
   --chart-level-step-a: 0.15;        /* … plus this per strength step (3: 0.6) */
   --chart-volume-a: 0.4;             /* volume bar that closed up … */
   --chart-volume-down-a: 0.2;        /* … and down */
+  --chart-block-a: 0.3;              /* Rally tracker blocks: launch / accelerating legs … */
+  --chart-block-steady-a: 0.24;      /* … steady legs … */
+  --chart-block-pullback-a: 0.14;    /* … pullbacks between legs */
+  --chart-giveback-a: 0.12;
+  --chart-pullzone-a: 0.08;          /* pullback zone band */
+  --chart-speed-a: 0.12;             /* speed area above zero … */
+  --chart-speed-down-a: 0.22;        /* … and below (red: the price falls) */
+  --chart-off-rally-a: 0.5;          /* markers outside a rally */
   /* Canvas geometry */
   --chart-pad: 10px;                 /* room above +100 / below −100 for the tags */
   --chart-live-pad: 28px;            /* space right of the live point */
@@ -202,12 +215,12 @@
   --chart-pane-sep: 10px;            /* price pane ↔ volume pane */
   --chart-label-room: 26px;          /* above / below the curve for the High / Low labels */
   --chart-marker-room: 20px;         /* more, when a New HoD or Halt marker is in view */
+  --chart-rally-room: 30px;          /* Rally tracker: above the highest block, for its label */
+  --chart-speed-share: 0.27;         /* speed pane: share of the plot height … */
+  --chart-speed-max: 96px;           /* … up to this */
   /* Geometry shared by the three views */
   --chart-axis-w: 52px;              /* value axis on the right */
   --chart-axis-h: 20px;              /* time axis at the bottom */
-  --chart-sub-h: 0.36fr;             /* sub pane (volume · speed) vs 1fr main */
-  --chart-ribbon-h: 16px;            /* state ribbon under the plot */
-  --chart-grid-cell: 56px 40px;      /* grid spacing (x y) */
   /* Fullscreen layouts: panes, their gaps (= drag handles), active pane */
   --chart-pane-gap: 6px;
   --chart-pane-active: color-mix(in srgb, var(--green) 45%, transparent);
@@ -1198,12 +1211,24 @@ html:has(.settings-modal[open]) { overflow: hidden; }
 .chart-meter--range .chart-meter__label[data-side="bull"] { text-align: right; }
 .chart-meter--range .chart-meter__thumb { left: 50%; transition: left var(--t-base); }
 .chart-meter--range .chart-meter__score { min-width: 5ch; }
+/* Rally meter (Rally tracker). RALLY / LAST: the price from the rally base
+   (left) to its high (right); the track right of the thumb, tinted red, is
+   what was given back. RISE: the rise off the 10-minute low up to the rally
+   trigger, the mark at the right end. The fill takes the state's tone. */
+.chart-meter--rally .chart-meter__label { min-width: 4.5ch; text-align: right; }
+.chart-meter--rally .chart-meter__fill { left: 0; background: var(--lead, var(--chart-neutral)); transition: width var(--t-base); }
+.chart-meter--rally .chart-meter__thumb { transition: left var(--t-base); }
+.chart-meter--rally .chart-meter__score { min-width: 6ch; }
+.chart-meter--rally[data-mode="rally"] .chart-meter__track { background: color-mix(in srgb, var(--chart-giveback) 22%, var(--surface-3)); }
+.chart-meter--rally[data-mode="rise"] .chart-meter__track::after { content: ""; position: absolute; top: -3px; bottom: -3px; right: 0; width: 1px; background: var(--text-3); }
+.chart-meter[data-lead="warn"] { --lead: var(--chart-warn); }
 .chart-meter__score { min-width: 3ch; color: var(--lead, var(--text)); font-family: var(--font-mono); font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
 
 /* Rally tracker: fade signals as chips (amber when active) */
 .chart-signals { grid-area: signals; display: flex; align-items: center; gap: 6px; min-width: 0; margin: 0; overflow: hidden; }
 .chart-signals__count { flex: none; color: var(--text-3); font-family: var(--font-mono); font-size: 9.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
 .chart-signal { flex: none; display: inline-flex; align-items: center; height: 18px; padding: 0 8px; border-radius: var(--radius-pill); background: var(--amber-a08); box-shadow: inset 0 0 0 1px var(--amber-a32); color: var(--chart-decel); font-size: 10.5px; font-weight: 700; white-space: nowrap; }
+.chart-signal[hidden] { display: none; }
 .chart-signal.is-empty { background: transparent; box-shadow: inset 0 0 0 1px var(--line); color: var(--text-3); font-weight: 600; }
 
 /* Stats: one strip, scrolls sideways when it does not fit */
@@ -1244,6 +1269,7 @@ html:has(.settings-modal[open]) { overflow: hidden; }
 .chart-key[data-key="steady"] { --key: var(--chart-steady); }
 .chart-key[data-key="decel"] { --key: var(--chart-decel); }
 .chart-key[data-key="pullback"] { --key: var(--chart-pullback); }
+.chart-key[data-key="giveback"] { --key: color-mix(in srgb, var(--chart-giveback) 45%, transparent); }
 
 /* Segmented controls: overlays (dot = on) · window · interval */
 .chart-seg { display: inline-flex; gap: 1px; padding: 2px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg-elevated); }
@@ -1254,6 +1280,8 @@ html:has(.settings-modal[open]) { overflow: hidden; }
   transition: color var(--t-fast), background var(--t-fast);
 }
 .chart-seg button:hover { color: var(--text); }
+.chart-seg button:disabled { opacity: 0.4; cursor: default; }
+.chart-seg button:disabled:hover { color: var(--text-3); }
 .chart-seg button[aria-pressed="true"] { background: var(--surface-3); color: var(--text); }
 .chart-seg button:focus-visible { outline: none; box-shadow: var(--ring); }
 .chart-toggle::before { content: ""; width: 6px; height: 6px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px currentColor; }
@@ -1286,45 +1314,7 @@ html:has(.settings-modal[open]) { overflow: hidden; }
 .chart-mark[data-mark="selling"] { --mark: var(--chart-bear); }
 .chart-mark[data-mark="halts"] { border-radius: 2.5px; background: var(--chart-chip); color: var(--chart-halt-ink); font-family: var(--font-mono); font-size: 8px; font-weight: 700; }
 
-/* Plot slots: where each canvas layer will draw. Main pane + value axis,
-   optional sub pane (volume · speed), optional state ribbon, time axis
-   with the live edge on the right. */
-.chart-slots {
-  flex: 1 1 0px; min-height: 0; display: grid; gap: 4px;
-  grid-template-columns: minmax(0, 1fr) var(--chart-axis-w);
-  grid-template-rows: minmax(0, 1fr) var(--chart-axis-h);
-  grid-template-areas: "main main-y" "x .";
-}
-.chart-slots[data-layout="ribbon"] {
-  grid-template-rows: minmax(0, 1fr) var(--chart-ribbon-h) var(--chart-axis-h);
-  grid-template-areas: "main main-y" "ribbon ." "x .";
-}
-.chart-slots[data-layout="sub"] {
-  grid-template-rows: minmax(0, 1fr) minmax(0, var(--chart-sub-h)) var(--chart-axis-h);
-  grid-template-areas: "main main-y" "sub sub-y" "x .";
-}
-.chart-slots[data-layout="sub ribbon"] {
-  grid-template-rows: minmax(0, 1fr) minmax(0, var(--chart-sub-h)) var(--chart-ribbon-h) var(--chart-axis-h);
-  grid-template-areas: "main main-y" "sub sub-y" "ribbon ." "x .";
-}
-.plot-slot {
-  position: relative; display: flex; align-items: flex-start; min-width: 0; min-height: 0; overflow: hidden; padding: 5px 7px;
-  border: 1px dashed var(--chart-slot); border-radius: 6px; color: var(--text-3);
-  font-family: var(--font-mono); font-size: 9.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
-}
-.plot-slot span { position: relative; z-index: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.plot-slot--main {
-  grid-area: main;
-  background-image: linear-gradient(var(--chart-grid) 1px, transparent 1px), linear-gradient(90deg, var(--chart-grid) 1px, transparent 1px);
-  background-size: var(--chart-grid-cell); background-position: -1px -1px;
-}
-.plot-slot--sub { grid-area: sub; background-image: linear-gradient(90deg, var(--chart-grid) 1px, transparent 1px); background-size: var(--chart-grid-cell); background-position: -1px 0; }
-.plot-slot--ribbon { grid-area: ribbon; align-items: center; padding-block: 0; font-size: 8.5px; }
-.plot-slot--axis { justify-content: center; align-items: center; padding: 0 4px; border-style: dotted; font-size: 8.5px; }
-.plot-slot--axis[data-area="main-y"] { grid-area: main-y; }
-.plot-slot--axis[data-area="sub-y"] { grid-area: sub-y; }
-.plot-slot--axis[data-area="x"] { grid-area: x; justify-content: flex-end; padding-right: 7px; }
-/* Canvas charts (Bull vs. Bear, Key levels): plots and axes are drawn by
+/* Canvas charts (Bull vs. Bear, Key levels, Rally tracker): plots and axes are drawn by
    scanner.js with the --chart-* tokens; the hover card and the empty
    note are HTML on top. */
 .chart-canvas { position: relative; flex: 1 1 0px; min-height: 0; }
@@ -1352,9 +1342,10 @@ html:has(.settings-modal[open]) { overflow: hidden; }
 .chart-tip .chart-tip__alert { display: flex; gap: 6px; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); color: var(--text-2); font-weight: 600; }
 .chart-tip__alert + .chart-tip__alert { margin-top: 2px; padding-top: 0; border-top: 0; }
 .chart-tip__alert b { color: var(--state); }
-
-/* Ticker watermark, TradingView style */
-.plot-slot__mark { position: absolute; inset: 0; display: grid; place-items: center; color: var(--white-a04); font-family: var(--font-display); font-size: clamp(28px, 11cqw, 84px); font-weight: 800; letter-spacing: -0.02em; pointer-events: none; }
+.chart-tip__alert b[data-tone="hod"] { --state: var(--chart-hod); }
+/* Rally tracker: the rally and leg under the crosshair */
+.chart-tip .chart-tip__rally { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); color: var(--text-2); }
+.chart-tip__rally b { color: var(--text); }
 
 /* Narrow panel: the company name goes first, then tab labels (the active
    one keeps its label longest), the exchange and the change. */
@@ -1386,9 +1377,8 @@ html:has(.settings-modal[open]) { overflow: hidden; }
   .chart-head { grid-template-columns: minmax(0, 1fr); grid-template-areas: "state" "meter"; }
   .chart-head__detail, .chart-signals, .chart-legend { display: none; }
   .chart-seg button { min-width: 24px; padding: 0 5px; }
-  .chart-slots, .chart-canvas { --chart-axis-w: 44px; }
+  .chart-canvas { --chart-axis-w: 44px; }
   .chart-canvas { --chart-live-pad: 18px; --chart-tip-w: 160px; }
-  .plot-slot--axis { padding: 0 2px; letter-spacing: 0.04em; }
 }
 @media (prefers-reduced-motion: reduce) {
   .chart-view:not([hidden]), .chart-layouts, .chart-menu-list { animation: none; }

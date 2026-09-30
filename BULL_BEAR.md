@@ -19,7 +19,7 @@ Una **puntuación de control** de −100 (vendedores) a +100 (compradores) y el 
 - `createBullBearFeed()` (sección **"Bull vs. Bear: mock feed"** de `scanner.js`) genera un día guionizado para GXAI con un **reloj simulado que marca 10:44 ET al abrir la página**: premarket tranquilo (08:50–09:30), impulso de apertura, Halt de 5 min (09:56–10:01), caída tras la reapertura, divergencia (precio sube con flujo vendedor), tug of war, un hueco de 3 min sin datos (punteado) y compradores de vuelta.
 - Después sigue en vivo: un lote cada **5 s** (el CSV real manda uno cada ~15 s) y regímenes aleatorios cada 2–5 min. El precio y la variación del chart bar siguen a la serie.
 - Con otro ticker en el buscador, el gráfico dice `Mock data covers GXAI only for now`.
-- El mismo feed alimenta **Key levels** (ver `KEY_LEVELS.md`): cada actualización de Top List lleva también su volumen (`vol`) y el VWAP (`vwap`).
+- El mismo feed alimenta **Key levels** (ver `KEY_LEVELS.md`) y **Rally tracker** (ver `RALLY_TRACKER.md`): cada actualización de Top List lleva también su volumen (`vol`) y el VWAP (`vwap`), y Rally tracker usa además el control de cada punto y la participación.
 - Solo la ventana principal corre el feed. Las copias (`?detach=chart`) reciben la serie en el `snapshot` y cada lote como mensaje `bb` (ver `DETACH.md`).
 
 ## Diseño (estilo TradingView)

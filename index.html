@@ -118,8 +118,8 @@
           <div class="splitter splitter--col" data-split="col" role="separator" aria-orientation="vertical" aria-label="Resize Momentum and chart" aria-valuemin="0" aria-valuemax="100" tabindex="0"></div>
           <!-- Charts of the selected ticker: one bar, three views on one stage.
                scanner.js (mountChartPanel) drives the tabs, fullscreen and layouts;
-               Bull vs. Bear (mountBullBear) and Key levels (mountKeyLevels) are drawn
-               on mock GXAI data; Rally tracker is still a layout slot. -->
+               Bull vs. Bear (mountBullBear), Key levels (mountKeyLevels) and Rally
+               tracker (mountRallyTracker) are drawn on mock GXAI data. -->
           <section class="chart-panel" data-panel="chart" data-title="Charts" aria-label="Charts of the selected ticker">
             <div class="chart-bar">
               <label class="chart-symbol">
@@ -309,13 +309,13 @@
                     <span class="chart-state" data-tone="neutral">Waiting for data</span>
                     <span class="chart-since">since --:--:-- ET</span>
                   </div>
-                  <div class="chart-meter" role="meter" aria-label="Rally progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-                    <span class="chart-meter__label" aria-hidden="true">Rally</span>
-                    <span class="chart-meter__track" aria-hidden="true"><i class="chart-meter__thumb"></i></span>
+                  <div class="chart-meter chart-meter--rally" role="meter" aria-label="Rally progress: the price from the rally base to its high, or the rise off the low up to the rally trigger" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                    <span class="chart-meter__label" aria-hidden="true">Rise</span>
+                    <span class="chart-meter__track" aria-hidden="true"><i class="chart-meter__fill"></i><i class="chart-meter__thumb"></i></span>
                     <strong class="chart-meter__score">—</strong>
                   </div>
                   <p class="chart-head__detail">Rallies, their legs and fade signals show up once the ticker moves.</p>
-                  <p class="chart-signals" aria-label="Fade signals"><span class="chart-signals__count">Fade signals 0/7</span><span class="chart-signal is-empty">None yet</span></p>
+                  <p class="chart-signals" aria-label="Fade signals"><span class="chart-signals__count">Fade signals —</span><span class="chart-signal is-empty">No rally to watch</span></p>
                 </div>
                 <dl class="chart-stats" aria-label="Rally metrics">
                   <div><dt>Rallies</dt><dd>—</dd></div>
@@ -333,28 +333,28 @@
                       <span><i class="chart-key chart-key--bar" data-key="steady"></i>Steady</span>
                       <span><i class="chart-key chart-key--bar" data-key="decel"></i>Decelerating</span>
                       <span><i class="chart-key chart-key--bar" data-key="pullback"></i>Pullback</span>
+                      <span><i class="chart-key chart-key--bar" data-key="giveback"></i>Given back</span>
                     </div>
                     <div class="chart-controls">
                       <div class="chart-seg" role="group" aria-label="Chart overlays">
-                        <button type="button" class="chart-toggle" aria-pressed="true" title="Show or hide the fail level, pullback zone and next resistance of the active rally">Levels</button>
+                        <button type="button" class="chart-toggle" data-rt-levels aria-pressed="true" title="Show or hide the pullback zone, fail level and next resistance of the active rally">Levels</button>
                       </div>
                       <div class="chart-seg" role="group" aria-label="Time window">
-                        <button type="button" aria-pressed="false">1m</button>
-                        <button type="button" aria-pressed="false">5m</button>
-                        <button type="button" aria-pressed="false">15m</button>
-                        <button type="button" aria-pressed="false">30m</button>
-                        <button type="button" aria-pressed="true">1h</button>
-                        <button type="button" aria-pressed="false" title="Whole day">Day</button>
+                        <button type="button" data-rt-window="60000" aria-pressed="false">1m</button>
+                        <button type="button" data-rt-window="300000" aria-pressed="false">5m</button>
+                        <button type="button" data-rt-window="900000" aria-pressed="false">15m</button>
+                        <button type="button" data-rt-window="1800000" aria-pressed="false">30m</button>
+                        <button type="button" data-rt-window="3600000" aria-pressed="true">1h</button>
+                        <button type="button" data-rt-window="0" aria-pressed="false" title="Whole day">Day</button>
                       </div>
                     </div>
                   </div>
-                  <div class="chart-slots" data-layout="sub ribbon" role="img" aria-label="Rally tracker chart (coming soon)">
-                    <div class="plot-slot plot-slot--main"><span>Rally blocks · legs · levels</span><b class="plot-slot__mark" aria-hidden="true">GXAI</b></div>
-                    <div class="plot-slot plot-slot--axis" data-area="main-y"><span>Gain %</span></div>
-                    <div class="plot-slot plot-slot--sub"><span>Speed %/min</span></div>
-                    <div class="plot-slot plot-slot--axis" data-area="sub-y"><span>%/min</span></div>
-                    <div class="plot-slot plot-slot--ribbon"><span>State ribbon</span></div>
-                    <div class="plot-slot plot-slot--axis" data-area="x"><span>Time · live edge →</span></div>
+                  <!-- Drawn by scanner.js (Rally tracker chart): gain and speed panes, ribbon, axes.
+                       Focus it and use ←/→ to move the crosshair. -->
+                  <div class="chart-canvas">
+                    <canvas tabindex="0" role="img" aria-label="Rally tracker chart"></canvas>
+                    <div class="chart-tip" aria-live="polite" hidden></div>
+                    <p class="chart-message" role="status" hidden></p>
                   </div>
                 </div>
               </div>

@@ -38,7 +38,7 @@ Hacen falta 20 actualizaciones para publicar niveles. NumPy y SciPy se sustituye
 
   | Alerta | Marcador |
   | --- | --- |
-  | New HoD | Triángulo ámbar encima de la curva |
+  | New HoD | Triángulo blanco encima de la curva |
   | Buying Pressure | Punto verde sobre el precio, halo según `Vol. 1m` (escala del día) |
   | Selling Pressure | Punto rojo sobre el precio, halo según `Vol. 1m` |
   | Halt / Resume | Cuadrado gris (como el Halt de Bull vs. Bear) con `H` ámbar / `R` verde, fuera de la curva |
@@ -71,7 +71,7 @@ Hacen falta 20 actualizaciones para publicar niveles. NumPy y SciPy se sustituye
 
 ### Uso contenido del color
 
-Cian para la única serie de color (el precio), verde y rojo de la marca para los niveles y las alertas (compradores / vendedores), y grises para todo lo demás: VWAP, volumen, Halt/Resume, rejilla, ejes y chips. El ámbar se reserva para New HoD y la `H` de Halt. Frente al original se quitan el ámbar del VWAP y el violeta de los soportes.
+Cian para la única serie de color (el precio), verde y rojo de la marca para los niveles y las alertas (compradores / vendedores), y grises para todo lo demás: VWAP, volumen, Halt/Resume, rejilla, ejes y chips. El ámbar se reserva para la `H` de Halt; New HoD va en blanco (`--chart-hod`), igual que en Rally tracker. Frente al original se quitan el ámbar del VWAP y el violeta de los soportes.
 
 ### Sin superposiciones
 
@@ -93,7 +93,7 @@ Cian para la única serie de color (el precio), verde y rojo de la marca para lo
 
 ## Tokens (`:root`, bloque Chart panel)
 
-Colores: `--chart-price` (cian), `--chart-vwap` (gris), `--chart-support` (= `--chart-bull`), `--chart-resistance` (= `--chart-bear`), `--chart-hod` (ámbar), `--chart-halt-ink` (ámbar), `--chart-resume-ink` (= `--chart-bull`), `--chart-volume` (gris). También reutiliza `--chart-neutral`, `--chart-chip`, `--chart-session`, `--chart-watermark` y los demás de Bull vs. Bear.
+Colores: `--chart-price` (cian), `--chart-vwap` (gris), `--chart-support` (= `--chart-bull`), `--chart-resistance` (= `--chart-bear`), `--chart-hod` (blanco, `--text`), `--chart-halt-ink` (ámbar), `--chart-resume-ink` (= `--chart-bull`), `--chart-volume` (gris). También reutiliza `--chart-neutral`, `--chart-chip`, `--chart-session`, `--chart-watermark` y los demás de Bull vs. Bear.
 Intensidades: `--chart-price-area-a`, `--chart-vwap-a`, `--chart-level-a` + `--chart-level-step-a` (por fuerza), `--chart-volume-a` / `--chart-volume-down-a`.
 Geometría: `--chart-bar-space` (px por barra antes del zoom), `--chart-vol-share` / `--chart-vol-max` (panel de volumen), `--chart-pane-sep`, `--chart-label-room`, `--chart-marker-room`.
 
