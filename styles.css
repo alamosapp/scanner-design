@@ -249,6 +249,29 @@
   --flag-blue: #3c3b6e;
   --flag-white: var(--white);
   --flag-edge: var(--white-a12);     /* hairline: dark flags keep their shape */
+
+  /* ---- Phones (≤ 720px): app shell · tab strip · list rows · account menu.
+     Edge-to-edge and quiet: white for what is picked, the panel's tone only
+     for its new-alert count, green/red only for price moves. ---- */
+  --m-gutter: 16px;                  /* side padding of every phone row */
+  --m-nav-h: 56px;
+  --m-status-h: 30px;
+  --m-tab-h: 34px;                   /* tab pill */
+  --m-tab-bg: var(--surface-2);
+  --m-tab-ink: var(--text-2);
+  --m-tab-on-bg: var(--text);        /* picked tab: white pill, dark text */
+  --m-tab-on-ink: var(--bg);
+  --m-badge-ink: var(--ink);         /* new-alert count on the panel's --tone */
+  --m-fade: 20px;                    /* tab strip edges fade out: more to scroll */
+  --m-row-pad: 12px;                 /* alert card: vertical padding */
+  --m-cell-h: 46px;                  /* toplist table rows */
+  --m-fs-sym: 16px;
+  --m-fs-price: 16px;
+  --m-fs-meta: 12.5px;
+  --m-menu-fs: 16px;                 /* account menu: bigger type, square edges */
+  --m-menu-item-h: 56px;
+  --m-avatar: 34px;
+  --m-scrim: color-mix(in srgb, var(--black) 84%, transparent); /* under the account menu */
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -429,35 +452,49 @@ html:has(.confirm-modal[open]) { overflow: hidden; }
 .cm-text { margin: 8px 0 0; max-width: 32ch; font-size: 13px; line-height: 1.5; color: var(--text-2); }
 .cm-foot { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); padding: 14px 20px; border-top: 1px solid var(--line); background: var(--surface); }
 
+/* The User Guide item is for phones: desktop has the nav icon */
+.pm-item--phone, .profile-scrim { display: none; }
+
 @media (max-width: 720px) {
-  /* Menu: full width under the nav */
+  /* Menu: a full-width sheet under the nav, square edges, bigger type; the
+     page behind it goes dark (a tap there closes it) */
   .profile { position: static; }
   .app-nav { position: relative; }
-  .profile-menu { top: calc(100% + 6px); right: var(--space-3); left: var(--space-3); width: auto; max-width: none; }
-  .pm-item { height: 44px; }
+  .profile-scrim:not([hidden]) {
+    display: block; position: fixed; inset: calc(var(--m-nav-h) + env(safe-area-inset-top)) 0 0; z-index: calc(var(--z-menu) - 1);
+    background: var(--m-scrim); animation: fadeIn 220ms var(--ease);
+  }
+  .profile-menu {
+    position: fixed; top: calc(var(--m-nav-h) + env(safe-area-inset-top)); right: 0; left: 0; width: auto; max-width: none;
+    padding: 0 0 var(--space-2); border: 0; border-bottom: 1px solid var(--line-strong); border-radius: 0;
+    background: var(--bg-elevated); box-shadow: 0 24px 48px -24px var(--shadow-color);
+  }
+  .profile-menu:not([hidden]) { animation: sheetDown 260ms var(--ease); }
+  @keyframes sheetDown { from { opacity: 0; transform: translateY(-12px); } }
+  .pm-head { gap: var(--space-4); padding: var(--space-5) var(--m-gutter) var(--space-4); }
+  .pm-head .pm-user { padding: 0; gap: 14px; }
+  .avatar--lg { --avatar: 52px; font-size: 18px; }
+  .pm-name { font-size: 19px; }
+  .pm-email { font-size: 14px; }
+  .pm-plan { min-height: 48px; padding: 0 var(--space-3) 0 var(--space-4); border-radius: 0; font-size: 14px; }
+  .pm-plan__tag { padding: 5px 10px; border-radius: 0; font-size: 13px; }
+  .pm-list { gap: 0; padding-top: var(--space-2); }
+  .pm-item { gap: 14px; height: var(--m-menu-item-h); padding: 0 var(--m-gutter); border-radius: 0; font-size: var(--m-menu-fs); }
+  .pm-item svg { width: 22px; height: 22px; }
+  .pm-item--phone { display: flex; }
+  .pm-sep { margin: var(--space-2) var(--m-gutter); }
   /* Confirm: bottom sheet */
   .confirm-modal { width: 100%; margin: auto 0 0; border-width: 1px 0 0; border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
   .confirm-modal[open] { animation: sheetIn 360ms var(--ease); }
   .cm-foot { padding: 12px var(--space-4) calc(12px + env(safe-area-inset-bottom)); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .profile-menu:not([hidden]), .confirm-modal[open], .confirm-modal::backdrop { animation: none; }
+  .profile-menu:not([hidden]), .profile-scrim:not([hidden]), .confirm-modal[open], .confirm-modal::backdrop { animation: none; }
 }
 
-/* ---- Help: floating button + User Guide side panel ---- */
-/* Desktop: help lives in the nav; the floating button is mobile only. */
+/* ---- Help: User Guide side panel ---- */
+/* Opened from the nav icon on desktop, from the account menu on phones. */
 .guide-icon svg { fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
-.faq-button {
-  position: fixed; right: var(--space-4); bottom: var(--space-4); z-index: 90;
-  display: grid; place-items: center; width: 44px; height: 44px; padding: 0;
-  border: 1px solid var(--line-strong); border-radius: 50%;
-  background: var(--surface-2); color: var(--text-2);
-  box-shadow: 0 10px 28px -8px var(--shadow-color);
-  transition: color var(--t-fast), border-color var(--t-fast), background var(--t-fast);
-}
-.faq-button:hover { color: var(--green); border-color: var(--green-a32); background: var(--surface-3); }
-.faq-button:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
-.faq-button svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
 
 .guide-panel {
   --tone: var(--green);
@@ -503,12 +540,7 @@ html:has(.confirm-modal[open]) { overflow: hidden; }
 .guide-empty { margin: var(--space-5) 0 0; text-align: center; color: var(--text-3); }
 
 @media (max-width: 720px) {
-  .faq-button { right: var(--space-3); bottom: var(--space-3); }
   .guide-panel { width: 100%; border-left: 0; }
-  .app-tools .guide-icon { display: none; }
-}
-@media (min-width: 721px) {
-  .faq-button { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -974,7 +1006,7 @@ html:has(.settings-modal[open]) { overflow: hidden; }
   .ex-search .btn span { display: none; }
   .ex-search .btn { width: 42px; padding: 0; }
   .ex-foot { flex-wrap: wrap; }
-  .toast { bottom: calc(76px + env(safe-area-inset-bottom)); }
+  .toast { bottom: calc(var(--space-5) + env(safe-area-inset-bottom)); }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1446,7 +1478,7 @@ html:has(.settings-modal[open]) { overflow: hidden; }
 /* Detached copy (?detach=<panel>): the panel alone fills its own window.
    Always the desktop table, however narrow the window gets. */
 .is-detached .app { grid-template-rows: minmax(0, 1fr); grid-template-columns: minmax(0, 1fr); }
-.is-detached .app-nav, .is-detached .faq-button { display: none; }
+.is-detached .app-nav, .is-detached .m-bar { display: none; }
 .is-detached .workspace { display: flex; padding: 0; }
 .is-detached .workspace > :not(.is-maximized) { position: relative; flex: 1 1 auto; border: 0; border-radius: 0; }
 .detach-status {
@@ -1649,62 +1681,111 @@ tr.is-new td, .alert-card.is-new { animation: rowIn 1.6s var(--ease); }
 .spark polyline { vector-effect: non-scaling-stroke; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 
 /* ==========================================================================
-   Phones: alert cards
+   Phones (≤ 720px): one panel at a time
+   ┌──────────────────────────┐
+   │ ▪ Scanner           (JL) │  nav: brand + account, nothing else
+   │ ● MARKET OPEN  10:42 ET  │  market status (moved out of the nav)
+   │ (Gainers) (Volume …) …   │  tab strip: scrolls sideways
+   ├──────────────────────────┤
+   │ the picked panel, full   │  toplists: compact table · alerts: cards
+   │ screen; only its list    │  momentum: constellation + cards
+   │ scrolls                  │  charts: the Charts panel
+   └──────────────────────────┘
+   Lighter than desktop: no table settings, filters, sounds, fullscreen or
+   detach. Edge-to-edge rows on the page background. A detached copy stays
+   the desktop table however narrow its window: hence html:not(.is-detached)
+   on every shell rule.
    ========================================================================== */
 
-.card-view { display: none; }
+.card-view, .m-bar { display: none; }
 
 @media (max-width: 720px) {
-  /* Panes stack in one scrolling column; nothing to resize */
-  .app { display: block; height: auto; }
-  /* Nav: brand + tools on top, market status on its own line below */
-  .app-nav { flex-wrap: wrap; row-gap: var(--space-2); padding: var(--space-2) var(--space-3); }
-  .app-tools { margin-left: auto; }
-  .app-status { order: 1; flex: 1 0 100%; margin-left: 0; padding-left: 0; border-left: 0; justify-content: space-between; }
-  .filter-btn { display: none; }
-  .workspace, .side-pane, .main-pane, .pane-row { display: flex; flex-direction: column; gap: var(--gap); }
-  .pane-row > :not(.splitter), .side-pane > :not(.splitter) { flex: none; }
-  /* Fullscreen panel: the cards fill the screen below the bar (and chart) */
-  .terminal.is-full { height: 100%; }
-  .terminal.is-full .card-view { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
-  .terminal.is-full .card-list { flex: 1 1 auto; min-height: 0; max-height: none; }
+  /* ---- Shell: fixed to the screen, safe areas respected ---- */
+  html:not(.is-detached) body { overscroll-behavior: none; }
+  html:not(.is-detached) .app {
+    display: flex; flex-direction: column; height: 100vh; height: 100dvh;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+  }
+
+  /* ---- Nav: brand + account ---- */
+  .app-nav { flex: none; height: var(--m-nav-h); gap: var(--space-3); padding: 0 var(--space-3) 0 var(--m-gutter); border-bottom: 0; background: var(--bg); }
+  .app-brand { display: inline-flex; align-items: center; gap: 10px; font-size: 18px; letter-spacing: 0.02em; }
+  .app-brand::before { content: ""; width: 10px; height: 10px; border-radius: 3px; background: var(--green); box-shadow: 0 0 12px var(--green-a32); }
+  .filter-btn, .app-tools > .icon-btn { display: none; }
+  .app-tools { margin-left: auto; padding-left: 0; border-left: 0; }
+  .user-avatar .avatar { --avatar: var(--m-avatar); font-size: 12px; box-shadow: 0 0 0 2px var(--bg); }
+
+  /* ---- Market status + tab strip ---- */
+  html:not(.is-detached) .m-bar { flex: none; display: flex; flex-direction: column; background: var(--bg); border-bottom: 1px solid var(--line); }
+  .m-bar .app-status { justify-content: space-between; height: var(--m-status-h); padding: 0 var(--m-gutter); border-left: 0; }
+  .m-bar .market-clock { font-size: 13px; }
+  .m-tabs {
+    display: flex; gap: var(--space-2); overflow-x: auto; overscroll-behavior-x: contain;
+    padding: var(--space-2) var(--m-gutter) var(--space-3); scroll-padding-inline: var(--m-gutter); scrollbar-width: none;
+  }
+  .m-tabs::-webkit-scrollbar { display: none; }
+  /* The edge with more tabs past it fades out */
+  .m-tabs[data-more="end"] { mask-image: linear-gradient(to left, transparent, var(--black) var(--m-fade)); }
+  .m-tabs[data-more="start"] { mask-image: linear-gradient(to right, transparent, var(--black) var(--m-fade)); }
+  .m-tabs[data-more="both"] { mask-image: linear-gradient(to right, transparent, var(--black) var(--m-fade), var(--black) calc(100% - var(--m-fade)), transparent); }
+  .m-tab {
+    --tone: var(--green);
+    flex: none; display: inline-flex; align-items: center; gap: 7px; height: var(--m-tab-h); padding: 0 15px;
+    border: 0; border-radius: var(--radius-pill); background: var(--m-tab-bg); color: var(--m-tab-ink);
+    font-size: 14px; font-weight: 700; line-height: 1; white-space: nowrap; -webkit-tap-highlight-color: transparent;
+    transition: background var(--t-fast), color var(--t-fast), transform var(--t-fast);
+  }
+  .m-tab[data-tone="bear"] { --tone: var(--red); }
+  .m-tab[data-tone="halt"] { --tone: var(--amber); }
+  .m-tab[hidden] { display: none; }
+  .m-tab:active { transform: scale(0.96); }
+  .m-tab[aria-selected="true"] { background: var(--m-tab-on-bg); color: var(--m-tab-on-ink); }
+  .m-tab:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+  /* New alerts since the tab was last open, in the panel's tone */
+  .m-tab__count {
+    display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: var(--radius-pill);
+    background: var(--tone); color: var(--m-badge-ink); font-family: var(--font-mono); font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums;
+  }
+  .m-tab__count[hidden] { display: none; }
+  .m-tab__count.is-bump { animation: countBump 360ms var(--ease-spring); }
+  @keyframes countBump { 40% { transform: scale(1.25); } }
+
+  /* ---- Workspace: only the picked panel, filling what is left ---- */
+  html:not(.is-detached) :is(.workspace, .side-pane, .main-pane, .pane-row) { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; padding: 0; gap: 0; }
+  html:not(.is-detached) :is(.side-pane, .main-pane, .pane-row):not(:has([data-m-active])) { display: none; }
+  html:not(.is-detached) .workspace :is(.terminal, .chart-panel):not([data-m-active]) { display: none; }
+  html:not(.is-detached) .workspace :is(.terminal, .chart-panel) { flex: 1 1 auto; border: 0; border-radius: 0; background: var(--bg); }
   .splitter { display: none; }
-  .terminal > .constellation { flex: none; height: 220px; }
-  .chart-panel { flex: none; height: 560px; }
 
-  .table-wrap { display: none; }
+  /* ---- Panels: the tab names them; their desktop tools stay on desktop ---- */
+  html:not(.is-detached) .terminal { --row-bg: var(--bg); --row-hover: var(--surface); }
+  html:not(.is-detached) .terminal-bar { display: none; }
+  html:not(.is-detached) .terminal > .constellation { flex: none; height: clamp(200px, 36dvh, 300px); }
 
-  .terminal { --table-h: 60vh; }
-  .terminal-bar { padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3); }
-  .terminal-title { font-size: var(--fs-base); }
-  .icon-btn { width: 34px; height: 34px; }
-  .icon-btn svg { width: 18px; height: 18px; }
-  .detach-icon, .terminal .fullscreen-icon { display: none; }
-  /* A detached copy stays a desktop table in a narrow window */
-  .is-detached .app { display: grid; height: 100vh; height: 100dvh; }
-  .is-detached .workspace { display: flex; flex-direction: row; }
-  .is-detached .table-wrap { display: block; }
-  .is-detached .card-view { display: none; }
-  .is-detached .terminal > .constellation { flex: 1 1 0px; height: auto; }
-  .is-detached .terminal-bar { padding: 4px 6px 4px var(--space-3); }
-  .is-detached .terminal-title { font-size: 13px; }
-  .is-detached .icon-btn { width: 28px; height: 28px; }
-  .is-detached .icon-btn svg { width: 16px; height: 16px; }
-  .is-detached .terminal .fullscreen-icon { display: inline-grid; }
-  .is-detached .chart-panel { flex: 1 1 auto; height: auto; }
+  /* Toplists (status tables): a compact table, swiped sideways */
+  html:not(.is-detached) .terminal:not([data-kind="toplist"]) .table-wrap { display: none; }
+  html:not(.is-detached) .terminal[data-kind="toplist"] .table-wrap { background: var(--bg); padding-bottom: env(safe-area-inset-bottom); scrollbar-width: none; }
+  html:not(.is-detached) .terminal[data-kind="toplist"] .table-wrap::-webkit-scrollbar { display: none; }
+  html:not(.is-detached) .scan-table { font-size: 14px; }
+  html:not(.is-detached) .scan-table th { height: 36px; font-size: 11.5px; background: var(--bg); }
+  html:not(.is-detached) .scan-table td { height: var(--m-cell-h); }
+  html:not(.is-detached) .scan-table .sym { font-size: 15px; }
+  html:not(.is-detached) .scan-table tbody tr:active > td { background: var(--row-hover); }
+  html:not(.is-detached) .col-resize { display: none; }
 
-  .card-view { display: block; position: relative; }
+  /* Alert tables: cards */
+  html:not(.is-detached) .terminal:not([data-kind="toplist"]) .card-view { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
   .card-list {
-    position: relative; display: flex; flex-direction: column; gap: var(--space-2);
-    max-height: var(--table-h); overflow-y: auto; overscroll-behavior: contain;
+    position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column;
+    overflow-y: auto; overscroll-behavior: contain;
     overflow-anchor: none;            /* anchoring is handled in JS (Safari has none) */
-    padding: var(--space-2) 18px var(--space-2) var(--space-2);
+    padding-bottom: env(safe-area-inset-bottom);
     scrollbar-width: none;            /* replaced by .card-rail */
   }
   .card-list::-webkit-scrollbar { display: none; }
 
-  /* Custom vertical scrollbar */
-  .card-rail { position: absolute; top: var(--space-2); bottom: var(--space-2); right: 2px; width: 14px; touch-action: none; cursor: pointer; }
+  /* Custom vertical scrollbar, over the rows' right padding */
+  .card-rail { position: absolute; top: var(--space-1); bottom: var(--space-1); right: 0; width: 12px; touch-action: none; cursor: pointer; }
   .card-rail::before { content: ""; position: absolute; inset: 0 5px; border-radius: var(--radius-pill); background: var(--white-a04); }
   .card-rail i { position: absolute; top: 0; left: 4px; right: 4px; border-radius: var(--radius-pill); background: var(--line-strong); transition: background var(--t-fast), left var(--t-fast), right var(--t-fast); }
   .card-rail.is-active i, .card-rail:hover i { left: 3px; right: 3px; background: var(--text-3); }
@@ -1713,42 +1794,57 @@ tr.is-new td, .alert-card.is-new { animation: rowIn 1.6s var(--ease); }
   /* "N new" pill while the user is scrolled away from the top */
   .new-pill {
     position: absolute; top: var(--space-3); left: 50%; z-index: 2; transform: translateX(-50%);
-    padding: 4px 12px; border: 1px solid color-mix(in srgb, var(--tone) 40%, transparent); border-radius: var(--radius-pill);
-    background: color-mix(in srgb, var(--tone) 16%, var(--surface)); color: var(--tone);
-    font-size: var(--fs-xs); font-weight: 700; box-shadow: 0 8px 20px -8px var(--shadow-color);
+    padding: 6px 14px; border: 0; border-radius: var(--radius-pill);
+    background: var(--m-tab-on-bg); color: var(--m-tab-on-ink);
+    font-size: 13px; font-weight: 800; box-shadow: 0 10px 24px -8px var(--shadow-color);
     animation: pillIn 240ms var(--ease);
   }
   .new-pill[hidden] { display: none; }
   @keyframes pillIn { from { opacity: 0; transform: translate(-50%, -6px); } }
 
+  /* One row per alert: ticker + time / volume over price + change */
   .alert-card {
-    --row-bg: var(--surface);
+    --row-bg: var(--bg);
     position: relative; flex: none;
-    display: grid; gap: 3px;
-    padding: 0.55rem var(--space-3) 0.55rem calc(var(--space-3) + 8px);
-    border: 1px solid var(--line); border-radius: var(--radius-sm);
-    background: var(--row-bg); font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: var(--space-4);
+    padding: var(--m-row-pad) var(--m-gutter) var(--m-row-pad) calc(var(--m-gutter) + 12px);
+    border-bottom: 1px solid var(--line); background: var(--row-bg); line-height: 1.25;
+    font-variant-numeric: tabular-nums; -webkit-tap-highlight-color: transparent;
   }
+  .alert-card:active { background: var(--surface); }
   /* Float color stripe down the left edge */
   .alert-card::before {
-    content: ""; position: absolute; left: 7px; top: 9px; bottom: 9px; width: 4px;
+    content: ""; position: absolute; left: var(--m-gutter); top: var(--m-row-pad); bottom: var(--m-row-pad); width: 3px;
     border-radius: var(--radius-pill); background: var(--sig);
     box-shadow: 0 0 10px -1px color-mix(in srgb, var(--sig) 55%, transparent);
   }
-
-  .card-line { display: flex; align-items: center; gap: var(--space-2); min-height: 1.5rem; }
-  .card-line .sym { font-size: var(--fs-base); }
-  .card-price { margin-inline: -3px; padding-inline: 3px; border-radius: 4px; font-size: var(--fs-base); font-weight: 700; color: var(--text-2); }
-  .card-time { margin-left: auto; font-size: var(--fs-xs); color: var(--text-3); }
-
-  .card-meta { gap: var(--space-3); font-size: var(--fs-xs); color: var(--text-3); }
-  .card-meta b { font-weight: 500; color: var(--text-2); }
-  .card-end { margin-left: auto; }
-  .card-end .heat { min-width: 0; height: 1.375rem; font-size: var(--fs-xs); }
-  .card-halt { display: inline-flex; align-items: center; gap: 6px; }
+  .card-main, .card-side { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+  .card-side { align-items: flex-end; }
+  .card-head { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; }
+  .card-head .sym { font-family: var(--font-mono); font-size: var(--m-fs-sym); }
+  .card-time { font-family: var(--font-mono); font-size: var(--m-fs-meta); color: var(--text-3); }
+  .card-meta { overflow: hidden; font-size: var(--m-fs-meta); font-weight: 600; color: var(--text-3); text-overflow: ellipsis; white-space: nowrap; }
+  .card-meta b { font-family: var(--font-mono); font-weight: 500; color: var(--text-2); }
+  .card-price { margin-inline: -4px; padding-inline: 4px; border-radius: 4px; font-family: var(--font-mono); font-size: var(--m-fs-price); font-weight: 700; color: var(--text); }
+  .card-end { display: flex; font-family: var(--font-mono); }
+  .card-end .heat { min-width: 0; height: 24px; font-size: 12.5px; }
+  .card-halt { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; }
   .card-halt i { font-style: normal; color: var(--text-3); }
-  .card-halt .timer[data-timer="resume"] { height: 1.375rem; }
+  .card-halt .timer[data-timer="resume"] { height: 24px; }
   .alert-card.is-leaving { overflow: hidden; pointer-events: none; }
+
+  /* ---- Charts: full screen, no fullscreen / layout / detach ---- */
+  html:not(.is-detached) .chart-panel :is([data-chart-fullscreen], [data-chart-layout], .detach-icon) { display: none; }
+  html:not(.is-detached) .chart-bar { padding: var(--space-2) var(--m-gutter); background: var(--bg); }
+  html:not(.is-detached) .chart-company { padding-right: 0; border-right: 0; }
+  html:not(.is-detached) .chart-toolbar { padding: var(--space-2) var(--m-gutter); }
+  html:not(.is-detached) .chart-tabs { flex: 1 1 100%; }
+  html:not(.is-detached) .chart-tab { flex: 1 1 auto; justify-content: center; height: 32px; }
+  html:not(.is-detached) .chart-metrics { margin-left: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .m-tab, .m-tab__count.is-bump, .new-pill { transition: none; animation: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

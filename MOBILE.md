@@ -1,0 +1,70 @@
+# Versión móvil
+
+A ≤ 720 px (`PHONE` en `scanner.js`, mismo corte que el CSS) la ventana principal muestra **un panel a la vez**, elegido en una cinta de tabs. Es más ligera que el escritorio: sin table settings, filtros, sonidos, pantalla completa ni detach. Estilo tipo Robinhood/Webull: filas de borde a borde sobre el fondo de la página, blanco para lo seleccionado y color solo donde significa algo.
+
+```
+┌──────────────────────────┐
+│ ▪ Scanner           (JL) │  nav: marca + cuenta
+│ ● MARKET OPEN  10:42 ET  │  estado del mercado (fuera de la nav)
+│ (Gainers) (Volume …) …   │  cinta de tabs, scroll horizontal
+├──────────────────────────┤
+│ panel elegido, a toda    │  toplists: tabla compacta
+│ pantalla; solo su lista  │  alertas: tarjetas
+│ hace scroll              │  momentum: constelación + tarjetas · charts: panel Charts
+└──────────────────────────┘
+```
+
+## Shell
+
+| Parte | Comportamiento |
+|---|---|
+| Nav | Solo `app-brand` y `profile`. Filtros, ayuda y pantalla completa se ocultan. |
+| Estado | `mountPhone` mueve `.app-status` de la nav a `.m-bar` (bajo la nav) y la devuelve a la nav en anchos de escritorio. |
+| Pantalla | `.app` ocupa `100dvh`, con `safe-area-inset-*` (`viewport-fit=cover`). La página no hace scroll; solo la lista del panel. `theme-color` toma `--bg`. |
+| Ayuda | El botón flotante desapareció: *User Guide* es un ítem del menú de cuenta (solo móvil). |
+
+## Tabs
+
+- Orden (`PHONE_TABS`): Gainers, Gainers Open, Volume Leaders, New HoD, Buying Pressure, Selling Pressure, Halts, Fast-Growing Momentum, Charts. Se generan desde el `data-title` de cada panel.
+- **9 tabs en Market Open, 8 en Pre-Market / After Hours / Closed**: el tab de Gainers Open sigue a su panel (`syncSessionTables` → `phone.syncSession`). Si estaba abierto, se pasa a Gainers.
+- Tab activo: píldora blanca (`--m-tab-on-bg`) con texto oscuro; el resto, `--m-tab-bg`. Al elegir uno se centra en la cinta (`scrollTo` absoluto, así dos cambios seguidos no se suman).
+- El borde con más tabs detrás se desvanece (`data-more="start|end|both"` + `mask-image`).
+- **Contador de nuevas alertas** en los tabs de alertas: cuenta las alertas que llegaron a pantalla (`onShown` de `mountTable`) desde que se abrió el tab por última vez, con el tono del panel (verde, rojo o ámbar). Solo cuenta en anchos de móvil; `99+` como máximo.
+- Teclado: ←/→, Inicio y Fin cambian de tab (tabindex itinerante). En móvil cada panel es `role="tabpanel"` etiquetado por su tab; en escritorio recupera su `role="region"` / `aria-label`.
+- Todos los paneles siguen montados y en vivo; el CSS oculta los que no tienen `[data-m-active]`.
+
+## Paneles
+
+| Panel | En móvil |
+|---|---|
+| Toplists (tablas de estado) | Siguen siendo **tabla** (no tarjetas). Columnas fijas por tabla (`PHONE_COLS`): Signal · Ticker · Price · su %Chg (Close u Open) · Volume · RVol · Float, con anchos `PHONE_W`. Se desliza en horizontal con Ticker fijo. Sin reordenar ni redimensionar; el orden y los anchos de escritorio no se tocan. |
+| Alertas (New HoD, Buying, Selling, Halts) | Tarjetas: ticker + hora / Vol · RVol a la izquierda, precio / %Chg 1m (o timers del halt) a la derecha, franja de float a la izquierda. Píldora "N new" si llegan alertas con la lista desplazada. |
+| Fast-Growing Momentum | Constelación arriba (`clamp(200px, 36dvh, 300px)`) y tarjetas debajo. |
+| Charts | Panel completo; sin pantalla completa, layouts ni detach. |
+
+La barra del panel (`.terminal-bar`) se oculta: el tab ya lo nombra y sus herramientas son de escritorio.
+
+## Menú de cuenta
+
+Hoja a todo el ancho bajo la nav: sin bordes curvos, letra más grande (`--m-menu-fs`, ítems de `--m-menu-item-h`) y fondo oscuro detrás (`.profile-scrim`, `--m-scrim`). Tocar el fondo lo cierra. Las flechas solo recorren los ítems visibles.
+
+## Detalles
+
+- Animación de entrada (`rowIn`): la clase `is-new` se quita al terminar; si no, al volver a mostrar un tab el CSS repetía la animación en todas las tarjetas.
+- Las copias (`?detach=`) **no** usan nada de esto: todas las reglas del shell llevan `html:not(.is-detached)` y siguen siendo la tabla de escritorio aunque la ventana sea estrecha.
+
+## Tokens (`:root`)
+
+`--m-gutter`, `--m-nav-h`, `--m-status-h`, `--m-tab-h`, `--m-tab-bg`, `--m-tab-ink`, `--m-tab-on-bg`, `--m-tab-on-ink`, `--m-badge-ink`, `--m-fade`, `--m-row-pad`, `--m-cell-h`, `--m-fs-sym`, `--m-fs-price`, `--m-fs-meta`, `--m-menu-fs`, `--m-menu-item-h`, `--m-avatar`, `--m-scrim`. Todos derivan de la paleta existente: no hay colores nuevos.
+
+## Almacenamiento
+
+`scanner:phone-tab:v1`: último tab abierto en este dispositivo. Excepción deliberada a la regla del listener `storage`: las copias no tienen cinta de tabs, no hay nada que seguir.
+
+## Probar en el móvil (ngrok)
+
+```bash
+cd tunnel && npm start
+```
+
+`tunnel/tunnel.mjs` sirve `scanner-design/` en `127.0.0.1:5179` y abre el túnel al dominio de `NGROK_DOMAIN` con `NGROK_TOKEN` (ambos en `scanner-design/.env`, que está en `.gitignore`). Usa su propio servidor estático porque `http-server` sirve dotfiles (`.env` con el token y `.git/` quedarían públicos): cualquier ruta con un segmento que empiece por `.` da 404. Sin caché, como `-c-1`. El plan gratuito de ngrok muestra un aviso la primera vez en cada navegador (*Visit Site*).

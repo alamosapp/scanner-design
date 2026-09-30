@@ -354,18 +354,35 @@
   // Every mounted table, by panel id: what the settings dialog reads and writes.
   const tables = new Map();
 
-  /* ---- Mobile card ------------------------------------------------------- */
+  /* ---- Phones -------------------------------------------------------------
+     At ≤ 720px (the CSS breakpoint) the main window shows one panel at a
+     time, picked from a tab strip (see mountPhone). Alert tables show their
+     rows as cards; toplists keep a table, trimmed to a few columns at phone
+     widths and never reordered or resized there. A detached copy always
+     stays the desktop table. */
 
-  // Two lines: ticker · price · time / volume · RVol · 1m change (or halt timers).
+  const PHONE = window.matchMedia("(max-width: 720px)");
+
+  // Alert card, two columns: ticker · time / volume · RVol on the left,
+  // price / 1m change (or halt timers) on the right.
   const renderCard = (d) => `
-    <div class="card-line">
-      ${d.sym}<span class="card-price">${d.price}</span>
-      <time class="card-time">${d.time}</time>
+    <div class="card-main">
+      <div class="card-head">${d.sym}<time class="card-time">${d.time}</time></div>
+      <div class="card-meta">Vol <b>${d.volume}</b> · RVol <b>${d.rvol}</b></div>
     </div>
-    <div class="card-line card-meta">
-      <span>Vol <b>${d.volume}</b></span><span>RVol <b>${d.rvol}</b></span>
+    <div class="card-side">
+      <span class="card-price">${d.price}</span>
       <span class="card-end">${d.duration ? `<span class="card-halt">${d.duration}<i>→</i>${d.resume}</span>` : d.chg1Tag}</span>
     </div>`;
+
+  // Toplist columns on a phone (after the pinned Signal · Ticker), each
+  // table's own change first, and their widths there.
+  const PHONE_COLS = {
+    gainers: ["price", "chgClose", "volume", "rvol", "float"],
+    "gainers-open": ["price", "chgOpen", "volume", "rvol", "float"],
+    "volume-leaders": ["price", "volume", "chgClose", "rvol", "float"],
+  };
+  const PHONE_W = { sym: 76, price: 76, chgClose: 100, chgOpen: 100, volume: 76, rvol: 68, float: 72 };
 
   /* ---- Mock data --------------------------------------------------------- */
 
@@ -1029,7 +1046,9 @@
 
   // `relay` hands every alert and price tick of the live feed to the
   // detached copies; the API returned is how a copy is fed.
-  const mountTable = (root, seed, { cols, pins = PINNED, next, every = LIVE_INTERVAL, expires = false, quotes = false, onAlert, onRender, relay }) => {
+  // `phoneCols`: the columns this table shows at phone widths (toplists);
+  // `onShown`: called for each new alert that reaches the screen.
+  const mountTable = (root, seed, { cols, pins = PINNED, phoneCols, next, every = LIVE_INTERVAL, expires = false, quotes = false, onAlert, onRender, onShown, relay }) => {
     const tone = root.dataset.tone;
     const panel = root.dataset.panel;
     const table = root.querySelector(".scan-table");
@@ -1043,8 +1062,10 @@
     let prefs = loadPrefs(panel, cols);
     let widths = loadWidths(panel);
 
-    const columns = () => [...pins, ...order.filter((k) => !prefs.hidden.has(k))];
-    const widthOf = (key) => widths[key] ?? COL[key].w;
+    // Phone widths: a fixed, trimmed set of columns (nothing to move or resize).
+    const compact = () => Boolean(phoneCols) && PHONE.matches && !DETACHED;
+    const columns = () => (compact() ? [...pins, ...phoneCols] : [...pins, ...order.filter((k) => !prefs.hidden.has(k))]);
+    const widthOf = (key) => (compact() ? PHONE_W[key] ?? COL[key].w : widths[key] ?? COL[key].w);
     const isExcluded = (sym) => prefs.excluded.has(sym) || globalExcluded.has(sym);
     // Rows on screen: not excluded, and passing every filter on this table.
     const shownTest = () => {
@@ -1099,12 +1120,12 @@
         th.className = cellClass(c);
         if (c.title) th.title = c.title;
         th.innerHTML = c.srOnly ? `<span class="sr-only">${c.label}</span>` : c.label;
-        if (!c.pinned) {
+        if (!c.pinned && !compact()) {
           th.draggable = true;
           th.tabIndex = 0;
           th.setAttribute("aria-description", "Drag, or Alt + arrow keys, to move this column. Alt + Shift + arrow keys to resize it");
         }
-        if (!c.fixed) th.insertAdjacentHTML("beforeend", '<span class="col-resize" data-resize aria-hidden="true" title="Drag to resize · double-click to fit"></span>');
+        if (!c.fixed && !compact()) th.insertAdjacentHTML("beforeend", '<span class="col-resize" data-resize aria-hidden="true" title="Drag to resize · double-click to fit"></span>');
         return th;
       }), fill);
       syncStuck();
@@ -1331,6 +1352,7 @@
       const card = cardEl(d, alert.sym);
       card.classList.add("is-new");
       feed.insert(card);
+      onShown?.();
       tickTimers();
       if (!DETACHED) playAlertSound(panel, tone, alert.sym); // the main window sounds it
     };
@@ -1357,6 +1379,8 @@
     soundBtn?.addEventListener("click", () => soundSettings.open(panel, soundBtn));
 
     wrap.addEventListener("scroll", syncStuck, { passive: true });
+    // Crossing the phone breakpoint swaps the trimmed and the full columns.
+    if (phoneCols) PHONE.addEventListener("change", () => renderAll());
 
     /* Live prices (toplists): a changed price flashes green when it ticks
        up, red when it ticks down — in the table cell and on the card. */
@@ -1400,9 +1424,11 @@
       }
     };
 
-    // Drop the class once done so re-renders never replay a stale flash.
+    // Drop the class once done so re-renders never replay a stale flash —
+    // nor a panel shown again (a phone tab): CSS restarts its animations.
     root.addEventListener("animationend", (e) => {
       if (/^flash(Up|Down)$/.test(e.animationName)) e.target.classList.remove("flash-up", "flash-down");
+      else if (e.animationName === "rowIn") e.target.closest(".is-new")?.classList.remove("is-new");
     });
 
     /* Table settings: the dialog drafts a copy of this state and hands it
@@ -1894,8 +1920,8 @@
     setTimeout(() => { tick(); setInterval(tick, 1000); }, 1000 - (Date.now() % 1000));
   };
 
-  /* User Guide: the floating help button opens a modal side panel (Esc, the
-     close button or a click outside closes it). The search box keeps only
+  /* User Guide: the help icon in the nav (the account menu on phones) opens
+     a modal side panel (Esc, the close button or a click outside closes it). The search box keeps only
      the sections that mention every word typed, and opens them. */
   const mountGuide = () => {
     const openers = document.querySelectorAll("[data-guide-open]");
@@ -1920,7 +1946,11 @@
       const inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
       if (!inside) panel.close();
     });
-    panel.addEventListener("close", () => openBtn.focus());
+    // Opened from the account menu, which is closed by now: back to the avatar.
+    panel.addEventListener("close", () => {
+      const back = openBtn.getClientRects().length ? openBtn : document.querySelector("[data-profile-btn]");
+      back?.focus();
+    });
 
     search.addEventListener("input", () => {
       const words = norm(search.value).split(/\s+/).filter(Boolean);
@@ -1938,26 +1968,35 @@
   /* Account menu: the avatar opens it (click, Enter/Space or ↓ lands on the
      first item, ↑ on the last). ↑/↓/Home/End move between items; Esc, Tab,
      a click outside or picking an item closes it. Account and Subscriptions
-     have no screens yet. Log out asks first: the confirmation dialog fires
-     `scanner:logout` for the sign-in layer to handle. */
+     have no screens yet; User Guide (phones only) opens the guide. Log out
+     asks first: the confirmation dialog fires `scanner:logout` for the
+     sign-in layer to handle. On phones the menu is a sheet under the nav
+     over a dark scrim; a tap on the scrim closes it. */
   const mountProfile = () => {
     const root = document.querySelector("[data-profile]");
     if (!root) return;
     const btn = root.querySelector("[data-profile-btn]");
     const menu = root.querySelector(".profile-menu");
-    const items = [...menu.querySelectorAll("[role=menuitem]")];
+    const scrim = root.querySelector("[data-profile-scrim]");
+    // Only the items on screen (User Guide is for phones)
+    const items = () => [...menu.querySelectorAll("[role=menuitem]")].filter((el) => el.getClientRects().length);
     const confirm = document.getElementById("logout-confirm");
 
     const isOpen = () => !menu.hidden;
-    const focusItem = (i) => items[(i + items.length) % items.length].focus();
+    const focusItem = (i) => {
+      const list = items();
+      list[(i + list.length) % list.length].focus();
+    };
     const open = (at = 0) => {
       menu.hidden = false;
+      scrim.hidden = false;
       btn.setAttribute("aria-expanded", "true");
       focusItem(at);
     };
     const close = (refocus = true) => {
       if (!isOpen()) return;
       menu.hidden = true;
+      scrim.hidden = true;
       btn.setAttribute("aria-expanded", "false");
       if (refocus) btn.focus();
     };
@@ -1970,17 +2009,20 @@
       }
     });
     menu.addEventListener("keydown", (e) => {
-      const at = items.indexOf(document.activeElement);
+      const at = items().indexOf(document.activeElement);
       const moves = { ArrowDown: at + 1, ArrowUp: at - 1, Home: 0, End: -1 };
       if (e.key in moves) { e.preventDefault(); focusItem(moves[e.key]); }
       else if (e.key === "Escape") { e.preventDefault(); close(); }
       else if (e.key === "Tab") close(false);
     });
     document.addEventListener("pointerdown", (e) => { if (isOpen() && !root.contains(e.target)) close(false); });
+    scrim.addEventListener("click", () => close(false));
 
-    items.forEach((item) => item.addEventListener("click", () => {
-      close(item.dataset.profileAction !== "logout");
-      if (item.dataset.profileAction === "logout") confirm.showModal();
+    // Log out and User Guide open a dialog, which takes the focus.
+    menu.querySelectorAll("[role=menuitem]").forEach((item) => item.addEventListener("click", () => {
+      const action = item.dataset.profileAction;
+      close(action !== "logout" && action !== "guide");
+      if (action === "logout") confirm.showModal();
     }));
 
     confirm.querySelector("[data-logout-cancel]").addEventListener("click", () => confirm.close());
@@ -9516,6 +9558,170 @@
     hello();
   };
 
+  /* ---- Phone shell ----------------------------------------------------------
+     At phone widths (PHONE) the main window shows one panel at a time:
+     - the nav keeps the brand and the account; the market status moves to
+       the bar under it (and back into the nav at desktop widths);
+     - one tab per table or chart, in PHONE_TABS order, in a strip that
+       scrolls sideways (the edge with more tabs past it fades out); ←/→,
+       Home and End move between tabs and open the focused one;
+     - Gainers Open's tab follows its panel: off outside Market Open, and
+       the strip falls back to Gainers while it was the open one;
+     - an alert tab counts the alerts shown since it was last open (only
+       at phone widths), in the panel's tone;
+     - the open tab is remembered on this device. Never synced to the
+       copies: they have no tab strip.
+     Every panel stays mounted and live; CSS hides all but [data-m-active].
+     Only the main window mounts it. */
+
+  const PHONE_TABS = ["gainers", "gainers-open", "volume-leaders", "new-hod", "buying", "selling", "halts", "momentum", "chart"];
+  const PHONE_TAB_KEY = "scanner:phone-tab:v1";
+
+  const mountPhone = () => {
+    const nav = document.querySelector(".app-nav");
+    const status = nav.querySelector(".app-status");
+    const tools = nav.querySelector(".app-tools");
+    const bar = document.querySelector("[data-m-bar]");
+    const strip = bar.querySelector("[data-m-tabs]");
+    const panels = Object.fromEntries(PHONE_TABS
+      .map((id) => [id, document.querySelector(`:is(.terminal, .chart-panel)[data-panel="${id}"]`)])
+      .filter(([, el]) => el));
+    const ids = Object.keys(panels);
+    const counts = new Map();
+    // How each panel is labelled at desktop widths, to restore it there
+    const desk = new Map(ids.map((id) => [id, ["role", "aria-labelledby"].map((a) => panels[id].getAttribute(a))]));
+
+    const tabs = Object.fromEntries(ids.map((id) => {
+      const p = panels[id];
+      p.id ||= `panel-${id}`;
+      const t = document.createElement("button");
+      t.type = "button";
+      t.className = "m-tab";
+      t.id = `m-tab-${id}`;
+      t.dataset.tab = id;
+      t.setAttribute("role", "tab");
+      t.setAttribute("aria-controls", p.id);
+      if (p.dataset.tone && p.dataset.kind !== "toplist") t.dataset.tone = p.dataset.tone;
+      t.innerHTML = `<span>${p.dataset.title}</span><span class="m-tab__count" hidden><span></span><span class="sr-only"> new</span></span>`;
+      strip.append(t);
+      return [id, t];
+    }));
+
+    const available = (id) => Boolean(panels[id]) && !panels[id].hidden;
+    let active = ids[0];
+    try {
+      const saved = localStorage.getItem(PHONE_TAB_KEY);
+      if (panels[saved]) active = saved;
+    } catch { /* ignore */ }
+
+    const setCount = (id, n, bump = false) => {
+      counts.set(id, n);
+      const el = tabs[id].querySelector(".m-tab__count");
+      el.hidden = n === 0;
+      el.firstChild.textContent = n > 99 ? "99+" : String(n);
+      if (bump && !reduceMotion.matches) {
+        el.classList.remove("is-bump");
+        void el.offsetWidth; // restart the bump
+        el.classList.add("is-bump");
+      }
+    };
+
+    // Strip edges: fade the side(s) with more tabs past them.
+    const syncFade = () => {
+      const max = strip.scrollWidth - strip.clientWidth;
+      const start = strip.scrollLeft > 1;
+      const end = strip.scrollLeft < max - 1;
+      strip.dataset.more = start && end ? "both" : start ? "start" : end ? "end" : "";
+    };
+
+    // The open tab slides to the middle of the strip. An absolute target, so
+    // a slide still in flight never adds up with the new one.
+    const center = (t) => {
+      const s = strip.getBoundingClientRect();
+      const r = t.getBoundingClientRect();
+      if (!s.width) return;
+      const left = strip.scrollLeft + r.left - s.left - (s.width - r.width) / 2;
+      strip.scrollTo({ left, behavior: reduceMotion.matches ? "auto" : "smooth" });
+    };
+
+    const select = (id, { focus = false, save = true } = {}) => {
+      if (!available(id)) id = ids.find(available);
+      active = id;
+      ids.forEach((k) => {
+        const on = k === id;
+        panels[k].toggleAttribute("data-m-active", on);
+        tabs[k].setAttribute("aria-selected", String(on));
+        tabs[k].tabIndex = on ? 0 : -1;
+      });
+      setCount(id, 0);
+      center(tabs[id]);
+      if (focus) tabs[id].focus();
+      if (save) {
+        try { localStorage.setItem(PHONE_TAB_KEY, id); } catch { /* ignore */ }
+      }
+    };
+
+    strip.addEventListener("click", (e) => {
+      const t = e.target.closest(".m-tab");
+      if (t && t.dataset.tab !== active) select(t.dataset.tab);
+    });
+    strip.addEventListener("keydown", (e) => {
+      const list = ids.filter(available);
+      const i = list.indexOf(e.target.closest(".m-tab")?.dataset.tab);
+      if (i < 0) return;
+      const n = list.length;
+      const next = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: n - 1 }[e.key];
+      if (next === undefined) return;
+      e.preventDefault();
+      select(list[(next + n) % n], { focus: true });
+    });
+    strip.addEventListener("scroll", syncFade, { passive: true });
+    new ResizeObserver(syncFade).observe(strip);
+
+    // Phone ↔ desktop widths: where the status sits, what labels the panels.
+    const syncMode = () => {
+      const phone = PHONE.matches;
+      if (phone) bar.prepend(status);
+      else nav.insertBefore(status, tools);
+      ids.forEach((id) => {
+        const p = panels[id];
+        if (phone) {
+          p.setAttribute("role", "tabpanel");
+          p.setAttribute("aria-labelledby", tabs[id].id);
+        } else {
+          ["role", "aria-labelledby"].forEach((a, i) => {
+            const v = desk.get(id)[i];
+            if (v === null) p.removeAttribute(a);
+            else p.setAttribute(a, v);
+          });
+          setCount(id, 0);
+        }
+      });
+      if (phone) center(tabs[active]);
+      syncFade();
+    };
+    PHONE.addEventListener("change", syncMode);
+
+    // Browser chrome on phones: the page background
+    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", getComputedStyle(document.documentElement).getPropertyValue("--bg").trim());
+
+    select(active, { save: false });
+    syncMode();
+
+    return {
+      // A new alert reached the screen of `id`'s panel
+      bump: (id) => {
+        if (PHONE.matches && tabs[id] && id !== active) setCount(id, (counts.get(id) || 0) + 1, true);
+      },
+      // A panel turned on or off for the market session
+      syncSession: () => {
+        ids.forEach((id) => { tabs[id].hidden = !available(id); });
+        if (!available(active)) select(active, { save: false });
+        syncFade();
+      },
+    };
+  };
+
   /* ---- Mount -------------------------------------------------------------- */
 
   const panel = (id) => document.querySelector(`.terminal[data-panel="${id}"]`);
@@ -9533,6 +9739,7 @@
     mountGuide();
     mountProfile();
   }
+  const phone = DETACHED ? null : mountPhone();
   mountNavStatus(); // the filters follow the market session
   const soundSettings = mountSoundSettings();
   const floatSettings = mountFloatSettings();
@@ -9551,9 +9758,9 @@
 
   const TABLE_SETUP = {
     // Vertical container: toplists
-    gainers: { seed: GAINERS, cols: TOPLIST_COLS, pins: TOPLIST_PINS, quotes: true },
-    "gainers-open": { seed: GAINERS_OPEN, cols: TOPLIST_COLS, pins: TOPLIST_PINS, quotes: true },
-    "volume-leaders": { seed: VOLUME_LEADERS, cols: TOPLIST_COLS, pins: TOPLIST_PINS, quotes: true },
+    gainers: { seed: GAINERS, cols: TOPLIST_COLS, pins: TOPLIST_PINS, phoneCols: PHONE_COLS.gainers, quotes: true },
+    "gainers-open": { seed: GAINERS_OPEN, cols: TOPLIST_COLS, pins: TOPLIST_PINS, phoneCols: PHONE_COLS["gainers-open"], quotes: true },
+    "volume-leaders": { seed: VOLUME_LEADERS, cols: TOPLIST_COLS, pins: TOPLIST_PINS, phoneCols: PHONE_COLS["volume-leaders"], quotes: true },
     // Top row: alerts
     "new-hod": { seed: BULL, cols: HOD_COLS, next: nextAlert(BULL) },
     buying: { seed: BUYING, cols: PRESSURE_COLS, next: nextAlert(BUYING) },
@@ -9600,7 +9807,7 @@
     constellation.seed(MOMENTUM);
     HALTS.forEach(constellation.halt);
     for (const [id, { seed, ...setup }] of Object.entries(TABLE_SETUP)) {
-      mountTable(panel(id), seed, { ...setup, relay: hub ? (msg) => post({ ...msg, panel: id }) : undefined });
+      mountTable(panel(id), seed, { ...setup, onShown: () => phone.bump(id), relay: hub ? (msg) => post({ ...msg, panel: id }) : undefined });
     }
     // The GXAI day runs here only (Bull vs. Bear, Key levels, Rally tracker); every update goes to the copies too.
     const bbFeed = createBullBearFeed();
@@ -9622,7 +9829,8 @@
      hides it with its splitter (Gainers and Volume Leaders share the space;
      the saved split returns with it) and keeps its settings. A copy of it
      stays open, dimmed with a notice, for the user to close it; it comes
-     back to life at the open. Follows the nav clock live. */
+     back to life at the open. On phones its tab goes with it (mountPhone).
+     Follows the nav clock live. */
   const SESSION_OFF = { "gainers-open": ["pre", "after", "closed"] };
   const SESSION_OFF_TEXT = { pre: "during Pre-Market", after: "during After Hours", closed: "while the market is closed" };
   const syncSessionTables = () => {
@@ -9659,7 +9867,9 @@
     }
   };
   syncSessionTables();
+  phone?.syncSession();
   onSessionChange.push(syncSessionTables);
+  if (phone) onSessionChange.push(phone.syncSession);
 
   // Saved in another window (a detached copy, or the main one): follow it.
   const PANEL_KEY = /^scanner:(?:columns:v2|prefs:v1):(.+)$/;

@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <!-- Phone browser chrome: scanner.js sets it to --bg -->
+  <meta name="theme-color" content="">
   <title>Scanner</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -67,6 +69,11 @@
                 <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5.5" width="18" height="13" rx="2.5"/><path d="M3 10h18M7 15h3"/></svg>
                 <span>Subscriptions</span>
               </button>
+              <!-- Phones: the User Guide lives here (the nav keeps only brand + profile) -->
+              <button type="button" class="pm-item pm-item--phone" role="menuitem" data-profile-action="guide" data-guide-open aria-haspopup="dialog" aria-controls="user-guide">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.3a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.6"/><path d="M12 17h.01"/></svg>
+                <span>User Guide</span>
+              </button>
               <div class="pm-sep" role="separator"></div>
               <button type="button" class="pm-item pm-item--danger" role="menuitem" data-profile-action="logout" aria-haspopup="dialog" aria-controls="logout-confirm">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h3.5A2.5 2.5 0 0 1 20 6.5v11a2.5 2.5 0 0 1-2.5 2.5H14"/><path d="M10 16.5 5.5 12 10 7.5M5.5 12H15"/></svg>
@@ -74,9 +81,17 @@
               </button>
             </div>
           </div>
+          <!-- Phones: dims the page under the open menu; a tap closes it -->
+          <div class="profile-scrim" data-profile-scrim hidden></div>
         </div>
       </div>
     </nav>
+
+    <!-- Phones only: the market status (moved here from the nav by scanner.js)
+         and one tab per table or chart; the workspace shows the picked one. -->
+    <div class="m-bar" data-m-bar>
+      <div class="m-tabs" role="tablist" aria-label="Tables and charts" data-m-tabs></div>
+    </div>
 
     <main class="workspace" id="main">
 
@@ -369,11 +384,6 @@
     </main>
   </div>
 
-  <!-- Floating help button → User Guide side panel -->
-  <button type="button" class="faq-button" data-guide-open aria-haspopup="dialog" aria-controls="user-guide" aria-label="Open the User Guide" title="User Guide">
-    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.3a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.6"/><path d="M12 17h.01"/></svg>
-  </button>
-
   <dialog class="guide-panel" id="user-guide" aria-labelledby="user-guide-title">
     <header class="guide-head">
       <h2 class="guide-title" id="user-guide-title">User Guide</h2>
@@ -519,7 +529,12 @@
 
       <details class="guide-item">
         <summary>On your phone</summary>
-        <p>Panels are stacked and each table shows its rows as cards. When new alerts arrive while you are scrolled down, tap the “new” pill to jump back to the top.</p>
+        <p>The tab strip at the top switches between the tables and the Charts panel (Gainers Open shows up only during Market Open). A number on a tab counts the alerts that arrived since you last looked at it.</p>
+        <ul>
+          <li><b>Toplists</b> keep a compact table: swipe it sideways for more columns.</li>
+          <li><b>Alert tables</b> show their rows as cards. When new alerts arrive while you are scrolled down, tap the “new” pill to jump back to the top.</li>
+        </ul>
+        <p>Table settings, filters, alert sounds, fullscreen and detached copies are set up on desktop.</p>
       </details>
 
       <p class="guide-empty" data-guide-empty hidden>No results. Try another word.</p>
